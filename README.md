@@ -1,44 +1,21 @@
-<style>
-  .responsive-wrapper {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 20px;
-  }
+# Android Projector Toolkit
 
-  .responsive-wrapper img {
-    width: 50%;
-  }
+  <img src="assets/img1.png" alt="Backup Process" width="400"/>
 
-  @media (max-width: 768px) {
-    .responsive-wrapper {
-      flex-direction: column;
-    }
+Tools for bypassing security restrictions on locked Android projectors and installing custom launchers.
 
-    .responsive-wrapper img {
-      width: 100%;
-    }
-  }
-</style>
+## What It Does
 
-<div class="responsive-wrapper">
-  <div style="flex: 1;">
-    <h2>Android Projector Toolkit</h2>
-    <p>Tools for bypassing security restrictions on locked Android projectors and installing custom launchers.</p>
-    <h2>What It Does</h2>
-    <p>Fixes Android projectors that won’t let you install apps or change launchers. Creates complete device backup and safely installs Nova Launcher or other custom launchers.</p>
-  </div>
-  <img src="assets/img1.png" alt="Backup Process" />
-</div>
+Fixes Android projectors that won't let you install apps or change launchers. Creates complete device backup and safely installs Nova Launcher or other custom launchers.
 
 ## Quick Start
 
 ```bash
-    # Access hidden features (safe)
-    ./scripts/TOOLS.sh
+# Access hidden features (safe)
+./scripts/TOOLS.sh
 
-    # Backup device (required before modifications)
-    ./scripts/MAKE_BACKUP.sh
+# Backup device (required before modifications)
+./scripts/MAKE_BACKUP.sh
 ```
 
 ## Features
@@ -53,18 +30,18 @@
 ## Repository Structure
 
 ```
-    scripts/
-    ├── TOOLS.sh                            # Access hidden features
-    └── MAKE_BACKUP.sh                      # Complete device backup  
-    projector-backup-<DATESTAMP>/           # Auto-generated backup directory  
-    docs/                                   # Detailed guides
-    apks/                                   # Launcher files
-    assets/                                 # Console demo
+scripts/
+├── TOOLS.sh                            # Access hidden features
+└── MAKE_BACKUP.sh                      # Complete device backup  
+projector-backup-<DATESTAMP>/           # Auto-generated backup directory  
+docs/                                   # Detailed guides
+apks/                                   # Launcher files
+assets/                                 # Console demo
 ```
 
 ## Safety
 
-- ⚠️ **Backup required** - Script won’t run without complete backup
+- ⚠️ **Backup required** - Script won't run without complete backup
 - ⚠️ **Root needed** - Requires existing root access  
 - ⚠️ **Voids warranty** - Use at own risk
 
