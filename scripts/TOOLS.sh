@@ -1,327 +1,245 @@
 #!/bin/bash
+# Projector Hidden Features Access Tool
+# Access hidden settings and features on locked Android projectors
 
-# Projector Hidden Apps Access Script
-# Provides easy access to hidden system features and settings on locked Android projectors
-# Based on discovered working commands for Newlink/Hisilicon devices
+set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+# Load common functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
 
-# Function to print colored output
-print_header() {
-    echo -e "${CYAN}=================================="
-    echo -e "   PROJECTOR ACCESS TOOLKIT"
-    echo -e "==================================${NC}"
-    echo ""
-}
+# ============================================================================
+# MENU DEFINITIONS
+# Each entry: "command|description"
+# ============================================================================
 
-print_menu() {
-    echo -e "${BLUE}Available Hidden Features:${NC}"
-    echo ""
-    echo -e "${GREEN}SYSTEM SETTINGS:${NC}"
-    echo "  1.  Android TV Settings (WORKING ✅)"
-    echo "  2.  Standard Android Settings"
-    echo "  3.  WiFi Settings"
-    echo "  4.  Bluetooth Settings" 
-    echo "  5.  Display Settings"
-    echo "  6.  Security Settings"
-    echo "  7.  Developer Options"
-    echo "  8.  Application Management"
-    echo ""
-    echo -e "${GREEN}PROJECTOR-SPECIFIC:${NC}"
-    echo "  9.  Hisilicon TV Settings"
-    echo "  10. Newlink Settings"  
-    echo "  11. TV Menu"
-    echo "  12. TV Quick Settings"
-    echo "  13. External Input Settings"
-    echo ""
-    echo -e "${GREEN}MEDIA & FILES:${NC}"
-    echo "  14. File Manager (via monkey)"
-    echo "  15. Gallery"
-    echo "  16. Music Player"
-    echo "  17. Video Player"
-    echo "  18. Office Apps"
-    echo ""
-    echo -e "${GREEN}CONNECTIVITY:${NC}"
-    echo "  19. Cast/Screen Mirroring"
-    echo "  20. Miracast"
-    echo "  21. Bluetooth Settings (Advanced)"
-    echo ""
-    echo -e "${GREEN}LAUNCHER OPTIONS:${NC}"
-    echo "  22. Choose Default Launcher"
-    echo "  23. RGTPLauncher (if available)"
-    echo "  24. WTProvision (if available)"
-    echo "  25. Reset to Original Launcher"
-    echo ""
-    echo -e "${GREEN}SYSTEM TOOLS:${NC}"
-    echo "  26. Package Installer"
-    echo "  27. Input Method Settings"
-    echo "  28. Default Apps Management"
-    echo "  29. System Information"
-    echo "  30. Hardware Information"
-    echo ""
-    echo -e "${YELLOW}ADVANCED:${NC}"
-    echo "  31. All Launcher Activities"
-    echo "  32. All System Activities"
-    echo "  33. Service Status Check"
-    echo "  34. Install APK via File Manager"
-    echo ""
-    echo -e "${RED}  0.  Exit${NC}"
-    echo ""
-}
+declare -a MENU_SYSTEM=(
+    "am start -n com.android.tv.settings/.MainSettings|Android TV Settings"
+    "am start -a android.settings.SETTINGS|Standard Settings"
+    "am start -a android.settings.WIFI_SETTINGS|WiFi Settings"
+    "am start -a android.settings.BLUETOOTH_SETTINGS|Bluetooth Settings"
+    "am start -a android.settings.DISPLAY_SETTINGS|Display Settings"
+    "am start -a android.settings.SECURITY_SETTINGS|Security Settings"
+    "am start -a android.settings.APPLICATION_DEVELOPMENT_SETTINGS|Developer Options"
+    "am start -a android.settings.MANAGE_APPLICATIONS_SETTINGS|App Management"
+)
 
-# Function to check if device is connected
-check_device() {
-    if ! command -v adb &> /dev/null; then
-        echo -e "${RED}Error: ADB is not installed or not in PATH${NC}"
-        exit 1
-    fi
+declare -a MENU_PROJECTOR=(
+    "am start -n com.hisilicon.tvsetting/.MainActivity|Hisilicon TV Settings"
+    "am start -n com.newlink.hisetting/.MainActivity|Newlink Settings"
+    "am start -n com.hisilicon.tv.menu/.MainActivity|TV Menu"
+    "am start -n com.android.tv.quicksettings/.MainActivity|Quick Settings"
+    "am start -n com.hisilicon.tvinput.external/.MainActivity|External Input"
+)
 
-    if ! adb devices | grep -q "device$"; then
-        echo -e "${RED}Error: No Android device connected${NC}"
-        echo "Make sure your projector is connected and USB debugging is enabled"
-        exit 1
-    fi
-}
+declare -a MENU_MEDIA=(
+    "monkey -p com.newlink.filemanager -c android.intent.category.LAUNCHER 1|File Manager"
+    "am start -n com.hisilicon.higallery/.MainActivity|Gallery"
+    "am start -n com.hisilicon.android.music/.MainActivity|Music Player"
+    "am start -n com.hisilicon.android.videoplayer/.MainActivity|Video Player"
+)
 
-# Function to execute commands with error handling
-execute_command() {
-    local description="$1"
-    local command="$2"
-    
-    echo -e "${BLUE}[INFO]${NC} $description"
-    echo -e "${YELLOW}Command:${NC} $command"
-    
-    eval "$command"
-    local result=$?
-    
-    if [ $result -eq 0 ]; then
-        echo -e "${GREEN}[SUCCESS]${NC} $description completed"
+declare -a MENU_LAUNCHER=(
+    "am start -a android.intent.action.MAIN -c android.intent.category.HOME|Choose Launcher"
+    "cmd package set-home-activity com.newlink.hisilauncher|Reset to Default Launcher"
+)
+
+# ============================================================================
+# FUNCTIONS
+# ============================================================================
+
+run_adb_command() {
+    local cmd="$1"
+    local desc="$2"
+
+    echo
+    print_status "$desc"
+    echo -e "${YELLOW}> adb shell $cmd${NC}"
+    echo
+
+    if adb shell "$cmd" 2>&1; then
+        print_success "Done"
     else
-        echo -e "${RED}[ERROR]${NC} $description failed (exit code: $result)"
+        print_warning "Command may have failed or app not available"
     fi
-    
-    echo ""
-    read -p "Press Enter to continue..."
-    echo ""
 }
 
-# Main menu function
-show_menu() {
+show_menu_section() {
+    local title="$1"
+    shift
+    local -n items=$1
+    local start_num="$2"
+
+    echo -e "${GREEN}${title}:${NC}"
+    local i=$start_num
+    for entry in "${items[@]}"; do
+        local desc="${entry#*|}"
+        printf "  %2d. %s\n" "$i" "$desc"
+        ((i++))
+    done
+    echo
+}
+
+get_menu_entry() {
+    local choice="$1"
+    local idx=1
+
+    for section in MENU_SYSTEM MENU_PROJECTOR MENU_MEDIA MENU_LAUNCHER; do
+        local -n arr=$section
+        for entry in "${arr[@]}"; do
+            if [[ "$idx" -eq "$choice" ]]; then
+                echo "$entry"
+                return 0
+            fi
+            ((idx++))
+        done
+    done
+    return 1
+}
+
+count_menu_items() {
+    local count=0
+    for section in MENU_SYSTEM MENU_PROJECTOR MENU_MEDIA MENU_LAUNCHER; do
+        local -n arr=$section
+        count=$((count + ${#arr[@]}))
+    done
+    echo "$count"
+}
+
+show_system_info() {
+    echo
+    print_status "System Information"
+    echo
+
+    echo -e "${CYAN}Device:${NC}"
+    adb shell getprop | grep -E "ro.product.model|ro.product.manufacturer|ro.build.version.release" | \
+        sed 's/\[ro\.product\.\([^]]*\)\]: \[\(.*\)\]/  \1: \2/' | \
+        sed 's/\[ro\.build\.version\.release\]: \[\(.*\)\]/  Android: \1/'
+    echo
+
+    echo -e "${CYAN}Storage:${NC}"
+    adb shell df -h /sdcard/ 2>/dev/null | tail -1 | awk '{print "  Total: "$2"  Used: "$3"  Free: "$4}'
+    echo
+
+    echo -e "${CYAN}Memory:${NC}"
+    adb shell cat /proc/meminfo 2>/dev/null | head -3 | sed 's/^/  /'
+}
+
+show_hardware_info() {
+    echo
+    print_status "Hardware Information"
+    echo
+
+    echo -e "${CYAN}CPU:${NC}"
+    adb shell cat /proc/cpuinfo 2>/dev/null | grep -E "^Hardware|^processor" | head -5 | sed 's/^/  /'
+    echo
+
+    echo -e "${CYAN}Display:${NC}"
+    adb shell dumpsys display 2>/dev/null | grep -E "mDisplayId=0|mCurrentDisplayRect" | head -2 | sed 's/^/  /'
+}
+
+list_launcher_activities() {
+    echo
+    print_status "Available Launcher Activities"
+    echo
+    adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | head -30
+}
+
+show_service_status() {
+    echo
+    print_status "Critical Services Status"
+    echo
+
+    local services=("zhiying.powerservice" "hisilicon.tv.service" "newlink.service")
+    for svc in "${services[@]}"; do
+        if adb shell ps 2>/dev/null | grep -q "$svc"; then
+            echo -e "  ${GREEN}[RUNNING]${NC} $svc"
+        else
+            echo -e "  ${YELLOW}[NOT FOUND]${NC} $svc"
+        fi
+    done
+}
+
+main_menu() {
+    local total
+    total=$(count_menu_items)
+
     while true; do
         clear
-        print_header
-        print_menu
-        
-        read -p "Select option (0-34): " choice
-        echo ""
-        
-        case $choice in
-            1)
-                execute_command "Opening Android TV Settings" \
-                "adb shell am start -n com.android.tv.settings/.MainSettings"
+        print_header "PROJECTOR ACCESS TOOLKIT"
+
+        local num=1
+        show_menu_section "SYSTEM SETTINGS" MENU_SYSTEM $num
+        num=$((num + ${#MENU_SYSTEM[@]}))
+
+        show_menu_section "PROJECTOR" MENU_PROJECTOR $num
+        num=$((num + ${#MENU_PROJECTOR[@]}))
+
+        show_menu_section "MEDIA & FILES" MENU_MEDIA $num
+        num=$((num + ${#MENU_MEDIA[@]}))
+
+        show_menu_section "LAUNCHER" MENU_LAUNCHER $num
+        num=$((num + ${#MENU_LAUNCHER[@]}))
+
+        echo -e "${YELLOW}DIAGNOSTICS:${NC}"
+        echo "  i.  System Information"
+        echo "  h.  Hardware Information"
+        echo "  l.  List Launcher Activities"
+        echo "  s.  Service Status"
+        echo
+        echo -e "${RED}  q.  Quit${NC}"
+        echo
+
+        read -r -p "Select option: " choice
+
+        case "$choice" in
+            [1-9]|[1-9][0-9])
+                if entry=$(get_menu_entry "$choice"); then
+                    local cmd="${entry%%|*}"
+                    local desc="${entry#*|}"
+                    run_adb_command "$cmd" "$desc"
+                    pause
+                else
+                    print_error "Invalid option"
+                    pause
+                fi
                 ;;
-            2)
-                execute_command "Opening Standard Android Settings" \
-                "adb shell am start -a android.settings.SETTINGS"
+            i|I)
+                show_system_info
+                pause
                 ;;
-            3)
-                execute_command "Opening WiFi Settings" \
-                "adb shell am start -a android.settings.WIFI_SETTINGS"
+            h|H)
+                show_hardware_info
+                pause
                 ;;
-            4)
-                execute_command "Opening Bluetooth Settings" \
-                "adb shell am start -a android.settings.BLUETOOTH_SETTINGS"
+            l|L)
+                list_launcher_activities
+                pause
                 ;;
-            5)
-                execute_command "Opening Display Settings" \
-                "adb shell am start -a android.settings.DISPLAY_SETTINGS"
+            s|S)
+                show_service_status
+                pause
                 ;;
-            6)
-                execute_command "Opening Security Settings" \
-                "adb shell am start -a android.settings.SECURITY_SETTINGS"
-                ;;
-            7)
-                execute_command "Opening Developer Options" \
-                "adb shell am start -a android.settings.APPLICATION_DEVELOPMENT_SETTINGS"
-                ;;
-            8)
-                execute_command "Opening Application Management" \
-                "adb shell am start -a android.settings.MANAGE_APPLICATIONS_SETTINGS"
-                ;;
-            9)
-                execute_command "Opening Hisilicon TV Settings" \
-                "adb shell am start -n com.hisilicon.tvsetting/.MainActivity"
-                ;;
-            10)
-                execute_command "Opening Newlink Settings" \
-                "adb shell am start -n com.newlink.hisetting/.MainActivity"
-                ;;
-            11)
-                execute_command "Opening TV Menu" \
-                "adb shell am start -n com.hisilicon.tv.menu/.MainActivity"
-                ;;
-            12)
-                execute_command "Opening TV Quick Settings" \
-                "adb shell am start -n com.android.tv.quicksettings/.MainActivity"
-                ;;
-            13)
-                execute_command "Opening External Input Settings" \
-                "adb shell am start -n com.hisilicon.tvinput.external/.MainActivity"
-                ;;
-            14)
-                execute_command "Opening File Manager" \
-                "adb shell monkey -p com.newlink.filemanager -c android.intent.category.LAUNCHER 1"
-                ;;
-            15)
-                execute_command "Opening Gallery" \
-                "adb shell am start -n com.hisilicon.higallery/.MainActivity"
-                ;;
-            16)
-                execute_command "Opening Music Player" \
-                "adb shell am start -n com.hisilicon.android.music/.MainActivity"
-                ;;
-            17)
-                execute_command "Opening Video Player" \
-                "adb shell am start -n com.hisilicon.android.videoplayer/.MainActivity"
-                ;;
-            18)
-                execute_command "Opening Office Apps" \
-                "adb shell am start -n com.mobisystems.editor.office_registered/.MainActivity"
-                ;;
-            19)
-                execute_command "Opening Cast/Screen Mirroring" \
-                "adb shell am start -n com.newlink.cast/.MainActivity"
-                ;;
-            20)
-                execute_command "Opening Miracast" \
-                "adb shell am start -n com.hisilicon.miracast/.MainActivity"
-                ;;
-            21)
-                execute_command "Opening Bluetooth Settings (Advanced)" \
-                "adb shell am start -n com.example.bluetoothsetting/.MainActivity"
-                ;;
-            22)
-                execute_command "Choose Default Launcher" \
-                "adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME"
-                ;;
-            23)
-                execute_command "Opening RGTPLauncher" \
-                "adb shell am start -n com.rgt.launcher/.MainActivity"
-                ;;
-            24)
-                execute_command "Opening WTProvision" \
-                "adb shell am start -n com.newlink.wtprovision/.MainActivity"
-                ;;
-            25)
-                execute_command "Resetting to Original Launcher" \
-                "adb shell cmd package set-home-activity com.newlink.hisilauncher"
-                ;;
-            26)
-                execute_command "Opening Package Installer" \
-                "adb shell am start -n com.android.packageinstaller/.PackageInstallerActivity"
-                ;;
-            27)
-                execute_command "Opening Input Method Settings" \
-                "adb shell am start -a android.settings.INPUT_METHOD_SETTINGS"
-                ;;
-            28)
-                execute_command "Opening Default Apps Management" \
-                "adb shell am start -a android.settings.MANAGE_DEFAULT_APPS_SETTINGS"
-                ;;
-            29)
-                echo -e "${BLUE}[INFO]${NC} Gathering System Information..."
-                echo ""
-                echo -e "${CYAN}Device Properties:${NC}"
-                adb shell getprop | grep -E "ro.product.model|ro.build.version|ro.product.manufacturer"
-                echo ""
-                echo -e "${CYAN}Storage Information:${NC}"
-                adb shell df /sdcard/
-                echo ""
-                echo -e "${CYAN}Memory Information:${NC}"
-                adb shell cat /proc/meminfo | head -5
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            30)
-                echo -e "${BLUE}[INFO]${NC} Hardware Information..."
-                echo ""
-                echo -e "${CYAN}CPU Information:${NC}"
-                adb shell cat /proc/cpuinfo | grep -E "processor|model name|Hardware" | head -10
-                echo ""
-                echo -e "${CYAN}Display Information:${NC}"
-                adb shell dumpsys display | grep -E "mDisplayId|mCurrentDisplayRect" | head -5
-                echo ""
-                echo -e "${CYAN}Thermal Information:${NC}"
-                adb shell cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | head -5 || echo "Thermal info not available"
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            31)
-                echo -e "${BLUE}[INFO]${NC} Finding All Launcher Activities..."
-                echo ""
-                adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            32)
-                echo -e "${BLUE}[INFO]${NC} Finding All System Activities..."
-                echo ""
-                adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            33)
-                echo -e "${BLUE}[INFO]${NC} Checking Critical Service Status..."
-                echo ""
-                echo -e "${CYAN}Power Management Services:${NC}"
-                adb shell dumpsys activity services | grep -E "zhiying.powerservice|hisilicon.tv.service|newlink.service" || echo "Services not found in current output"
-                echo ""
-                echo -e "${CYAN}Running System Services:${NC}"
-                adb shell ps | grep -E "system_server|servicemanager" | head -5
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            34)
-                echo -e "${BLUE}[INFO]${NC} Opening File Manager for APK Installation..."
-                echo ""
-                echo -e "${YELLOW}Instructions:${NC}"
-                echo "1. File manager will open on your projector"
-                echo "2. Navigate to your APK file"
-                echo "3. Tap on the APK to install"
-                echo "4. Follow on-screen prompts"
-                echo ""
-                read -p "Press Enter to open file manager..."
-                adb shell monkey -p com.newlink.filemanager -c android.intent.category.LAUNCHER 1
-                echo ""
-                echo -e "${GREEN}File manager opened on projector screen${NC}"
-                read -p "Press Enter when done..."
-                ;;
-            0)
-                echo -e "${GREEN}Exiting Projector Access Toolkit${NC}"
+            q|Q|0)
+                echo
+                print_success "Goodbye!"
                 exit 0
                 ;;
             *)
-                echo -e "${RED}Invalid option. Please select 0-34.${NC}"
-                read -p "Press Enter to continue..."
+                print_error "Invalid option"
+                sleep 1
                 ;;
         esac
     done
 }
 
-# Main execution
+# ============================================================================
+# MAIN
+# ============================================================================
+
 main() {
-    # Check if device is connected
-    check_device
-    
-    # Show main menu
-    show_menu
+    require_device false
+    main_menu
 }
 
-# Run the script
-main
+main "$@"
