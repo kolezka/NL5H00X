@@ -172,6 +172,15 @@ run_dd() {
             dd "${args[@]}" 2>/dev/null | dd bs=1024 count=1 2>/dev/null
             return 0
         fi
+        # The failure that actually happens: the remote dd is reaped, the stream
+        # stops, and exec-out never returns. Returning short is the easy case;
+        # hanging is the one that defeats a naive retry loop.
+        if [[ "${FAKE_ADB_HANG_STREAM_ONCE:-0}" == "1" && ! -f "$STATE/.hang_used" ]]; then
+            touch "$STATE/.hang_used"
+            dd "${args[@]}" 2>/dev/null | dd bs=1024 count=1 2>/dev/null
+            sleep 600
+            return 0
+        fi
         dd "${args[@]}" 2>/dev/null
         dd_summary "$cmd" "$src" "$bs" "$skip" "$count"
         return 0

@@ -215,6 +215,45 @@ adb_root_stream() {
     esac
 }
 
+# Run a root stream into a file, killing it if the data stops flowing.
+#
+# This is what makes retrying possible at all. A reaped remote dd does NOT
+# close the exec-out stream: the host side sits waiting for bytes that will
+# never come, so a retry loop around a bare adb_root_stream never gets control
+# back. Measured on hardware 2026-07-28: a 256 MB block stopped at 113 MB and
+# the transfer hung indefinitely with the link still healthy.
+#
+# Usage: adb_root_stream_watched "dd ..." out.tmp [stall_secs]
+# Returns 124 if it had to kill a stalled transfer.
+adb_root_stream_watched() {
+    local cmd="$1" out="$2" stall_secs="${3:-30}"
+
+    : > "$out"
+    ( adb_root_stream "$cmd" > "$out" ) &
+    local pid=$! last=0 quiet=0 cur
+
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 2
+        cur=$(local_size "$out")
+        if [[ "$cur" -gt "$last" ]]; then
+            last=$cur
+            quiet=0
+        else
+            quiet=$((quiet + 2))
+            if [[ "$quiet" -ge "$stall_secs" ]]; then
+                print_warning "Transfer stalled ${stall_secs}s at $(human_size "$cur") - killing it"
+                pkill -P "$pid" 2>/dev/null || true   # the adb child
+                kill -9 "$pid" 2>/dev/null || true
+                wait "$pid" 2>/dev/null || true
+                return 124
+            fi
+        fi
+    done
+
+    wait "$pid" 2>/dev/null || true
+    return 0
+}
+
 # Size of a file on the device, or 0 if absent. Never fails the caller.
 adb_remote_size() {
     local path="$1"

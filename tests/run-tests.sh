@@ -192,6 +192,36 @@ fi
 rm -rf "$sandbox"
 
 # ---------------------------------------------------------------------------
+head_ "a HUNG transfer is killed and retried, not waited on forever"
+# The real hardware failure. A short block that returns is the easy case; the
+# one that matters is exec-out never returning at all, because a retry loop
+# around a call that never comes back is decoration. This test exists because
+# the first block-retry implementation passed its tests and still hung on the
+# device -- the fake returned short instantly instead of hanging.
+
+sandbox=$(new_sandbox)
+rundir=$(run_backup "$sandbox" env FAKE_ADB_HANG_STREAM_ONCE=1 STREAM_CHUNK_MB=8 STREAM_STALL_SECS=6)
+rc=$(cat "$rundir/rc")
+img=$(backup_img "$rundir")
+
+if [[ "$rc" == "0" ]]; then
+    ok "run completes despite a transfer that never returns"
+else
+    bad "exit $rc -- a hung block still kills the run"
+fi
+if grep -qi "stalled" "$rundir/log"; then
+    ok "the hang is detected and named, not silently waited on"
+else
+    bad "no stall detection in the log"
+fi
+if [[ -n "$img" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
+    ok "image after killing the hung block is byte-identical"
+else
+    bad "image differs after a hung block"
+fi
+rm -rf "$sandbox"
+
+# ---------------------------------------------------------------------------
 head_ "an interrupted transfer resumes instead of restarting"
 
 sandbox=$(new_sandbox)

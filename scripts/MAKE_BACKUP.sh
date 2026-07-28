@@ -20,6 +20,9 @@ BACKUP_METHOD=unknown                         # set to stream/chunked/direct at 
 # lived -- a 7.65 GB single dd was reaped mid-transfer on real hardware.
 STREAM_CHUNK_MB=${STREAM_CHUNK_MB:-256}
 STREAM_RETRIES=${STREAM_RETRIES:-3}
+# Seconds of zero data before a block transfer is declared hung and killed.
+# Without this the retries above never fire -- see adb_root_stream_watched.
+STREAM_STALL_SECS=${STREAM_STALL_SECS:-30}
 
 # ============================================================================
 # BACKUP FUNCTIONS
@@ -167,7 +170,7 @@ backup_full_device_stream() {
     # through the final size assertion.
     if [[ "$offset" -gt 0 ]]; then
         print_status "Verifying resume point at $(human_size "$offset")..."
-        adb_root_stream "dd if=$DEVICE_BLOCK bs=1048576 skip=$(( offset / 1048576 - 1 )) count=1" > "$tmp" || true
+        adb_root_stream_watched "dd if=$DEVICE_BLOCK bs=1048576 skip=$(( offset / 1048576 - 1 )) count=1" "$tmp" 20 || true
         dd if="$img" of="$tmp.local" bs=1048576 skip=$(( offset / 1048576 - 1 )) count=1 2>/dev/null
         local dev_md5 img_md5
         dev_md5=$(local_md5 "$tmp"); img_md5=$(local_md5 "$tmp.local")
@@ -193,7 +196,11 @@ backup_full_device_stream() {
         while [[ "$attempt" -lt "$STREAM_RETRIES" ]]; do
             attempt=$((attempt + 1))
             rm -f "$tmp"
-            adb_root_stream "dd if=$DEVICE_BLOCK bs=$DD_BLOCK_SIZE skip=$((offset / 1048576)) count=$STREAM_CHUNK_MB" > "$tmp" || true
+            # Watched, not bare: a reaped remote dd leaves exec-out hanging, and
+            # a retry loop around a call that never returns is decoration.
+            adb_root_stream_watched \
+                "dd if=$DEVICE_BLOCK bs=$DD_BLOCK_SIZE skip=$((offset / 1048576)) count=$STREAM_CHUNK_MB" \
+                "$tmp" "$STREAM_STALL_SECS" || true
             got=$(local_size "$tmp")
             [[ "$got" -eq "$expected" ]] && { landed=1; break; }
             print_warning "Block at $(human_size "$offset"): got $got bytes, wanted $expected (try $attempt/$STREAM_RETRIES)"
