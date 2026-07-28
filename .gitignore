@@ -1,4 +1,8 @@
 .git
 .DS_Store
 
+# Backup output: 7.65 GB images, never committed
 projector-backup-*/
+
+# Claude Code worktrees and session state
+.claude/

@@ -22,12 +22,55 @@ Fixes Android projectors that won't let you install apps or change launchers. Cr
 ## Quick Start
 
 ```bash
-# Access hidden features (safe, no modifications)
+# 1. Look around. Read-only, no root, safe to run any time.
 ./scripts/TOOLS.sh
 
-# Backup device (required before modifications)
+# 2. Back up the whole device. Takes ~15 min and is not optional --
+#    the unlock refuses to run without a verified backup.
 ./scripts/MAKE_BACKUP.sh
+
+# 3. Unlock the launcher. Start with --status; it changes nothing.
+./scripts/UNLOCK.sh --status
+./scripts/UNLOCK.sh
 ```
+
+## Unlocking the launcher
+
+The projector ships locked to `com.newlink.hisilauncher` and will not let you
+change the home screen from Settings. `UNLOCK.sh` fixes that.
+
+```bash
+./scripts/UNLOCK.sh              # interactive menu
+./scripts/UNLOCK.sh --status     # what is and is not applied; changes nothing
+./scripts/UNLOCK.sh --apply-all  # do everything, then stop
+./scripts/UNLOCK.sh --revert     # put the stock launcher back
+```
+
+**Copying a launcher APK into `/system/app` is not enough.** It is the first
+thing everyone tries and it does not work: while the stock launcher is still
+enabled it re-claims the home screen on the next boot. The unlock disables it
+first, then sets the home activity. That ordering is the whole trick.
+
+What it does, one step at a time — each is checked by reading the value back
+off the device, not by trusting the command's exit code:
+
+| Step | Change |
+|------|--------|
+| `dev_options` | Developer options on, install from unknown sources allowed |
+| `launcher_present` | Nova Launcher present in `/system/app` |
+| `launcher_default` | Stock launcher disabled, Nova set as home |
+| `cleanup_leftovers` | Removes empty/duplicated folders from earlier attempts |
+
+Safety behaviour worth knowing:
+
+- Refuses to run on anything that is not an NL5H00X.
+- Refuses to change anything without a verified backup (`--status` is exempt).
+- Re-running it is a no-op; it reports what was already done.
+- If the stock launcher cannot be disabled, it re-enables it rather than
+  leaving you with no home screen at all.
+- `--revert` restores the stock launcher, and that too is verified.
+
+Restart the projector afterwards for the new home screen to appear.
 
 ## Features
 
@@ -41,7 +84,7 @@ Fixes Android projectors that won't let you install apps or change launchers. Cr
 |--------|---------|---------------|
 | [`TOOLS.sh`](scripts/TOOLS.sh) | Access hidden features and settings | No |
 | [`MAKE_BACKUP.sh`](scripts/MAKE_BACKUP.sh) | Create complete device backup | Yes |
-| [`UNLOCK.sh`](scripts/UNLOCK.sh) | System unlock (work in progress) | Yes |
+| [`UNLOCK.sh`](scripts/UNLOCK.sh) | Replace the locked stock launcher | Yes |
 
 ## Documentation
 
@@ -63,9 +106,15 @@ Fixes Android projectors that won't let you install apps or change launchers. Cr
 scripts/
   TOOLS.sh              # Access hidden features
   MAKE_BACKUP.sh        # Complete device backup
-  UNLOCK.sh             # System unlock (WIP)
+  UNLOCK.sh             # Launcher unlock, interactive CLI
   lib/
     common.sh           # Shared functions
+    unlock.sh           # Unlock steps (state/apply/revert per step)
+tests/
+  run-tests.sh          # Backup regression suite
+  unlock-tests.sh       # Unlock end-to-end suite
+  fake-adb/adb          # Emulated projector -- no hardware needed
+  device-emu/seed.sh    # Seeds the emulator from measured firmware values
 docs/
   TECHNICAL_NOTES.md    # Technical documentation
   SECURITY_ANALYSIS.md  # Security analysis
@@ -85,11 +134,53 @@ assets/
 ## Emergency Recovery
 
 ```bash
-# Reset launcher to default
-adb shell cmd package set-home-activity com.newlink.hisilauncher
+# Put the stock launcher back (the supported way -- it verifies the result)
+./scripts/UNLOCK.sh --revert
 
-# Full system restore (requires backup)
-./scripts/RESTORE.sh
+# By hand, if you cannot run the script. Note that this alone does not
+# survive a reboot while the stock launcher is disabled:
+adb shell 'echo "pm enable com.newlink.hisilauncher" | su'
+adb shell cmd package set-home-activity com.newlink.hisilauncher/.MainActivity
+```
+
+Full restore from the image is a different matter. `RESTORE.sh` is **generated
+by `MAKE_BACKUP.sh` into the backup directory** -- it is not in `scripts/` --
+so run it from there:
+
+```bash
+cd projector-backup-<timestamp>/
+./RESTORE.sh
+```
+
+It refuses to write a full-device image that does not match `backup-manifest.txt`,
+and refuses outright if the manifest is missing. Restoring a short image over
+the whole device is how a projector stops booting.
+
+## Development without a projector
+
+The whole toolkit runs against an emulated device, so changes can be tested
+without touching hardware — which matters when the thing under test is "the
+backup you would restore from" or "the launcher you need to boot".
+
+```bash
+bash tests/run-tests.sh      # backup suite
+bash tests/unlock-tests.sh   # unlock suite
+```
+
+The emulator is seeded from values measured on a real NL5H00X: its
+`build.prop`, its `/system/app` inventory, piped-`su` only (`su -c` is
+rejected, as on the device), `/system` mounted read-only, and a boot that
+re-asserts the stock launcher while it is enabled. It **refuses what the
+device refuses**, so an unlock that forgets to remount `/system` or forgets to
+disable the stock launcher fails there too.
+
+To drive the scripts against your own pulled firmware instead of the stand-in:
+
+```bash
+export FAKE_ADB_STATE=/tmp/fakedev
+mkdir -p "$FAKE_ADB_STATE/sdcard"
+cp projector-backup-*/full-system-backup.img "$FAKE_ADB_STATE/blockdev"
+PATH="$PWD/tests/fake-adb:$PATH" ./scripts/TOOLS.sh
 ```
 
 ## Contributing
