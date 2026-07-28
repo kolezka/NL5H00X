@@ -165,6 +165,92 @@ fi
 rm -rf "$sandbox"
 
 # ---------------------------------------------------------------------------
+head_ "a reaped remote dd is retried, not fatal"
+# The failure measured on hardware: the remote dd dies partway and the stream
+# simply stops. One short block must not cost the whole transfer.
+
+sandbox=$(new_sandbox)
+rundir=$(run_backup "$sandbox" env FAKE_ADB_SHORT_STREAM_ONCE=1 STREAM_CHUNK_MB=8)
+rc=$(cat "$rundir/rc")
+img=$(backup_img "$rundir")
+
+if [[ "$rc" == "0" ]]; then
+    ok "run survives a block that comes back short"
+else
+    bad "exit $rc after a single short block"
+fi
+if [[ -n "$img" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
+    ok "retried image is byte-identical to the device"
+else
+    bad "retried image differs from the device"
+fi
+if grep -q "wanted" "$rundir/log"; then
+    ok "the short block is reported, not silently swallowed"
+else
+    bad "no mention of the short block in the log"
+fi
+rm -rf "$sandbox"
+
+# ---------------------------------------------------------------------------
+head_ "an interrupted transfer resumes instead of restarting"
+
+sandbox=$(new_sandbox)
+bdir="$sandbox/run/projector-backup-20260101_000000"
+mkdir -p "$bdir"
+# 20 MB of a 40 MB device already pulled, plus a 3 MB partial tail that must
+# be discarded rather than trusted.
+dd if="$sandbox/state/blockdev" of="$bdir/full-system-backup.img" \
+   bs=1048576 count=23 2>/dev/null
+rundir=$(run_backup "$sandbox" env STREAM_CHUNK_MB=8)
+rc=$(cat "$rundir/rc")
+img=$(find "$rundir" -name full-system-backup.img -print -quit)
+
+if grep -qi "partial tail" "$rundir/log"; then
+    ok "partial tail past the block boundary is dropped"
+else
+    bad "partial tail was kept or not reported"
+fi
+if grep -qi "Resume point verified" "$rundir/log"; then
+    ok "resume point is checked against the device, not assumed"
+else
+    bad "resumed without verifying the existing prefix"
+fi
+if [[ "$rc" == "0" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
+    ok "resumed image is byte-identical to the device"
+else
+    bad "resumed image differs (rc=$rc)"
+fi
+rm -rf "$sandbox"
+
+# ---------------------------------------------------------------------------
+head_ "a resumed prefix that does not match the device is rejected"
+# Size alone cannot distinguish a good prefix from a corrupt one, so a
+# mismatched carry-over must be refused rather than extended.
+
+sandbox=$(new_sandbox)
+bdir="$sandbox/run/projector-backup-20260101_000000"
+mkdir -p "$bdir"
+dd if=/dev/urandom of="$bdir/full-system-backup.img" bs=1048576 count=16 2>/dev/null
+rundir=$(run_backup "$sandbox" env STREAM_CHUNK_MB=8 FAKE_ADB_NO_EXEC_OUT=0)
+rc=$(cat "$rundir/rc")
+
+if grep -qi "Resume check FAILED" "$rundir/log"; then
+    ok "mismatched prefix is detected and named"
+else
+    bad "corrupt carry-over was not detected"
+fi
+# Rejecting the prefix drops it and rebuilds from scratch via the staged path,
+# so success here is correct -- what matters is that the corrupt bytes were
+# never extended into the final image.
+img=$(find "$rundir" -name full-system-backup.img -print -quit)
+if [[ -n "$img" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
+    ok "corrupt prefix discarded; final image matches the device"
+else
+    bad "corrupt bytes survived into the final image"
+fi
+rm -rf "$sandbox"
+
+# ---------------------------------------------------------------------------
 head_ "device diagnostics cannot pass as image data"
 # dd writes a ~95 byte summary to stderr and this device's su merges it into
 # stdout. adb_root_stream suppresses it; if a device merges it anyway, the
@@ -175,10 +261,13 @@ rundir=$(run_backup "$sandbox" env FAKE_ADB_FORCE_DD_SUMMARY=1)
 rc=$(cat "$rundir/rc")
 img=$(backup_img "$rundir")
 
-if grep -qi "larger than the device" "$rundir/log"; then
-    ok "names the failure as contamination, not a generic size mismatch"
+# Block streaming catches contamination per block, before it ever reaches the
+# assembled image -- an earlier and more precise signal than the whole-image
+# size check that used to report it.
+if grep -qiE "wanted|larger than the device" "$rundir/log"; then
+    ok "over-sized block is named at the point it arrives"
 else
-    bad "failure message does not explain an over-sized image"
+    bad "contamination not reported"
 fi
 
 # Degrading to the staged path is the correct response, not a failure: the

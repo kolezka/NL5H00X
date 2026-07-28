@@ -15,7 +15,11 @@ source "$SCRIPT_DIR/lib/common.sh"
 CHUNK_SIZE_MB=${CHUNK_SIZE_MB:-3000}          # Size of backup chunks in MB
 DEVICE_BLOCK=${DEVICE_BLOCK:-/dev/block/mmcblk0}
 DD_BLOCK_SIZE=${DD_BLOCK_SIZE:-1048576}       # 1MB - compatible with busybox dd
-BACKUP_METHOD=unknown                         # set to chunked/direct at runtime
+BACKUP_METHOD=unknown                         # set to stream/chunked/direct at runtime
+# Block size for the streaming path. Small enough that each remote dd is short
+# lived -- a 7.65 GB single dd was reaped mid-transfer on real hardware.
+STREAM_CHUNK_MB=${STREAM_CHUNK_MB:-256}
+STREAM_RETRIES=${STREAM_RETRIES:-3}
 
 # ============================================================================
 # BACKUP FUNCTIONS
@@ -126,28 +130,98 @@ backup_partition() {
     return 0
 }
 
+# Stream the image in bounded blocks rather than one long transfer.
+#
+# A single 7.65 GB `dd` has to survive ~12 minutes. Measured on hardware
+# 2026-07-28: it did not -- the remote dd was reaped at 26 %, the host-side
+# exec-out kept waiting on a stream that would never produce another byte, and
+# the whole run was lost. The link itself was fine throughout.
+#
+# Blocks bound that exposure: each dd lives ~25 s, a reaped one is retried
+# instead of fatal, and a run that dies anyway resumes from the last completed
+# block instead of from zero.
 backup_full_device_stream() {
     local device_size="$1"
+    local img=full-system-backup.img
+    local tmp=stream_block.tmp
+    local chunk_bytes=$((STREAM_CHUNK_MB * 1048576))
 
-    print_status "Streaming device image to host (nothing staged on the device)..."
-    print_warning "Roughly $(( device_size / 1048576 / 10 / 60 + 1 )) minutes at 10 MB/s"
+    rm -f "$tmp"
 
-    if ! adb_root_stream "dd if=$DEVICE_BLOCK bs=$DD_BLOCK_SIZE" > full-system-backup.img; then
-        print_error "Streaming backup failed"
-        return 1
-    fi
-
-    local got
-    got=$(local_size full-system-backup.img)
-    if [[ "$got" -ne "$device_size" ]]; then
-        print_error "Streamed image is $got bytes, expected $device_size"
-        if [[ "$got" -gt "$device_size" ]]; then
-            print_error "  image is LARGER than the device - device diagnostics contaminated the stream"
+    # --- resume ------------------------------------------------------------
+    local offset=0 have
+    have=$(local_size "$img")
+    if [[ "$have" -gt 0 ]]; then
+        offset=$(( have / chunk_bytes * chunk_bytes ))
+        if [[ "$offset" -ne "$have" ]]; then
+            # A partial tail cannot be told apart from a complete one after the
+            # fact, so it is discarded rather than trusted.
+            print_warning "Resuming: dropping $(human_size $((have - offset))) of partial tail"
+            dd if="$img" of="$img.part" bs=1048576 count=$((offset / 1048576)) 2>/dev/null
+            mv "$img.part" "$img"
         fi
+    fi
+
+    # Size proves nothing about content, so re-read the last megabyte before the
+    # resume point off the device and compare. A mismatched prefix would sail
+    # through the final size assertion.
+    if [[ "$offset" -gt 0 ]]; then
+        print_status "Verifying resume point at $(human_size "$offset")..."
+        adb_root_stream "dd if=$DEVICE_BLOCK bs=1048576 skip=$(( offset / 1048576 - 1 )) count=1" > "$tmp" || true
+        dd if="$img" of="$tmp.local" bs=1048576 skip=$(( offset / 1048576 - 1 )) count=1 2>/dev/null
+        local dev_md5 img_md5
+        dev_md5=$(local_md5 "$tmp"); img_md5=$(local_md5 "$tmp.local")
+        rm -f "$tmp" "$tmp.local"
+        if [[ -z "$dev_md5" || "$dev_md5" != "$img_md5" ]]; then
+            print_error "Resume check FAILED: existing image does not match the device at $(human_size "$offset")"
+            print_error "Delete $img and start over -- do not trust this file."
+            return 1
+        fi
+        print_success "Resume point verified; continuing from $((offset * 100 / device_size))%"
+    fi
+
+    local total_blocks=$(( (device_size + chunk_bytes - 1) / chunk_bytes ))
+    print_status "Streaming in ${STREAM_CHUNK_MB}MB blocks ($total_blocks total, nothing staged on the device)"
+
+    # --- transfer ----------------------------------------------------------
+    while [[ "$offset" -lt "$device_size" ]]; do
+        local remaining=$((device_size - offset))
+        local expected=$chunk_bytes
+        [[ "$remaining" -lt "$expected" ]] && expected=$remaining
+
+        local attempt=0 got=0 landed=0
+        while [[ "$attempt" -lt "$STREAM_RETRIES" ]]; do
+            attempt=$((attempt + 1))
+            rm -f "$tmp"
+            adb_root_stream "dd if=$DEVICE_BLOCK bs=$DD_BLOCK_SIZE skip=$((offset / 1048576)) count=$STREAM_CHUNK_MB" > "$tmp" || true
+            got=$(local_size "$tmp")
+            [[ "$got" -eq "$expected" ]] && { landed=1; break; }
+            print_warning "Block at $(human_size "$offset"): got $got bytes, wanted $expected (try $attempt/$STREAM_RETRIES)"
+        done
+
+        if [[ "$landed" -ne 1 ]]; then
+            rm -f "$tmp"
+            print_error "Block at $(human_size "$offset") failed $STREAM_RETRIES times"
+            print_error "$(human_size "$offset") kept in $img -- re-run to resume from here"
+            return 1
+        fi
+
+        cat "$tmp" >> "$img"
+        rm -f "$tmp"
+        offset=$((offset + expected))
+        print_status "  $((offset * 100 / device_size))%  $(human_size "$offset") / $(human_size "$device_size")"
+    done
+
+    local final
+    final=$(local_size "$img")
+    if [[ "$final" -ne "$device_size" ]]; then
+        print_error "Assembled image is $final bytes, expected $device_size"
+        [[ "$final" -gt "$device_size" ]] && \
+            print_error "  larger than the device - device diagnostics contaminated the stream"
         return 1
     fi
 
-    print_success "Full backup complete: $(human_size "$got")"
+    print_success "Full backup complete: $(human_size "$final")"
     return 0
 }
 
@@ -429,9 +503,19 @@ main() {
     # Check requirements
     require_device true
 
-    # Create backup directory
-    local backup_dir="projector-backup-$(date +%Y%m%d_%H%M%S)"
-    print_status "Creating backup directory: $backup_dir"
+    # Reuse an unfinished run instead of starting a fresh directory -- otherwise
+    # the streaming resume can never fire, since every run would get its own
+    # empty timestamped directory. A finished run has a manifest and is skipped.
+    local backup_dir
+    if [[ -n "${BACKUP_DIR:-}" ]]; then
+        backup_dir="$BACKUP_DIR"
+        print_status "Using backup directory: $backup_dir"
+    elif backup_dir=$(find_incomplete_backup_dir) && [[ -n "$backup_dir" ]]; then
+        print_warning "Unfinished backup found - resuming into $backup_dir"
+    else
+        backup_dir="projector-backup-$(date +%Y%m%d_%H%M%S)"
+        print_status "Creating backup directory: $backup_dir"
+    fi
     mkdir -p "$backup_dir"
     cd "$backup_dir"
 

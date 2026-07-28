@@ -230,6 +230,11 @@ local_size() {
     stat -f%z "$path" 2>/dev/null || stat -c%s "$path" 2>/dev/null || echo 0
 }
 
+# MD5 of a local file. Portable across BSD (md5) and GNU (md5sum).
+local_md5() {
+    md5 -q "$1" 2>/dev/null || md5sum "$1" 2>/dev/null | awk '{print $1}'
+}
+
 # Start an Android activity
 # Usage: adb_start_activity "com.package/.Activity" "description"
 adb_start_activity() {
@@ -303,6 +308,20 @@ verify_backup_dir() {
     [[ "$actual" -eq "$expected" ]] || return 3
 
     return 0
+}
+
+# Newest projector-backup-* holding an image but no manifest -- a run that did
+# not finish. Without this the streaming resume is unreachable: every run would
+# create a fresh timestamped directory and start from zero.
+find_incomplete_backup_dir() {
+    local d newest=""
+    for d in projector-backup-*; do
+        [[ -d "$d" ]] || continue
+        [[ -f "$d/full-system-backup.img" ]] || continue
+        [[ -f "$d/$MANIFEST_NAME" ]] && continue
+        newest="$d"          # glob is lexicographic; timestamps sort chronologically
+    done
+    [[ -n "$newest" ]] && echo "$newest"
 }
 
 # Check if a backup directory exists with a verified-complete backup
