@@ -23,10 +23,14 @@ readonly NC='\033[0m'
 # ============================================================================
 # PRINT FUNCTIONS
 # ============================================================================
+# Progress goes to stdout; diagnostics go to stderr. The split matters:
+# helpers like adb_root_exec return their payload on stdout and are called as
+# out=$(adb_root_exec ...), so a diagnostic written to stdout is captured into
+# the caller's variable and never reaches the operator.
 print_status()  { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_success() { echo -e "${GREEN}[OK]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-print_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
+print_error()   { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 print_step()    { echo -e "${PURPLE}[STEP]${NC} $1"; }
 
 print_header() {

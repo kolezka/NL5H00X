@@ -87,6 +87,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+head_ "diagnostics reach the operator, not the caller's variable"
+# Helpers that return a payload on stdout are called as out=$(helper ...).
+# A diagnostic written to stdout is swallowed by that capture and the operator
+# sees nothing. This locks the contract for all of them, not just the one
+# helper that surfaced it.
+
+probe='source "'"$SCRIPTS"'/lib/common.sh"; SU_MODE=""; out=$(adb_root_exec whoami); echo "CAPTURED:[$out]"'
+captured=$(bash -c "$probe" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+on_stderr=$(bash -c "$probe" 2>&1 >/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+
+if [[ "$captured" == "CAPTURED:[]" ]]; then
+    ok "helper diagnostic is not captured as the helper's return value"
+else
+    bad "diagnostic leaked into the caller's variable: $captured"
+fi
+
+if [[ "$on_stderr" == *ERROR* ]]; then
+    ok "helper diagnostic reaches stderr"
+else
+    bad "diagnostic went nowhere the operator can see it"
+fi
+
+# ---------------------------------------------------------------------------
 head_ "healthy device produces a complete backup"
 
 sandbox=$(new_sandbox)
