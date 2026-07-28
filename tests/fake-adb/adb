@@ -19,7 +19,11 @@
 set -uo pipefail
 
 STATE="${FAKE_ADB_STATE:?FAKE_ADB_STATE not set}"
-SU_MODE="${FAKE_ADB_SU_MODE:-direct}"
+# piped, not direct: the real NL5H00X rejects `su -c` with
+# "su: invalid uid/gid '-c'" and only accepts `echo cmd | su` (measured
+# 2026-07-28). The emulator's default has to match the hardware, or every
+# script gets developed against a device that does not exist.
+SU_MODE="${FAKE_ADB_SU_MODE:-piped}"
 PROPAGATE_RC="${FAKE_ADB_PROPAGATE_RC:-0}"
 FREE_KB="${FAKE_ADB_FREE_KB:-1024}"
 
@@ -37,6 +41,56 @@ finish() {
 # ---------------------------------------------------------------------------
 # Remote command dispatch
 # ---------------------------------------------------------------------------
+# Filesystem operations against the modelled device tree.
+#
+# The refusal is the point: /system starts read-only, and a write to it fails
+# exactly as it does on the device. An unlock that forgets to remount has to
+# fail here too, or the emulator is just agreeing with whatever the script does.
+fs_op() {
+    local cmd="$1"
+    set -- $cmd
+    local op="$1"; shift
+    [[ "$op" == "rm" ]] && shift            # -rf
+    [[ "$op" == "mkdir" && "$1" == "-p" ]] && shift
+
+    local target="${!#}"                     # last argument
+    if [[ "$target" == /system/* && "$(sget mount_system ro)" == "ro" ]]; then
+        echo "$op: '$target': Read-only file system" >&2
+        return 1
+    fi
+
+    case "$op" in
+        mkdir) mkdir -p "${STATE}${target}" ;;
+        chmod|chown) [[ -e "${STATE}${target}" ]] || { echo "$op: '$target': No such file or directory" >&2; return 1; } ;;
+        rm) rm -rf "${STATE}${target}" ;;
+        cp)
+            local src="$1"
+            [[ -e "${STATE}${src}" ]] || { echo "cp: '$src': No such file or directory" >&2; return 1; }
+            mkdir -p "$(dirname "${STATE}${target}")"
+            cp -R "${STATE}${src}" "${STATE}${target}"
+            ;;
+    esac
+    return 0
+}
+
+# --- mutable device state -------------------------------------------------
+# Files under $STATE; absent files mean "this profile does not model it", so
+# the backup-only seeds keep working without carrying unlock state around.
+sget() { [[ -f "$STATE/$1" ]] && cat "$STATE/$1" || echo "$2"; }
+setting_get() {
+    [[ -f "$STATE/settings" ]] || { echo null; return; }
+    local v
+    v=$(awk -v n="$1" -v k="$2" '$1==n && $2==k {print $3}' "$STATE/settings")
+    echo "${v:-null}"
+}
+setting_put() {
+    touch "$STATE/settings"
+    grep -v "^$1 $2 " "$STATE/settings" > "$STATE/settings.new" 2>/dev/null || true
+    echo "$1 $2 $3" >> "$STATE/settings.new"
+    mv "$STATE/settings.new" "$STATE/settings"
+}
+pkg_enabled() { ! grep -qx "$1" "$STATE/packages_disabled" 2>/dev/null; }
+
 run_remote() {
     local cmd="$1"
 
@@ -45,6 +99,110 @@ run_remote() {
             echo root
             return 0
             ;;
+
+        # --- properties -------------------------------------------------
+        "getprop "*)
+            local k="${cmd#getprop }"
+            [[ -f "$STATE/props" ]] && awk -F= -v k="$k" '$1==k{print $2}' "$STATE/props"
+            return 0 ;;
+        getprop)
+            if [[ -f "$STATE/props" ]]; then
+                awk -F= '{printf "[%s]: [%s]\n",$1,$2}' "$STATE/props"
+            else
+                echo "[ro.product.model]: [NL5H00X]"
+                echo "[ro.build.version.sdk]: [28]"
+            fi
+            return 0 ;;
+
+        # --- settings ---------------------------------------------------
+        "settings put "*)
+            set -- $cmd; setting_put "$3" "$4" "$5"; return 0 ;;
+        "settings get "*)
+            set -- $cmd; setting_get "$3" "$4"; return 0 ;;
+
+        # --- mount ------------------------------------------------------
+        "mount -o remount,rw /system"|"mount -o rw,remount /system")
+            # Real remount needs root; without it the device refuses.
+            echo rw > "$STATE/mount_system"; return 0 ;;
+        "mount -o remount,ro /system"|"mount -o ro,remount /system")
+            echo ro > "$STATE/mount_system"; return 0 ;;
+        "mount")
+            echo "/dev/block/mmcblk0p20 /system ext4 $(sget mount_system ro),seclabel 0 0"; return 0 ;;
+
+        # --- SELinux ----------------------------------------------------
+        "setenforce 0") echo Permissive > "$STATE/selinux"; return 0 ;;
+        "setenforce 1") echo Enforcing  > "$STATE/selinux"; return 0 ;;
+        getenforce)     sget selinux Enforcing; return 0 ;;
+
+        # --- packages ---------------------------------------------------
+        "pm list packages -f"*)
+            if [[ -f "$STATE/packages" ]]; then sed 's/^/package:/' "$STATE/packages"
+            else echo "package:/system/app/RGTPLauncher/RGTPLauncher.apk=com.newlink.hisilauncher"; fi
+            return 0 ;;
+        "pm list packages -d"*)
+            [[ -f "$STATE/packages_disabled" ]] && sed 's/^/package:/' "$STATE/packages_disabled"; return 0 ;;
+        "pm list packages -e"*|"pm list packages")
+            if [[ -f "$STATE/packages" ]]; then
+                cut -d= -f2 "$STATE/packages" | while read -r p; do
+                    pkg_enabled "$p" && echo "package:$p"
+                done
+            else
+                echo "package:com.newlink.hisilauncher"
+            fi
+            return 0 ;;
+        "pm disable-user "*|"pm disable "*)
+            local p="${cmd##* }"
+            # Models a device that will not let its launcher be disabled. The
+            # unlock must not leave the user with no home screen when this
+            # happens -- it has to back its own change out.
+            if [[ "${FAKE_ADB_REFUSE_DISABLE:-0}" == "1" ]]; then
+                echo "Error: java.lang.SecurityException: Cannot disable $p" >&2
+                return 1
+            fi
+            grep -q "=$p$" "$STATE/packages" 2>/dev/null || {
+                echo "Error: package $p not found" >&2; return 1; }
+            grep -qx "$p" "$STATE/packages_disabled" 2>/dev/null || echo "$p" >> "$STATE/packages_disabled"
+            echo "Package $p new state: disabled-user"; return 0 ;;
+        "pm enable "*)
+            local p="${cmd##* }"
+            grep -vx "$p" "$STATE/packages_disabled" > "$STATE/pd.new" 2>/dev/null || true
+            mv "$STATE/pd.new" "$STATE/packages_disabled" 2>/dev/null || true
+            echo "Package $p new state: enabled"; return 0 ;;
+        "pm install"*)
+            local apk="${cmd##* }"
+            if [[ "$(setting_get secure install_non_market_apps)" == "0" ]]; then
+                echo "Failure [INSTALL_FAILED_VERIFICATION_FAILURE]"; return 1
+            fi
+            [[ -f "${STATE}${apk}" ]] || { echo "Failure [INSTALL_FAILED_INVALID_URI]"; return 1; }
+            echo Success; return 0 ;;
+
+        # --- home activity ----------------------------------------------
+        "cmd package set-home-activity "*)
+            local comp="${cmd##* }"
+            local pkg="${comp%%/*}"
+            grep -q "=$pkg$" "$STATE/packages" 2>/dev/null || {
+                echo "Error: component $comp not found" >&2; return 1; }
+            pkg_enabled "$pkg" || { echo "Error: package $pkg is disabled" >&2; return 1; }
+            echo "$comp" > "$STATE/home_activity"
+            echo Success; return 0 ;;
+        "cmd package get-home-activity"*)
+            sget home_activity "com.newlink.hisilauncher/.MainActivity"; return 0 ;;
+
+        # --- existence checks --------------------------------------------
+        "ls -d "*)
+            local path="${cmd#ls -d }"
+            if [[ -e "${STATE}${path}" ]]; then echo "$path"; return 0; fi
+            echo "ls: $path: No such file or directory" >&2; return 1 ;;
+        "test -e "*|"test -d "*|"test -f "*)
+            local path="${cmd##* }"
+            [[ -e "${STATE}${path}" ]] && return 0 || return 1 ;;
+
+        # --- filesystem under /system ------------------------------------
+        "cp "*|"mkdir "*|"chmod "*|"chown "*|"rm -rf "*)
+            fs_op "$cmd"; return $? ;;
+        esac
+
+    case "$cmd" in
         "blockdev --getsize64 "*)
             stat -f%z "$STATE/blockdev" 2>/dev/null || stat -c%s "$STATE/blockdev"
             return 0
@@ -276,6 +434,18 @@ case "$subcmd" in
         ;;
 
     reboot)
+        # MODELLED HYPOTHESIS, not a measured fact. Evidence: Nova Launcher has
+        # been sitting in /system/app since 2025-07-15 and the device still
+        # boots com.newlink.hisilauncher, so something re-asserts the stock
+        # launcher. The simplest model that explains it is that it wins on boot
+        # while it is still enabled. If the real mechanism turns out to differ,
+        # this is the line to change -- and the unlock's "disable the stock
+        # launcher" step is what makes it robust either way.
+        if [[ -f "$STATE/home_activity" ]] && pkg_enabled com.newlink.hisilauncher; then
+            echo "com.newlink.hisilauncher/.MainActivity" > "$STATE/home_activity"
+        fi
+        [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
+        echo ro > "$STATE/mount_system" 2>/dev/null || true
         exit 0
         ;;
 
