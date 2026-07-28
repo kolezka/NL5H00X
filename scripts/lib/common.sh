@@ -184,6 +184,37 @@ adb_root_exec() {
     return "$status"
 }
 
+# Stream a root command's raw stdout to our stdout, for bulk binary data.
+# Usage: adb_root_stream "dd if=/dev/block/mmcblk0 bs=1048576" > image.img
+#
+# Two things here are not stylistic:
+#
+#   exec-out, not shell -- `adb shell` runs the far side on a pty on some
+#   builds, which translates line endings and silently corrupts binary.
+#
+#   2>/dev/null is appended HERE, not left to the caller. This device's `su`
+#   merges the child's stderr into stdout, so an unsuppressed `dd` appends its
+#   ~95-byte "N+0 records in" summary directly into the image. Measured on
+#   hardware 2026-07-28: 67108959 bytes back for a 67108864-byte read. A call
+#   site can forget the redirect; this cannot.
+adb_root_stream() {
+    local cmd="$1"
+
+    if [[ "$cmd" == *"'"* ]]; then
+        print_error "adb_root_stream: command contains a single quote: $cmd"
+        return 125
+    fi
+
+    case "${SU_MODE:-}" in
+        direct) adb exec-out "su -c '$cmd 2>/dev/null'" ;;
+        piped)  adb exec-out "echo '$cmd 2>/dev/null' | su" ;;
+        *)
+            print_error "adb_root_stream: root not established (require_device true first)"
+            return 125
+            ;;
+    esac
+}
+
 # Size of a file on the device, or 0 if absent. Never fails the caller.
 adb_remote_size() {
     local path="$1"

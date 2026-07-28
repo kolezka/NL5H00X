@@ -105,6 +105,32 @@ run_remote() {
     esac
 }
 
+# Real dd reports a transfer summary on stderr, and this device's su merges the
+# child's stderr into stdout -- so an unsuppressed dd appends ~95 bytes of
+# "N+0 records in" straight into a streamed image. Reproduced here so the
+# toolkit's defence against it is actually exercised.
+dd_summary() {
+    local cmd="$1" src="$2" bs="$3" skip="$4" count="$5"
+    # FAKE_ADB_FORCE_DD_SUMMARY models a device whose su merges the summary in
+    # despite the redirect, so the toolkit's size assertion is the last defence.
+    if [[ "${FAKE_ADB_FORCE_DD_SUMMARY:-0}" != "1" ]]; then
+        [[ "$cmd" == *"2>/dev/null"* ]] && return 0
+    fi
+
+    local total blocks
+    total=$(stat -f%z "$src" 2>/dev/null || stat -c%s "$src")
+    if [[ -n "$count" ]]; then
+        blocks="$count"
+    else
+        blocks=$(( (total - skip * bs + bs - 1) / bs ))
+    fi
+    {
+        echo "${blocks}+0 records in"
+        echo "${blocks}+0 records out"
+        echo "$(( blocks * bs )) bytes transferred in 0.051 secs (20560313 bytes/sec)"
+    } >&2
+}
+
 # Emulate dd against the stand-in block device.
 run_dd() {
     local cmd="$1"
@@ -127,21 +153,29 @@ run_dd() {
         /dev/block/*)       src="$STATE/blockdev" ;;  # partitions: same backing file
         *)                  src="${STATE}${if_}" ;;
     esac
-    dst="${STATE}${of_}"
 
     if [[ ! -f "$src" ]]; then
         echo "dd: $if_: No such file or directory" >&2
         return 1
     fi
 
-    local args=(if="$src" of="$dst" bs="$bs")
+    local args=(if="$src" bs="$bs")
     [[ "$skip" != "0" ]] && args+=(skip="$skip")
     [[ -n "$count" ]] && args+=(count="$count")
 
-    if ! dd "${args[@]}" 2>/dev/null; then
+    # No of= means stream to stdout -- the exec-out path.
+    if [[ -z "$of_" ]]; then
+        dd "${args[@]}" 2>/dev/null
+        dd_summary "$cmd" "$src" "$bs" "$skip" "$count"
+        return 0
+    fi
+
+    dst="${STATE}${of_}"
+    if ! dd "${args[@]}" of="$dst" 2>/dev/null; then
         echo "dd: write error" >&2
         return 1
     fi
+    dd_summary "$cmd" "$src" "$bs" "$skip" "$count"
 
     # Simulated short write: the data is truncated but dd still reports success.
     # This is the failure the toolkit must catch on its own.
@@ -227,6 +261,26 @@ case "$subcmd" in
 
     reboot)
         exit 0
+        ;;
+
+    exec-out)
+        # Older adb / device builds have no exec-out; the toolkit must fall
+        # back to a staged backup rather than produce nothing.
+        if [[ "${FAKE_ADB_NO_EXEC_OUT:-0}" == "1" ]]; then
+            echo "adb: unknown command exec-out" >&2
+            exit 1
+        fi
+        # Raw binary channel. The device's su merges the child's stderr into
+        # stdout, so this does too -- that merge is the contamination hazard.
+        shell_cmd="$*"
+        inner=$(unwrap_su "$shell_cmd")
+        case $? in
+            0) : ;;
+            1) echo "su: invalid option -- c" >&2; finish 1 ;;
+            *) inner="$shell_cmd" ;;
+        esac
+        run_remote "$inner" 2>&1
+        finish $?
         ;;
 
     shell)

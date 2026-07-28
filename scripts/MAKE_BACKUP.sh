@@ -126,6 +126,31 @@ backup_partition() {
     return 0
 }
 
+backup_full_device_stream() {
+    local device_size="$1"
+
+    print_status "Streaming device image to host (nothing staged on the device)..."
+    print_warning "Roughly $(( device_size / 1048576 / 10 / 60 + 1 )) minutes at 10 MB/s"
+
+    if ! adb_root_stream "dd if=$DEVICE_BLOCK bs=$DD_BLOCK_SIZE" > full-system-backup.img; then
+        print_error "Streaming backup failed"
+        return 1
+    fi
+
+    local got
+    got=$(local_size full-system-backup.img)
+    if [[ "$got" -ne "$device_size" ]]; then
+        print_error "Streamed image is $got bytes, expected $device_size"
+        if [[ "$got" -gt "$device_size" ]]; then
+            print_error "  image is LARGER than the device - device diagnostics contaminated the stream"
+        fi
+        return 1
+    fi
+
+    print_success "Full backup complete: $(human_size "$got")"
+    return 0
+}
+
 backup_full_device_chunked() {
     local device_size="$1"
     local chunk_size_bytes=$((CHUNK_SIZE_MB * 1024 * 1024))
@@ -439,14 +464,22 @@ main() {
     free_space=$(get_device_free_space)
     [[ "$free_space" =~ ^[0-9]+$ ]] || free_space=0
 
-    # Recorded in the manifest so a restore knows how the image was assembled.
-    if [[ "$device_size" -gt "$free_space" ]]; then
-        print_warning "Device space limited - using chunked backup"
-        BACKUP_METHOD=chunked
-        backup_full_device_chunked "$device_size" || true
-    else
-        BACKUP_METHOD=direct
-        backup_full_device_direct "$device_size" || true
+    # Streaming first: it needs no free space on the device at all, which the
+    # staged paths do -- and on this hardware /sdcard has 3.74 GB free against a
+    # 2.93 GB chunk. Recorded in the manifest so a restore knows how the image
+    # was assembled.
+    BACKUP_METHOD=stream
+    if ! backup_full_device_stream "$device_size"; then
+        print_warning "Streaming failed - falling back to a staged backup"
+        rm -f full-system-backup.img
+        if [[ "$device_size" -gt "$free_space" ]]; then
+            print_warning "Device space limited - using chunked backup"
+            BACKUP_METHOD=chunked
+            backup_full_device_chunked "$device_size" || true
+        else
+            BACKUP_METHOD=direct
+            backup_full_device_direct "$device_size" || true
+        fi
     fi
 
     # Phase 5: Create restore scripts

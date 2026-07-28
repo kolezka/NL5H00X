@@ -109,6 +109,15 @@ else
     bad "diagnostic went nowhere the operator can see it"
 fi
 
+# print_warning moved to stderr in the same commit as print_error but was
+# asserted nowhere, so a revert of half the fix would have stayed green.
+warn_out=$(bash -c 'source "'"$SCRIPTS"'/lib/common.sh"; print_warning hi' 2>/dev/null)
+if [[ -z "$warn_out" ]]; then
+    ok "print_warning is on stderr too, not just print_error"
+else
+    bad "print_warning still writes to stdout: $warn_out"
+fi
+
 # ---------------------------------------------------------------------------
 head_ "healthy device produces a complete backup"
 
@@ -146,6 +155,75 @@ if grep -q "BACKUP COMPLETE" "$rundir/log"; then
 else
     bad "did not report BACKUP COMPLETE"
 fi
+
+manifest=$(find "$rundir" -name backup-manifest.txt -print -quit)
+if grep -q '^method=stream$' "$manifest" 2>/dev/null; then
+    ok "streaming is the path taken by default"
+else
+    bad "expected method=stream, got: $(grep '^method=' "$manifest" 2>/dev/null)"
+fi
+rm -rf "$sandbox"
+
+# ---------------------------------------------------------------------------
+head_ "device diagnostics cannot pass as image data"
+# dd writes a ~95 byte summary to stderr and this device's su merges it into
+# stdout. adb_root_stream suppresses it; if a device merges it anyway, the
+# image comes back LARGER than the device and must be rejected, not trusted.
+
+sandbox=$(new_sandbox)
+rundir=$(run_backup "$sandbox" env FAKE_ADB_FORCE_DD_SUMMARY=1)
+rc=$(cat "$rundir/rc")
+img=$(backup_img "$rundir")
+
+if grep -qi "larger than the device" "$rundir/log"; then
+    ok "names the failure as contamination, not a generic size mismatch"
+else
+    bad "failure message does not explain an over-sized image"
+fi
+
+# Degrading to the staged path is the correct response, not a failure: the
+# staged path writes via of=, so the summary never reaches the image. What
+# must never happen is the contaminated stream being kept.
+if [[ -n "$img" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
+    ok "contaminated stream discarded; final image is byte-identical"
+else
+    bad "final image is not the device's contents"
+fi
+
+manifest=$(find "$rundir" -name backup-manifest.txt -print -quit)
+if grep -qE '^method=(chunked|direct)$' "$manifest" 2>/dev/null; then
+    ok "manifest records the staged fallback, not the stream that failed"
+else
+    bad "manifest method wrong: $(grep '^method=' "$manifest" 2>/dev/null)"
+fi
+rm -rf "$sandbox"
+
+# ---------------------------------------------------------------------------
+head_ "falls back to a staged backup when exec-out is unavailable"
+
+sandbox=$(new_sandbox)
+rundir=$(run_backup "$sandbox" env FAKE_ADB_NO_EXEC_OUT=1)
+rc=$(cat "$rundir/rc")
+img=$(backup_img "$rundir")
+
+if [[ "$rc" == "0" ]]; then
+    ok "still completes without exec-out"
+else
+    bad "exit $rc when exec-out is unavailable"
+fi
+
+if [[ -n "$img" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
+    ok "fallback image is byte-identical to the device"
+else
+    bad "fallback image differs from the device"
+fi
+
+manifest=$(find "$rundir" -name backup-manifest.txt -print -quit)
+if grep -qE '^method=(chunked|direct)$' "$manifest" 2>/dev/null; then
+    ok "manifest records the staged method actually used"
+else
+    bad "manifest method wrong: $(grep '^method=' "$manifest" 2>/dev/null)"
+fi
 rm -rf "$sandbox"
 
 # ---------------------------------------------------------------------------
@@ -154,8 +232,10 @@ head_ "truncated chunk is caught (the bug this suite exists for)"
 # non-empty, so a size-blind script concatenates them and declares victory.
 
 sandbox=$(new_sandbox)
-# Chunk 0 lands intact; chunk 1 (skip=15) comes back short.
+# Chunk 0 lands intact; chunk 1 (skip=15) comes back short. exec-out is
+# disabled so the run actually reaches the chunked path under test.
 rundir=$(run_backup "$sandbox" env \
+    FAKE_ADB_NO_EXEC_OUT=1 \
     FAKE_ADB_TRUNCATE_AT=$((5 * 1048576)) \
     FAKE_ADB_TRUNCATE_MIN_SKIP="$CHUNK_MB")
 rc=$(cat "$rundir/rc")
