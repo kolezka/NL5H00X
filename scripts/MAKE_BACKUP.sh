@@ -11,9 +11,11 @@ source "$SCRIPT_DIR/lib/common.sh"
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-CHUNK_SIZE_MB=3000          # Size of backup chunks in MB
-DEVICE_BLOCK="/dev/block/mmcblk0"
-DD_BLOCK_SIZE=1048576       # 1MB - compatible with busybox dd
+# Overridable so the test harness can drive a small stand-in device.
+CHUNK_SIZE_MB=${CHUNK_SIZE_MB:-3000}          # Size of backup chunks in MB
+DEVICE_BLOCK=${DEVICE_BLOCK:-/dev/block/mmcblk0}
+DD_BLOCK_SIZE=${DD_BLOCK_SIZE:-1048576}       # 1MB - compatible with busybox dd
+BACKUP_METHOD=unknown                         # set to chunked/direct at runtime
 
 # ============================================================================
 # BACKUP FUNCTIONS
@@ -21,9 +23,10 @@ DD_BLOCK_SIZE=1048576       # 1MB - compatible with busybox dd
 
 get_device_size() {
     local size
-    size=$(adb shell "su -c 'blockdev --getsize64 $DEVICE_BLOCK'" 2>/dev/null | tr -d '\r\n')
-    [[ -z "$size" || "$size" == "0" ]] && size=$(adb shell "echo 'blockdev --getsize64 $DEVICE_BLOCK' | su" 2>/dev/null | tr -d '\r\n')
-    echo "${size:-0}"
+    size=$(adb_root_exec "blockdev --getsize64 $DEVICE_BLOCK") || return 1
+    size=$(printf '%s' "$size" | tr -d ' \r\n')
+    [[ "$size" =~ ^[0-9]+$ && "$size" -gt 0 ]] || return 1
+    echo "$size"
 }
 
 get_device_free_space() {
@@ -80,28 +83,47 @@ backup_partition() {
 
     print_status "Backing up $description..."
 
-    # Create backup on device
-    adb shell "su -c 'dd if=$partition of=/sdcard/temp_backup.img bs=$DD_BLOCK_SIZE'" 2>/dev/null || \
-        adb shell "echo 'dd if=$partition of=/sdcard/temp_backup.img bs=$DD_BLOCK_SIZE' | su" 2>/dev/null
-
-    # Check if created
-    local remote_size
-    remote_size=$(adb shell ls -l /sdcard/temp_backup.img 2>/dev/null | awk '{print $5}')
-
-    if [[ "${remote_size:-0}" -gt 0 ]]; then
-        print_status "Pulling from device ($remote_size bytes)..."
-        if adb pull /sdcard/temp_backup.img "$output_file" 2>/dev/null; then
-            adb shell rm -f /sdcard/temp_backup.img
-            local size
-            size=$(du -h "$output_file" | cut -f1)
-            print_success "$description backed up ($size)"
-            return 0
-        fi
+    local expected
+    expected=$(adb_root_exec "blockdev --getsize64 $partition" | tr -d ' \r\n')
+    if ! [[ "$expected" =~ ^[0-9]+$ ]] || [[ "$expected" -eq 0 ]]; then
+        print_error "$description: could not determine partition size"
+        return 1
     fi
 
-    adb shell rm -f /sdcard/temp_backup.img 2>/dev/null
-    print_error "$description backup failed"
-    return 1
+    local dd_out
+    if ! dd_out=$(adb_root_exec "dd if=$partition of=/sdcard/temp_backup.img bs=$DD_BLOCK_SIZE"); then
+        print_error "$description: dd failed on device"
+        [[ -n "$dd_out" ]] && echo "$dd_out" >&2
+        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+        return 1
+    fi
+
+    local remote_size
+    remote_size=$(adb_remote_size /sdcard/temp_backup.img)
+    if [[ "$remote_size" -ne "$expected" ]]; then
+        print_error "$description: device copy is $remote_size bytes, expected $expected"
+        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+        return 1
+    fi
+
+    print_status "Pulling from device ($remote_size bytes)..."
+    if ! adb pull /sdcard/temp_backup.img "$output_file" >/dev/null 2>&1; then
+        print_error "$description: pull failed"
+        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+        return 1
+    fi
+
+    local pulled
+    pulled=$(local_size "$output_file")
+    if [[ "$pulled" -ne "$expected" ]]; then
+        print_error "$description: pulled $pulled bytes, expected $expected"
+        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+        return 1
+    fi
+
+    adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+    print_success "$description backed up ($(human_size "$pulled"))"
+    return 0
 }
 
 backup_full_device_chunked() {
@@ -114,47 +136,69 @@ backup_full_device_chunked() {
     local chunk
     for ((chunk=0; chunk<total_chunks; chunk++)); do
         local skip_mb=$((chunk * CHUNK_SIZE_MB))
+        local offset=$((chunk * chunk_size_bytes))
         local chunk_file="backup_chunk_$(printf "%03d" $chunk).img"
 
-        print_status "Chunk $((chunk + 1))/$total_chunks (offset ${skip_mb}MB)..."
+        # The final chunk is legitimately short -- dd runs off the end of the
+        # device and stops. Every other chunk must be exactly full.
+        local remaining=$((device_size - offset))
+        local expected=$chunk_size_bytes
+        [[ "$remaining" -lt "$expected" ]] && expected=$remaining
 
-        # Create chunk on device
-        adb shell "su -c 'dd if=$DEVICE_BLOCK of=/sdcard/chunk.img bs=$DD_BLOCK_SIZE skip=$skip_mb count=$CHUNK_SIZE_MB'" 2>/dev/null || \
-            adb shell "echo 'dd if=$DEVICE_BLOCK of=/sdcard/chunk.img bs=$DD_BLOCK_SIZE skip=$skip_mb count=$CHUNK_SIZE_MB' | su" 2>/dev/null
+        print_status "Chunk $((chunk + 1))/$total_chunks (offset ${skip_mb}MB, expect $(human_size "$expected"))..."
 
-        # Pull chunk
-        local chunk_size
-        chunk_size=$(adb shell ls -l /sdcard/chunk.img 2>/dev/null | awk '{print $5}')
-
-        if [[ "${chunk_size:-0}" -gt 0 ]]; then
-            if adb pull /sdcard/chunk.img "$chunk_file" 2>/dev/null; then
-                adb shell rm -f /sdcard/chunk.img
-                print_success "Chunk $((chunk + 1)) complete"
-            else
-                print_error "Failed to pull chunk $((chunk + 1))"
-                adb shell rm -f /sdcard/chunk.img 2>/dev/null
-                return 1
-            fi
-        else
-            print_error "Chunk $((chunk + 1)) not created on device"
+        local dd_out
+        if ! dd_out=$(adb_root_exec "dd if=$DEVICE_BLOCK of=/sdcard/chunk.img bs=$DD_BLOCK_SIZE skip=$skip_mb count=$CHUNK_SIZE_MB"); then
+            print_error "Chunk $((chunk + 1)): dd failed on device"
+            [[ -n "$dd_out" ]] && echo "$dd_out" >&2
+            adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
             return 1
         fi
+
+        local chunk_size
+        chunk_size=$(adb_remote_size /sdcard/chunk.img)
+        if [[ "$chunk_size" -ne "$expected" ]]; then
+            print_error "Chunk $((chunk + 1)): device wrote $chunk_size bytes, expected $expected"
+            print_error "dd reported success -- this is a silent short write, not a warning"
+            adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+            return 1
+        fi
+
+        if ! adb pull /sdcard/chunk.img "$chunk_file" >/dev/null 2>&1; then
+            print_error "Failed to pull chunk $((chunk + 1))"
+            adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+            return 1
+        fi
+
+        local pulled
+        pulled=$(local_size "$chunk_file")
+        if [[ "$pulled" -ne "$expected" ]]; then
+            print_error "Chunk $((chunk + 1)): pulled $pulled bytes, expected $expected"
+            adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+            return 1
+        fi
+
+        adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+        print_success "Chunk $((chunk + 1)) complete ($(human_size "$pulled"))"
     done
 
     # Combine chunks
     print_status "Combining chunks..."
     cat backup_chunk_*.img > full-system-backup.img
 
-    if [[ -s "full-system-backup.img" ]]; then
-        local final_size
-        final_size=$(stat -f%z full-system-backup.img 2>/dev/null || stat -c%s full-system-backup.img 2>/dev/null)
-        print_success "Combined backup: $(human_size "$final_size")"
-        rm -f backup_chunk_*.img
-        return 0
+    # Only now is it safe to drop the chunks. Deleting them before this check
+    # destroys the only evidence of what actually came off the device.
+    local final_size
+    final_size=$(local_size full-system-backup.img)
+    if [[ "$final_size" -ne "$device_size" ]]; then
+        print_error "Combined image is $final_size bytes, device is $device_size bytes"
+        print_error "Chunk files kept for inspection: backup_chunk_*.img"
+        return 1
     fi
 
-    print_error "Failed to combine chunks"
-    return 1
+    print_success "Combined backup: $(human_size "$final_size")"
+    rm -f backup_chunk_*.img
+    return 0
 }
 
 backup_full_device_direct() {
@@ -163,38 +207,56 @@ backup_full_device_direct() {
     print_status "Creating full backup on device storage..."
     print_warning "This will take 20-60 minutes"
 
-    # Start backup in background
-    adb shell "su -c 'dd if=$DEVICE_BLOCK of=/sdcard/full_backup.img bs=$DD_BLOCK_SIZE'" &
-    local pid=$!
+    # Report progress from a side process while dd runs in the foreground, so
+    # the dd's own exit status stays reachable.
+    (
+        while true; do
+            sleep 30
+            cur=$(adb_remote_size /sdcard/full_backup.img)
+            if [[ "$cur" -gt 0 ]]; then
+                print_status "Progress: $(human_size "$cur") / $(human_size "$device_size") ($((cur * 100 / device_size))%)"
+            fi
+        done
+    ) &
+    local monitor_pid=$!
 
-    # Monitor progress
-    while kill -0 $pid 2>/dev/null; do
-        local current
-        current=$(adb shell ls -l /sdcard/full_backup.img 2>/dev/null | awk '{print $5}')
-        if [[ "${current:-0}" -gt 0 ]]; then
-            local pct=$((current * 100 / device_size))
-            print_status "Progress: $(human_size "$current") / $(human_size "$device_size") (${pct}%)"
-        fi
-        sleep 30
-    done
-    wait $pid
+    local dd_out rc=0
+    dd_out=$(adb_root_exec "dd if=$DEVICE_BLOCK of=/sdcard/full_backup.img bs=$DD_BLOCK_SIZE") || rc=$?
 
-    # Pull the backup
-    local final_size
-    final_size=$(adb shell ls -l /sdcard/full_backup.img 2>/dev/null | awk '{print $5}')
+    kill "$monitor_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
 
-    if [[ "${final_size:-0}" -gt 0 ]]; then
-        print_status "Pulling backup from device..."
-        if adb pull /sdcard/full_backup.img full-system-backup.img 2>/dev/null; then
-            adb shell rm -f /sdcard/full_backup.img
-            print_success "Full backup complete: $(human_size "$final_size")"
-            return 0
-        fi
+    if [[ "$rc" -ne 0 ]]; then
+        print_error "Full backup: dd failed on device"
+        [[ -n "$dd_out" ]] && echo "$dd_out" >&2
+        adb shell "rm -f /sdcard/full_backup.img" >/dev/null 2>&1
+        return 1
     fi
 
-    adb shell rm -f /sdcard/full_backup.img 2>/dev/null
-    print_error "Full backup failed"
-    return 1
+    local remote_size
+    remote_size=$(adb_remote_size /sdcard/full_backup.img)
+    if [[ "$remote_size" -ne "$device_size" ]]; then
+        print_error "Device copy is $remote_size bytes, expected $device_size"
+        adb shell "rm -f /sdcard/full_backup.img" >/dev/null 2>&1
+        return 1
+    fi
+
+    print_status "Pulling backup from device..."
+    if ! adb pull /sdcard/full_backup.img full-system-backup.img >/dev/null 2>&1; then
+        print_error "Failed to pull backup from device"
+        return 1
+    fi
+
+    local pulled
+    pulled=$(local_size full-system-backup.img)
+    if [[ "$pulled" -ne "$device_size" ]]; then
+        print_error "Pulled image is $pulled bytes, expected $device_size"
+        return 1
+    fi
+
+    adb shell "rm -f /sdcard/full_backup.img" >/dev/null 2>&1
+    print_success "Full backup complete: $(human_size "$pulled")"
+    return 0
 }
 
 create_restore_scripts() {
@@ -243,8 +305,29 @@ case "$choice" in
         ;;
     4)
         echo -e "${RED}WARNING: This will overwrite EVERYTHING${NC}"
+
+        # Refuse to write a short image over the whole device -- that is the
+        # one action that turns a bad backup into a dead projector.
+        if [[ ! -f full-system-backup.img ]]; then
+            echo -e "${RED}No full-system-backup.img here${NC}"
+            exit 1
+        fi
+        expected=$(grep '^device_size=' backup-manifest.txt 2>/dev/null | cut -d= -f2)
+        actual=$(stat -f%z full-system-backup.img 2>/dev/null || stat -c%s full-system-backup.img 2>/dev/null)
+        if [[ -z "$expected" ]]; then
+            echo -e "${RED}No backup-manifest.txt - cannot confirm this image is complete.${NC}"
+            echo "Refusing to restore. Verify the image by hand first."
+            exit 1
+        fi
+        if [[ "$actual" != "$expected" ]]; then
+            echo -e "${RED}Image is $actual bytes, manifest says $expected - TRUNCATED.${NC}"
+            echo "Restoring it would overwrite the device with an incomplete copy."
+            exit 1
+        fi
+        echo -e "${GREEN}Image verified: $actual bytes${NC}"
+
         read -p "Type RESTORE to confirm: " confirm
-        if [[ "$confirm" == "RESTORE" && -f full-system-backup.img ]]; then
+        if [[ "$confirm" == "RESTORE" ]]; then
             echo "Starting full restore..."
             adb push full-system-backup.img /sdcard/ || {
                 echo "Streaming restore..."
@@ -271,17 +354,26 @@ EOF
 }
 
 verify_backup() {
+    local device_size="$1"
+
     print_section "VERIFICATION"
 
     local backup_ok=true
 
-    if [[ -s full-system-backup.img ]]; then
-        local size
-        size=$(stat -f%z full-system-backup.img 2>/dev/null || stat -c%s full-system-backup.img 2>/dev/null)
-        print_success "Full backup: $(human_size "$size")"
-    else
+    # Size against the device, not merely "non-empty". A third of an image is
+    # non-empty and will happily brick the projector on restore.
+    local size
+    size=$(local_size full-system-backup.img)
+    if [[ "$size" -eq 0 ]]; then
         print_error "Full backup: MISSING"
         backup_ok=false
+    elif [[ "$size" -ne "$device_size" ]]; then
+        print_error "Full backup: $(human_size "$size") but device is $(human_size "$device_size") - TRUNCATED"
+        print_error "  got      $size bytes"
+        print_error "  expected $device_size bytes"
+        backup_ok=false
+    else
+        print_success "Full backup: $(human_size "$size") (matches device exactly)"
     fi
 
     [[ -s system.img ]] && print_success "System partition: $(du -h system.img | cut -f1)" || print_warning "System partition: not available"
@@ -290,10 +382,16 @@ verify_backup() {
 
     echo
     if [[ "$backup_ok" == true ]]; then
+        # The manifest is what UNLOCK.sh's require_backup checks. Writing it
+        # only here means a failed run can never vouch for its own output.
+        write_backup_manifest "$device_size" "$DEVICE_BLOCK" "$BACKUP_METHOD"
         echo -e "${GREEN}BACKUP COMPLETE - Safe to proceed with modifications${NC}"
-    else
-        echo -e "${RED}BACKUP INCOMPLETE - Do NOT modify system${NC}"
+        return 0
     fi
+
+    rm -f "$MANIFEST_NAME"
+    echo -e "${RED}BACKUP INCOMPLETE - Do NOT modify system${NC}"
+    return 1
 }
 
 # ============================================================================
@@ -315,9 +413,7 @@ main() {
     # Get device info
     print_status "Getting device information..."
     local device_size
-    device_size=$(get_device_size)
-
-    if [[ "$device_size" -eq 0 ]]; then
+    if ! device_size=$(get_device_size); then
         print_error "Could not determine device size"
         exit 1
     fi
@@ -341,23 +437,29 @@ main() {
 
     local free_space
     free_space=$(get_device_free_space)
+    [[ "$free_space" =~ ^[0-9]+$ ]] || free_space=0
 
+    # Recorded in the manifest so a restore knows how the image was assembled.
     if [[ "$device_size" -gt "$free_space" ]]; then
         print_warning "Device space limited - using chunked backup"
-        backup_full_device_chunked "$device_size"
+        BACKUP_METHOD=chunked
+        backup_full_device_chunked "$device_size" || true
     else
-        backup_full_device_direct "$device_size"
+        BACKUP_METHOD=direct
+        backup_full_device_direct "$device_size" || true
     fi
 
     # Phase 5: Create restore scripts
     create_restore_scripts
 
-    # Phase 6: Verification
-    verify_backup
+    # Phase 6: Verification -- the single place that decides pass/fail
+    local verdict=0
+    verify_backup "$device_size" || verdict=1
 
     echo
     print_status "Backup location: $(pwd)"
     echo
+    return "$verdict"
 }
 
 main "$@"

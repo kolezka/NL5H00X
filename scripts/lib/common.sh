@@ -2,8 +2,10 @@
 # Common functions for Android Projector Toolkit scripts
 # Source this file: source "$(dirname "$0")/lib/common.sh"
 
-# Prevent multiple inclusion
-[[ -n "$_COMMON_SH_LOADED" ]] && return 0
+# Prevent multiple inclusion. The :- default is required: every entry script
+# enables `set -u` before sourcing this file, so a bare $_COMMON_SH_LOADED
+# aborts the script here on first load, before anything runs.
+[[ -n "${_COMMON_SH_LOADED:-}" ]] && return 0
 _COMMON_SH_LOADED=1
 
 # ============================================================================
@@ -68,19 +70,28 @@ check_device_connected() {
     return 0
 }
 
-# Check if device has root access
+# Which su invocation this device accepts: "direct" (su -c 'cmd') or
+# "piped" (echo cmd | su). Probed by check_root_access, consumed by
+# adb_root_exec. Empty means root has not been established yet.
+SU_MODE=""
+
+# Check if device has root access, and remember which su form worked.
 check_root_access() {
     local result
+
     result=$(adb shell "su -c 'whoami'" 2>/dev/null | tr -d '\r\n')
-
-    # Try alternative method if first fails
-    if [[ "$result" != "root" ]]; then
-        result=$(adb shell "echo 'whoami' | su" 2>/dev/null | tr -d '\r\n')
-    fi
-
     if [[ "$result" == "root" ]]; then
+        SU_MODE="direct"
         return 0
     fi
+
+    result=$(adb shell "echo 'whoami' | su" 2>/dev/null | tr -d '\r\n')
+    if [[ "$result" == "root" ]]; then
+        SU_MODE="piped"
+        return 0
+    fi
+
+    SU_MODE=""
     return 1
 }
 
@@ -124,11 +135,64 @@ adb_exec() {
     fi
 }
 
-# Execute command as root via ADB
-# Usage: adb_root_exec "command to run as root"
+# Execute a command as root via ADB, returning its TRUE remote exit status.
+#
+# `adb shell` cannot be trusted to propagate the far-side status: on older shell
+# protocols it exits 0 no matter what happened, and `su -c` does not always pass
+# the child's status through either. So the remote status is smuggled back on
+# stdout as a sentinel line and parsed here. Without this, a failed dd looks
+# exactly like a successful one.
+#
+# Usage: output=$(adb_root_exec "command"); rc=$?
 adb_root_exec() {
     local cmd="$1"
-    adb shell "su -c '$cmd'" 2>/dev/null || adb shell "echo '$cmd' | su" 2>/dev/null
+    local raw status
+
+    # The command is embedded in a single-quoted string on the far side; a
+    # literal quote would silently truncate it into something else entirely.
+    if [[ "$cmd" == *"'"* ]]; then
+        print_error "adb_root_exec: command contains a single quote: $cmd"
+        return 125
+    fi
+
+    case "${SU_MODE:-}" in
+        direct) raw=$(adb shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+        piped)  raw=$(adb shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+        *)
+            print_error "adb_root_exec: root not established (require_device true first)"
+            return 125
+            ;;
+    esac
+
+    raw=$(printf '%s' "$raw" | tr -d '\r')
+
+    if [[ "$raw" != *__RC__=* ]]; then
+        print_error "adb_root_exec: device returned no exit status for: $cmd"
+        return 125
+    fi
+
+    status="${raw##*__RC__=}"
+    status="${status%%[!0-9]*}"
+    [[ -n "$status" ]] || return 125
+
+    # Everything ahead of the sentinel is the command's own output.
+    printf '%s' "${raw%__RC__=*}"
+    return "$status"
+}
+
+# Size of a file on the device, or 0 if absent. Never fails the caller.
+adb_remote_size() {
+    local path="$1"
+    local out
+    out=$(adb shell "ls -l $path" 2>/dev/null | tr -d '\r' | awk 'NR==1 {print $5}')
+    [[ "$out" =~ ^[0-9]+$ ]] && echo "$out" || echo 0
+}
+
+# Size of a local file, or 0 if absent. Portable across BSD and GNU stat.
+local_size() {
+    local path="$1"
+    [[ -f "$path" ]] || { echo 0; return; }
+    stat -f%z "$path" 2>/dev/null || stat -c%s "$path" 2>/dev/null || echo 0
 }
 
 # Start an Android activity
@@ -161,39 +225,94 @@ adb_start_action() {
 # BACKUP HELPER FUNCTIONS
 # ============================================================================
 
-# Check if a backup directory exists with valid backup
+MANIFEST_NAME="backup-manifest.txt"
+
+# Record what a backup is supposed to contain, so it can be checked later.
+write_backup_manifest() {
+    local device_size="$1"
+    local device_block="$2"
+    local method="$3"
+
+    {
+        echo "device_size=$device_size"
+        echo "device_block=$device_block"
+        echo "method=$method"
+        echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } > "$MANIFEST_NAME"
+}
+
+read_manifest_field() {
+    local dir="$1" field="$2"
+    [[ -f "$dir/$MANIFEST_NAME" ]] || return 1
+    local line
+    line=$(grep "^${field}=" "$dir/$MANIFEST_NAME" 2>/dev/null | head -1) || return 1
+    [[ -n "$line" ]] || return 1
+    echo "${line#*=}"
+}
+
+# A backup is usable only if the image is exactly the size the manifest says
+# the device was. A size-only heuristic (the old ">1GB") passes a backup that
+# stopped a third of the way through, which is the one that bricks the device
+# on restore.
+verify_backup_dir() {
+    local backup_dir="$1"
+    local img="$backup_dir/full-system-backup.img"
+
+    [[ -f "$img" ]] || return 1
+
+    local expected actual
+    expected=$(read_manifest_field "$backup_dir" device_size) || return 2
+    [[ "$expected" =~ ^[0-9]+$ && "$expected" -gt 0 ]] || return 2
+
+    actual=$(local_size "$img")
+    [[ "$actual" -eq "$expected" ]] || return 3
+
+    return 0
+}
+
+# Check if a backup directory exists with a verified-complete backup
 find_backup_dir() {
     local backup_dir
     for backup_dir in projector-backup-*; do
-        if [[ -d "$backup_dir" && -f "$backup_dir/full-system-backup.img" ]]; then
-            local size
-            size=$(stat -f%z "$backup_dir/full-system-backup.img" 2>/dev/null || \
-                   stat -c%s "$backup_dir/full-system-backup.img" 2>/dev/null || echo 0)
-            if [[ "$size" -gt 1000000000 ]]; then  # At least 1GB
-                echo "$backup_dir"
-                return 0
-            fi
+        [[ -d "$backup_dir" ]] || continue
+        if verify_backup_dir "$backup_dir"; then
+            echo "$backup_dir"
+            return 0
         fi
     done
     return 1
 }
 
-# Require backup before proceeding
+# Require a verified backup before proceeding
 require_backup() {
     print_step "Verifying backup exists..."
 
     local backup_dir
     if backup_dir=$(find_backup_dir); then
-        local size_gb
-        size_gb=$(du -h "$backup_dir/full-system-backup.img" | cut -f1)
-        print_success "Found backup: $backup_dir ($size_gb)"
+        print_success "Found verified backup: $backup_dir ($(du -h "$backup_dir/full-system-backup.img" | cut -f1))"
         return 0
     fi
 
-    print_error "No complete backup found!"
+    # Say which way it failed -- "no backup" and "backup is short" need
+    # very different responses from the user.
+    print_error "No verified backup found!"
     echo
-    echo -e "${RED}This script requires a complete device backup.${NC}"
+    for backup_dir in projector-backup-*; do
+        [[ -d "$backup_dir" ]] || continue
+        verify_backup_dir "$backup_dir"
+        case $? in
+            1) print_warning "$backup_dir: no full-system-backup.img" ;;
+            2) print_warning "$backup_dir: no usable $MANIFEST_NAME - cannot verify completeness" ;;
+            3) print_error "$backup_dir: image is $(local_size "$backup_dir/full-system-backup.img") bytes, manifest says $(read_manifest_field "$backup_dir" device_size) - TRUNCATED" ;;
+        esac
+    done
+    echo
+    echo -e "${RED}This script requires a complete, verified device backup.${NC}"
     echo "Run ./MAKE_BACKUP.sh first, then try again."
+    echo
+    echo "A backup made before manifests existed can be vouched for by hand:"
+    echo "  echo 'device_size=<blockdev --getsize64 output>' > <dir>/$MANIFEST_NAME"
+    echo "Only do that if you have independently confirmed the image is complete."
     echo
     exit 1
 }

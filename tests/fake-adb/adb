@@ -1,0 +1,265 @@
+#!/bin/bash
+# Fake adb: simulates an NL5H00X-class Android projector well enough to run
+# the toolkit scripts end to end without hardware.
+#
+# The "device" is a directory tree under $FAKE_ADB_STATE:
+#   blockdev      - a real file standing in for /dev/block/mmcblk0
+#   sdcard/       - stands in for /sdcard
+#
+# Behaviour knobs (env):
+#   FAKE_ADB_STATE        state dir (required)
+#   FAKE_ADB_SU_MODE      direct | piped | none   (default: direct)
+#   FAKE_ADB_PROPAGATE_RC 1 = adb exits with the remote status,
+#                         0 = adb always exits 0 (old shell protocol; default)
+#   FAKE_ADB_TRUNCATE_AT  byte count to truncate every dd output to, simulating
+#                         a short write that dd does not report
+#   FAKE_ADB_FREE_KB      free space on /sdcard in KB (default: tiny, forces
+#                         the chunked path)
+
+set -uo pipefail
+
+STATE="${FAKE_ADB_STATE:?FAKE_ADB_STATE not set}"
+SU_MODE="${FAKE_ADB_SU_MODE:-direct}"
+PROPAGATE_RC="${FAKE_ADB_PROPAGATE_RC:-0}"
+FREE_KB="${FAKE_ADB_FREE_KB:-1024}"
+
+mkdir -p "$STATE/sdcard"
+
+# adb's own exit status. Real adb on older devices returns 0 regardless of what
+# happened on the far side; that is the default here because it is the case the
+# toolkit has to survive.
+finish() {
+    local remote_rc="$1"
+    [[ "$PROPAGATE_RC" == "1" ]] && exit "$remote_rc"
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Remote command dispatch
+# ---------------------------------------------------------------------------
+run_remote() {
+    local cmd="$1"
+
+    case "$cmd" in
+        whoami)
+            echo root
+            return 0
+            ;;
+        "blockdev --getsize64 "*)
+            stat -f%z "$STATE/blockdev" 2>/dev/null || stat -c%s "$STATE/blockdev"
+            return 0
+            ;;
+        "cat /proc/partitions")
+            local sz
+            sz=$(stat -f%z "$STATE/blockdev" 2>/dev/null || stat -c%s "$STATE/blockdev")
+            echo "major minor  #blocks  name"
+            echo " 179        0  $((sz / 1024)) mmcblk0"
+            return 0
+            ;;
+        getprop)
+            echo "[ro.product.model]: [NL5H00X]"
+            echo "[ro.build.version.sdk]: [28]"
+            return 0
+            ;;
+        "pm list packages"*)
+            echo "package:com.newlink.hisilauncher"
+            return 0
+            ;;
+        "cmd package get-home-activity"*)
+            echo "com.newlink.hisilauncher/.MainActivity"
+            return 0
+            ;;
+        "df /sdcard/"*|"df /sdcard")
+            echo "Filesystem  1K-blocks  Used Available Use% Mounted on"
+            echo "/dev/fuse     8000000  1000  $FREE_KB   1% /sdcard"
+            return 0
+            ;;
+        "ls -l "*)
+            local path="${cmd#ls -l }"
+            local local_path="${STATE}${path}"
+            if [[ ! -f "$local_path" ]]; then
+                echo "ls: $path: No such file or directory" >&2
+                return 1
+            fi
+            local sz
+            sz=$(stat -f%z "$local_path" 2>/dev/null || stat -c%s "$local_path")
+            echo "-rw-rw---- 1 root sdcard_rw $sz 2026-07-27 03:00 $(basename "$path")"
+            return 0
+            ;;
+        "rm -f "*)
+            local path="${cmd#rm -f }"
+            rm -f "${STATE}${path}"
+            return 0
+            ;;
+        "dd "*)
+            run_dd "$cmd"
+            return $?
+            ;;
+        "am start"*|"cmd package set-home-activity"*)
+            return 0
+            ;;
+        *)
+            echo "fake-adb: unhandled remote command: $cmd" >&2
+            return 127
+            ;;
+    esac
+}
+
+# Emulate dd against the stand-in block device.
+run_dd() {
+    local cmd="$1"
+    local if_="" of_="" bs=512 skip=0 count=""
+    local tok
+    for tok in $cmd; do
+        case "$tok" in
+            if=*)    if_="${tok#if=}" ;;
+            of=*)    of_="${tok#of=}" ;;
+            bs=*)    bs="${tok#bs=}" ;;
+            skip=*)  skip="${tok#skip=}" ;;
+            count=*) count="${tok#count=}" ;;
+        esac
+    done
+
+    # Map device paths onto the state dir.
+    local src dst
+    case "$if_" in
+        /dev/block/mmcblk0) src="$STATE/blockdev" ;;
+        /dev/block/*)       src="$STATE/blockdev" ;;  # partitions: same backing file
+        *)                  src="${STATE}${if_}" ;;
+    esac
+    dst="${STATE}${of_}"
+
+    if [[ ! -f "$src" ]]; then
+        echo "dd: $if_: No such file or directory" >&2
+        return 1
+    fi
+
+    local args=(if="$src" of="$dst" bs="$bs")
+    [[ "$skip" != "0" ]] && args+=(skip="$skip")
+    [[ -n "$count" ]] && args+=(count="$count")
+
+    if ! dd "${args[@]}" 2>/dev/null; then
+        echo "dd: write error" >&2
+        return 1
+    fi
+
+    # Simulated short write: the data is truncated but dd still reports success.
+    # This is the failure the toolkit must catch on its own.
+    # FAKE_ADB_TRUNCATE_MIN_SKIP delays the fault to a later chunk, so earlier
+    # chunks land intact and the run has partial evidence to preserve.
+    if [[ -n "${FAKE_ADB_TRUNCATE_AT:-}" && -f "$dst" ]] \
+       && [[ "$skip" -ge "${FAKE_ADB_TRUNCATE_MIN_SKIP:-0}" ]]; then
+        local cur
+        cur=$(stat -f%z "$dst" 2>/dev/null || stat -c%s "$dst")
+        if [[ "$cur" -gt "$FAKE_ADB_TRUNCATE_AT" ]]; then
+            local tmp="$dst.trunc"
+            dd if="$dst" of="$tmp" bs=1 count="$FAKE_ADB_TRUNCATE_AT" 2>/dev/null
+            mv "$tmp" "$dst"
+        fi
+    fi
+
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Unwrap the su forms the toolkit uses
+# ---------------------------------------------------------------------------
+unwrap_su() {
+    local shell_cmd="$1"
+
+    # su -c 'CMD'
+    if [[ "$shell_cmd" == "su -c '"* ]]; then
+        [[ "$SU_MODE" == "direct" ]] || return 1
+        local inner="${shell_cmd#su -c \'}"
+        printf '%s' "${inner%\'*}"
+        return 0
+    fi
+
+    # echo 'CMD' | su   (also: { echo 'CMD'; } | su)
+    if [[ "$shell_cmd" == *"| su"* && "$shell_cmd" == "echo '"* ]]; then
+        [[ "$SU_MODE" == "piped" ]] || return 1
+        local inner="${shell_cmd#echo \'}"
+        printf '%s' "${inner%%\'*}"
+        return 0
+    fi
+
+    return 2  # not an su wrapper
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+[[ $# -eq 0 ]] && { echo "fake-adb: no args" >&2; exit 1; }
+
+subcmd="$1"; shift
+
+case "$subcmd" in
+    devices)
+        echo "List of devices attached"
+        echo "FAKE0123456	device"
+        exit 0
+        ;;
+
+    pull)
+        remote="$1"; local_dst="${2:-.}"
+        if [[ ! -f "${STATE}${remote}" ]]; then
+            echo "adb: error: remote object '$remote' does not exist" >&2
+            exit 1
+        fi
+        cp "${STATE}${remote}" "$local_dst"
+        exit 0
+        ;;
+
+    push)
+        cp "$1" "${STATE}${2}"
+        exit 0
+        ;;
+
+    backup)
+        out=""
+        while [[ $# -gt 0 ]]; do
+            [[ "$1" == "-f" ]] && { out="$2"; shift; }
+            shift
+        done
+        [[ -n "$out" ]] && printf 'ANDROID BACKUP\n5\n0\nnone\n' > "$out"
+        exit 0
+        ;;
+
+    reboot)
+        exit 0
+        ;;
+
+    shell)
+        shell_cmd="$*"
+
+        # Strip the exit-status sentinel the toolkit appends, if present.
+        sentinel=0
+        if [[ "$shell_cmd" == *'; echo __RC__=$?' ]]; then
+            sentinel=1
+            shell_cmd="${shell_cmd%'; echo __RC__=$?'}"
+        fi
+        # 2>&1 inside the remote command is for the device's shell, not ours.
+        shell_cmd="${shell_cmd% 2>&1}"
+
+        inner=$(unwrap_su "$shell_cmd")
+        case $? in
+            0) : ;;                       # unwrapped an su form we support
+            1)                            # su form the "device" does not support
+                echo "su: invalid option -- c" >&2
+                [[ "$sentinel" == "1" ]] && echo '__RC__=1'
+                finish 1
+                ;;
+            *) inner="$shell_cmd" ;;      # plain, non-root command
+        esac
+
+        run_remote "$inner"
+        rc=$?
+        [[ "$sentinel" == "1" ]] && echo "__RC__=$rc"
+        finish "$rc"
+        ;;
+
+    *)
+        echo "fake-adb: unhandled subcommand: $subcmd" >&2
+        exit 1
+        ;;
+esac
