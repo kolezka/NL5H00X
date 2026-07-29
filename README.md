@@ -22,16 +22,41 @@ Fixes Android projectors that won't let you install apps or change launchers. Cr
 ## Quick Start
 
 ```bash
-# 1. Look around. Read-only, no root, safe to run any time.
-./scripts/TOOLS.sh
+./scripts/PROJECTOR.sh
+```
 
-# 2. Back up the whole device. Takes ~15 min and is not optional --
-#    the unlock refuses to run without a verified backup.
-./scripts/MAKE_BACKUP.sh
+That is the whole thing. It finds the projector, shows what state it is in, and
+walks you through backup → verify → unlock, with a progress bar for the 15-minute
+backup. Nothing is done without asking.
 
-# 3. Unlock the launcher. Start with --status; it changes nothing.
-./scripts/UNLOCK.sh --status
-./scripts/UNLOCK.sh
+```
+  NL5H00X Projector Toolkit
+  -----------------------------------------------------------
+  device       NL5H00X_TP   root: yes
+  backup       verified  7.65 GB   projector-backup-20260728_054611
+  launcher     locked     stock launcher
+  -----------------------------------------------------------
+
+  [1] Back up the device again  ~13 min
+  [2] Unlock the launcher
+  [3] Restore the stock launcher
+  [4] Detailed unlock state
+  [5] Refresh
+  [q] Quit
+
+  > 1
+
+  [#################...........]  62%  4.74 GB / 7.65 GB   10.4 MB/s  stalls killed: 3
+```
+
+The individual scripts still work on their own if you prefer them, or want to
+script against them:
+
+```bash
+./scripts/TOOLS.sh               # read-only, no root, safe any time
+./scripts/MAKE_BACKUP.sh         # full device image, resumable
+./scripts/UNLOCK.sh --status     # what is applied; changes nothing
+./scripts/UNLOCK.sh --apply-all
 ```
 
 ## Unlocking the launcher
@@ -82,6 +107,7 @@ Restart the projector afterwards for the new home screen to appear.
 
 | Script | Purpose | Root Required |
 |--------|---------|---------------|
+| [`PROJECTOR.sh`](scripts/PROJECTOR.sh) | **Start here** — guided interface over everything below | Depends |
 | [`TOOLS.sh`](scripts/TOOLS.sh) | Access hidden features and settings | No |
 | [`MAKE_BACKUP.sh`](scripts/MAKE_BACKUP.sh) | Create complete device backup | Yes |
 | [`UNLOCK.sh`](scripts/UNLOCK.sh) | Replace the locked stock launcher | Yes |
@@ -104,6 +130,7 @@ Restart the projector afterwards for the new home screen to appear.
 
 ```
 scripts/
+  PROJECTOR.sh          # Guided interface -- start here
   TOOLS.sh              # Access hidden features
   MAKE_BACKUP.sh        # Complete device backup
   UNLOCK.sh             # Launcher unlock, interactive CLI
