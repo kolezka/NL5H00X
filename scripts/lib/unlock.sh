@@ -134,22 +134,45 @@ launcher_apk() {
     return 1
 }
 
-system_is_rw() {
-    adb_root_exec "mount" 2>/dev/null | grep -q '/system.*[( ,]rw'
+# The mountpoint that has to be remounted in order to write /system.
+#
+# This projector is system-as-root (ro.build.system_root_image=true): /system is
+# a plain directory on the root filesystem, not a mount of its own, and
+# `mount -o remount,rw /system` answers "mount: '/system' not in /proc/mounts".
+# The mountpoint to remount is / instead. Older layouts do have a separate
+# /system, so this asks /proc/mounts rather than assuming either shape.
+system_mountpoint() {
+    if adb_root_exec "cat /proc/mounts" 2>/dev/null | tr -d '\r' \
+        | awk '$2 == "/system" { found = 1 } END { exit !found }'; then
+        echo /system
+    else
+        echo /
+    fi
 }
 
-# Remount /system writable, verifying it actually took. Callers must pair this
-# with system_ro when they are done.
+# /proc/mounts rather than `mount`: the options field is positional there, so
+# "rw" cannot be matched out of a device name or a path that happens to contain
+# it. The old check grepped '/system.*[( ,]rw' against `mount` output.
+system_is_rw() {
+    local mp; mp=$(system_mountpoint)
+    adb_root_exec "cat /proc/mounts" 2>/dev/null | tr -d '\r' \
+        | awk -v mp="$mp" '$2 == mp && $4 ~ /^rw(,|$)/ { found = 1 } END { exit !found }'
+}
+
+# Remount writable, verifying it actually took. Callers must pair this with
+# system_ro when they are done.
 system_rw() {
     system_is_rw && return 0
-    adb_root_exec "mount -o remount,rw /system" >/dev/null || true
+    local mp; mp=$(system_mountpoint)
+    adb_root_exec "mount -o remount,rw $mp" >/dev/null || true
     if system_is_rw; then return 0; fi
-    print_error "Could not remount /system read-write"
+    print_error "Could not remount $mp read-write"
     return 1
 }
 
 system_ro() {
-    adb_root_exec "mount -o remount,ro /system" >/dev/null 2>&1 || true
+    local mp; mp=$(system_mountpoint)
+    adb_root_exec "mount -o remount,ro $mp" >/dev/null 2>&1 || true
 }
 
 # ---------------------------------------------------------------------------
@@ -240,15 +263,29 @@ launcher_present_apply() {
     print_warning "The device refused a normal install: $(echo "$out" | grep -oE 'Failure \[[A-Z_]+\]' | head -1)"
     print_status "Falling back to $LAUNCHER_SYSTEM_DIR, which is how this device accepts apps"
 
-    system_rw || return 1
-    adb_root_exec "mkdir -p $LAUNCHER_SYSTEM_DIR" >/dev/null || true
-    if ! adb push "$apk" "$LAUNCHER_SYSTEM_DIR/$(basename "$LAUNCHER_SYSTEM_DIR").apk" >/dev/null 2>&1; then
-        print_error "Could not copy the launcher into $LAUNCHER_SYSTEM_DIR"
-        system_ro
+    # Staged through /data/local/tmp on purpose. `adb push` runs as the shell
+    # user, which cannot write /system even once it is mounted rw -- only the
+    # su side can -- so pushing straight to /system/app fails on a device where
+    # `adb root` is unavailable, which is every Magisk-rooted one.
+    local staged="/data/local/tmp/$(basename "$apk")"
+    local dest="$LAUNCHER_SYSTEM_DIR/$(basename "$LAUNCHER_SYSTEM_DIR").apk"
+
+    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
+        print_error "Could not stage the launcher to $staged"
         return 1
     fi
-    adb_root_exec "chmod 644 $LAUNCHER_SYSTEM_DIR/$(basename "$LAUNCHER_SYSTEM_DIR").apk" >/dev/null || true
+
+    system_rw || { adb_root_exec "rm -f $staged" >/dev/null 2>&1; return 1; }
+    adb_root_exec "mkdir -p $LAUNCHER_SYSTEM_DIR" >/dev/null || true
+    adb_root_exec "cp $staged $dest" >/dev/null || true
+    adb_root_exec "chmod 644 $dest" >/dev/null || true
     system_ro
+    adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
+
+    if ! adb_root_exec "ls -d $dest" >/dev/null 2>&1; then
+        print_error "Could not copy the launcher into $LAUNCHER_SYSTEM_DIR"
+        return 1
+    fi
 
     print_warning "$LAUNCHER_NAME will only register after a restart - rerun this afterwards"
     return 1

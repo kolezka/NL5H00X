@@ -252,9 +252,10 @@ dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
     && bad "disabled the stock launcher despite an incomplete install" \
     || ok "stock launcher left alone"
 
-# /system must not be left writable
-dev "$sb" 'mount' | grep -E ' /system ' | grep -q 'ro' \
-    && ok "/system put back read-only" || bad "/system left writable"
+# The filesystem holding /system must not be left writable. On this device that
+# is / -- it is system-as-root, so /system is never its own mount.
+dev "$sb" 'cat /proc/mounts' | awk '$2 == "/" && $4 ~ /^ro(,|$)/ { f = 1 } END { exit !f }' \
+    && ok "/ put back read-only" || bad "/ left writable"
 rm -rf "$sb"
 
 # ---------------------------------------------------------------------------

@@ -160,13 +160,23 @@ run_remote() {
             set -- $cmd; setting_get "$3" "$4"; return 0 ;;
 
         # --- mount ------------------------------------------------------
-        "mount -o remount,rw /system"|"mount -o rw,remount /system")
-            # Real remount needs root; without it the device refuses.
+        # System-as-root, like the real device: /system is a directory on /,
+        # not a mount of its own, so it never appears in /proc/mounts and the
+        # remount has to target /. A toolkit that remounts /system gets the
+        # device's actual answer here instead of a helpful fiction.
+        "mount -o remount,rw /"|"mount -o rw,remount /")
             echo rw > "$STATE/mount_system"; return 0 ;;
-        "mount -o remount,ro /system"|"mount -o ro,remount /system")
+        "mount -o remount,ro /"|"mount -o ro,remount /")
             echo ro > "$STATE/mount_system"; return 0 ;;
+        "mount -o remount,rw /system"|"mount -o rw,remount /system"|\
+        "mount -o remount,ro /system"|"mount -o ro,remount /system")
+            echo "mount: '/system' not in /proc/mounts" >&2; return 1 ;;
+        "cat /proc/mounts")
+            echo "/dev/root / ext4 $(sget mount_system ro),seclabel,relatime 0 0"
+            echo "/dev/block/platform/soc/f9830000.emmc/by-name/userdata /data ext4 rw,seclabel,nosuid 0 0"
+            return 0 ;;
         "mount")
-            echo "/dev/block/mmcblk0p20 /system ext4 $(sget mount_system ro),seclabel 0 0"; return 0 ;;
+            echo "/dev/root / ext4 $(sget mount_system ro),seclabel 0 0"; return 0 ;;
 
         # --- SELinux ----------------------------------------------------
         "setenforce 0") echo Permissive > "$STATE/selinux"; return 0 ;;

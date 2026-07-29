@@ -15,7 +15,7 @@ STATE="${1:?usage: seed.sh <state-dir> [profile]}"
 PROFILE="${2:---locked}"
 
 rm -rf "$STATE"
-mkdir -p "$STATE"/{sdcard,system/app,system/priv-app,data}
+mkdir -p "$STATE"/{sdcard,system/app,system/priv-app,data,data/local/tmp}
 
 # ---------------------------------------------------------------------------
 # Properties (verbatim from system/build.prop in the pulled image)
