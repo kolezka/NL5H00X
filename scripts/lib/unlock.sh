@@ -47,8 +47,36 @@ setting() {
     echo "$out"
 }
 
+# The home activity currently preferred by the system.
+#
+# `cmd package get-home-activity` DOES NOT EXIST on API 28 -- it answers
+# "Unknown command: get-home-activity", and because that was never checked the
+# status screen cheerfully printed "home screen now: Unknowncommand:get-home-activity".
+# `set-home-activity` does exist, so the write path was fine and only the read
+# path was fiction. Measured on the device 2026-07-29.
+#
+# What it writes lands in the preferred-activity table, so that is where it has
+# to be read from: find the component whose filter carries CATEGORY_HOME and is
+# pinned with mAlways=true.
 home_activity() {
-    adb_root_exec "cmd package get-home-activity" | tr -d ' \r\n'
+    adb_root_exec "dumpsys package preferred-activities" 2>/dev/null | tr -d '\r' | awk '
+        /^[[:space:]]+[0-9a-f]+ [A-Za-z0-9_.]+\// { comp = $2; always = 0 }
+        /mAlways=true/                            { always = 1 }
+        /android\.intent\.category\.HOME/         { if (always && comp != "") { print comp; exit } }
+    '
+}
+
+# The component a given package registers for HOME.
+#
+# Never hardcode this. The stock launcher's HOME entry is .WizardAciticity --
+# their spelling, not a typo here -- while the activity you actually see is
+# .MainActivity, which carries no HOME filter at all. --revert pointed
+# set-home-activity at .MainActivity, so the way back would have failed on the
+# first device it was ever tried on.
+home_component_of() {
+    local pkg="$1"
+    adb_root_exec "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
+        | tr -d '\r' | grep -oE "${pkg//./[.]}/[A-Za-z0-9_.$]+" | head -1
 }
 
 package_installed() {
@@ -66,17 +94,10 @@ package_path() {
         | sed -n "s|^package:\(.*\)=$1\$|\1|p" | head -1
 }
 
-# The component that actually handles HOME for our launcher.
-#
-# Activity names move between launcher releases -- Projectivy's is not the same
-# string across its 4.x line -- so this asks the device rather than hardcoding
-# one. Empty means the package registers no home activity at all, which is the
-# honest answer and far better than guessing a component that set-home-activity
-# would quietly refuse.
-launcher_component() {
-    adb_root_exec "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
-        | tr -d '\r' | grep -oE "${LAUNCHER_PKG//./[.]}/[A-Za-z0-9_.$]+" | head -1
-}
+# The component that actually handles HOME for our launcher. Empty means the
+# package registers no home activity at all, which is the honest answer and far
+# better than guessing a component set-home-activity would quietly refuse.
+launcher_component() { home_component_of "$LAUNCHER_PKG"; }
 
 # Prove the replacement launcher works before anything relies on it.
 #
@@ -298,8 +319,21 @@ launcher_default_apply() {
 }
 
 launcher_default_revert() {
+    # Re-enable first: a disabled package registers no activities, so the
+    # component lookup below would come back empty.
     adb_root_exec "pm enable $STOCK_LAUNCHER" >/dev/null || true
-    adb_root_exec "cmd package set-home-activity $STOCK_LAUNCHER/.MainActivity" >/dev/null || true
+    if package_disabled "$STOCK_LAUNCHER"; then
+        print_error "Could not re-enable $STOCK_LAUNCHER"
+        return 1
+    fi
+
+    local comp; comp=$(home_component_of "$STOCK_LAUNCHER")
+    if [[ -z "$comp" ]]; then
+        print_error "$STOCK_LAUNCHER registers no home activity to restore to"
+        return 1
+    fi
+
+    adb_root_exec "cmd package set-home-activity $comp" >/dev/null || true
     local home; home=$(home_activity)
     if [[ "$home" != "$STOCK_LAUNCHER"* ]]; then
         print_error "Could not restore the stock launcher (home is '$home')"

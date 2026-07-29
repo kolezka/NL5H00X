@@ -88,8 +88,17 @@ reset_default_launcher() {
         echo "  which re-enables it first and then verifies the home screen."
         return 1
     fi
-    run_adb_command "cmd package set-home-activity $STOCK_LAUNCHER_PKG/.MainActivity" \
-                    "Reset to Default Launcher"
+    # Not .MainActivity. That is the activity you see, but the one carrying the
+    # HOME filter is .WizardAciticity (their spelling), so set-home-activity
+    # against .MainActivity is rejected. Ask the device rather than guess.
+    local comp
+    comp=$(adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
+           | tr -d '\r' | grep -oE "$STOCK_LAUNCHER_PKG/[A-Za-z0-9_.]+" | head -1)
+    if [[ -z "$comp" ]]; then
+        print_warning "The stock launcher registers no home activity on this device"
+        return 1
+    fi
+    run_adb_command "cmd package set-home-activity $comp" "Reset to Default Launcher"
 }
 
 # These read an array whose name is in a variable. `local -n` would be the

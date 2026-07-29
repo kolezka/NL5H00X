@@ -77,7 +77,7 @@ EOF
 # ---------------------------------------------------------------------------
 # Mutable device state
 # ---------------------------------------------------------------------------
-echo "com.newlink.hisilauncher/.MainActivity" > "$STATE/home_activity"
+echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
 echo "ro"        > "$STATE/mount_system"     # /system starts read-only
 echo "Enforcing" > "$STATE/selinux"
 echo "0"         > "$STATE/reboots"
@@ -88,8 +88,10 @@ echo "0"         > "$STATE/reboots"
 # still boots the stock one. Projectivy is deliberately absent; installing it
 # is the unlock's job.
 cat > "$STATE/home_activities" <<'EOF'
-com.newlink.hisilauncher/.MainActivity
-com.teslacoilsw.launcher/com.teslacoilsw.launcher.NovaLauncher
+com.newlink.hisilauncher/.WizardAciticity
+com.newlink.wtprovision/.MainActivity
+com.teslacoilsw.launcher/.NovaLauncher
+com.android.tv.settings/.system.FallbackHome
 EOF
 
 # Processes. Only the stock launcher is up on a freshly booted device.

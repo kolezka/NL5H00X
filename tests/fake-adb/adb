@@ -263,8 +263,26 @@ run_remote() {
             pkg_enabled "$pkg" || { echo "Error: package $pkg is disabled" >&2; return 1; }
             echo "$comp" > "$STATE/home_activity"
             echo Success; return 0 ;;
+        # API 28 HAS NO get-home-activity. Measured on the device 2026-07-29:
+        # it answers exactly this, and set-home-activity works fine. The
+        # emulator used to answer the question helpfully, so code that read a
+        # command the hardware does not have looked correct here and printed
+        # "Unknowncommand:get-home-activity" as the home screen on the device.
         "cmd package get-home-activity"*)
-            sget home_activity "com.newlink.hisilauncher/.MainActivity"; return 0 ;;
+            echo "Unknown command: get-home-activity"; return 0 ;;
+        "dumpsys package preferred-activities"*)
+            # The shape the real dumpsys emits, which is where the preferred
+            # home actually has to be read from on this API level.
+            local ha; ha=$(sget home_activity "com.newlink.hisilauncher/.WizardAciticity")
+            echo "Preferred Activities User 0:"
+            echo "  Non-Data Actions:"
+            echo "      android.intent.action.MAIN:"
+            echo "        bb697d9 $ha"
+            echo "         mMatch=0x100000 mAlways=true"
+            echo "          Action: \"android.intent.action.MAIN\""
+            echo "          Category: \"android.intent.category.HOME\""
+            echo "          Category: \"android.intent.category.DEFAULT\""
+            return 0 ;;
 
         # --- existence checks --------------------------------------------
         "ls -d "*)
@@ -302,7 +320,16 @@ run_remote() {
             return 0
             ;;
         "cmd package get-home-activity"*)
-            echo "com.newlink.hisilauncher/.MainActivity"
+            echo "Unknown command: get-home-activity"
+            return 0
+            ;;
+        "dumpsys package preferred-activities"*)
+            echo "Preferred Activities User 0:"
+            echo "  Non-Data Actions:"
+            echo "      android.intent.action.MAIN:"
+            echo "        bb697d9 com.newlink.hisilauncher/.WizardAciticity"
+            echo "         mMatch=0x100000 mAlways=true"
+            echo "          Category: \"android.intent.category.HOME\""
             return 0
             ;;
         "df /sdcard/"*|"df /sdcard")
@@ -562,7 +589,7 @@ case "$subcmd" in
         # this is the line to change -- and the unlock's "disable the stock
         # launcher" step is what makes it robust either way.
         if [[ -f "$STATE/home_activity" ]] && pkg_enabled com.newlink.hisilauncher; then
-            echo "com.newlink.hisilauncher/.MainActivity" > "$STATE/home_activity"
+            echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
         fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
         # Nothing survives a restart except what the system brings back up: the

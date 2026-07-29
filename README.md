@@ -221,9 +221,15 @@ assets/
 ./scripts/UNLOCK.sh --revert
 
 # By hand, if you cannot run the script. Note that this alone does not
-# survive a reboot while the stock launcher is disabled:
+# survive a reboot while the stock launcher is disabled.
+#
+# The component is .WizardAciticity, spelled exactly like that in the firmware.
+# .MainActivity is the screen you actually see, but it carries no HOME filter,
+# so set-home-activity rejects it. Ask the device rather than trusting either:
 adb shell 'echo "pm enable com.newlink.hisilauncher" | su'
-adb shell cmd package set-home-activity com.newlink.hisilauncher/.MainActivity
+adb shell cmd package query-activities --brief \
+  -a android.intent.action.MAIN -c android.intent.category.HOME
+adb shell cmd package set-home-activity com.newlink.hisilauncher/.WizardAciticity
 ```
 
 Full restore from the image is a different matter. `RESTORE.sh` is **generated

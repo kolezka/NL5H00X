@@ -59,6 +59,7 @@ dev() { # run a command on the emulated device
     local sb="$1"; shift
     PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" adb shell "$@" 2>/dev/null | tr -d '\r'
 }
+home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
 reboot_dev() { PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$1/state" adb reboot >/dev/null 2>&1; }
 
 STOCK=com.newlink.hisilauncher
@@ -69,7 +70,7 @@ PROJECTIVY=com.spocky.projengmenu
 head_ "the device starts locked, exactly as the real one does"
 
 sb=$(new_sandbox)
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "home screen is the stock launcher" || bad "unexpected home: $home"
 
 # Nova is already in /system/app on the real device and it changes nothing --
@@ -114,7 +115,7 @@ if [[ "$out" != *"RC=0"* ]] && [[ "$out" == *"backup"* ]]; then
 else
     bad "ran without a backup"
 fi
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "device untouched after refusal" || bad "device changed despite refusal"
 rm -rf "$sb"
 
@@ -144,7 +145,7 @@ out=$(unlock "$sb" --apply-all --yes)
 dev "$sb" 'pm list packages -f' | grep -q "=$PROJECTIVY\$" \
     && ok "Projectivy was installed" || bad "Projectivy is not installed"
 
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 [[ "$home" == "$PROJECTIVY"* ]] && ok "home screen is Projectivy" || bad "home is '$home'"
 
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
@@ -153,7 +154,7 @@ dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
 # The decisive one. Setting the home activity alone reverts on boot while the
 # stock launcher is enabled -- that is why Nova sat unused since July.
 reboot_dev "$sb"
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 [[ "$home" == "$PROJECTIVY"* ]] && ok "still Projectivy after a restart" || bad "reverted to '$home' after restart"
 rm -rf "$sb"
 
@@ -173,11 +174,11 @@ out=$(unlock "$sb" FAKE_ADB_LAUNCHER_CRASHES=1 --apply-all --yes)
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
     && bad "stock launcher was disabled anyway" || ok "stock launcher left enabled"
 
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "home screen still works" || bad "user left with home='$home'"
 
 reboot_dev "$sb"
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "and still works after a restart" || bad "home drifted to '$home' after restart"
 rm -rf "$sb"
 
@@ -202,12 +203,12 @@ sb=$(new_sandbox)
 unlock "$sb" --apply-all --yes >/dev/null
 out=$(unlock "$sb" --revert --yes)
 
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "home screen is the stock launcher again" || bad "home is '$home'"
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
     && bad "stock launcher left disabled" || ok "stock launcher re-enabled"
 reboot_dev "$sb"
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "still stock after a restart" || bad "home drifted to '$home'"
 rm -rf "$sb"
 
@@ -218,7 +219,7 @@ head_ "a device that will not let go of its launcher fails safely"
 
 sb=$(new_sandbox)
 unlock "$sb" FAKE_ADB_REFUSE_DISABLE=1 --apply-all --yes >/dev/null 2>&1
-home=$(dev "$sb" 'cmd package get-home-activity')
+home=$(home_now "$sb")
 if [[ "$home" == "$STOCK"* ]]; then
     ok "left the stock launcher working when it could not be disabled"
 else

@@ -42,6 +42,7 @@ ui() {
       PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" "$@" \
         /bin/bash "$SCRIPTS/$script" <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 }
+home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
 dev() { PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$1/state" adb shell "$2" 2>/dev/null | tr -d '\r'; }
 
 # ---------------------------------------------------------------------------
@@ -106,13 +107,13 @@ fi
 echo "$out" | grep -q 'UNLOCK.sh --revert' \
     && ok "points at the command that actually works" \
     || bad "does not say what to do instead"
-[[ "$(dev "$sb" 'cmd package get-home-activity')" == "$PROJECTIVY"* ]] \
+[[ "$(home_now "$sb")" == "$PROJECTIVY"* ]] \
     && ok "home screen left alone" || bad "home screen changed unexpectedly"
 
 ( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
     bash "$SCRIPTS/UNLOCK.sh" --revert --yes >/dev/null 2>&1 )
 out=$(ui "$sb" TOOLS.sh $'19\n\nq\n')
-[[ "$(dev "$sb" 'cmd package get-home-activity')" == "$STOCK"* ]] \
+[[ "$(home_now "$sb")" == "$STOCK"* ]] \
     && ok "works normally once the stock launcher is enabled" \
     || bad "could not reset the launcher even when enabled"
 rm -rf "$sb"
@@ -147,7 +148,7 @@ if echo "$out" | grep -qi 'verified backup is required'; then
 else
     bad "did not refuse"
 fi
-[[ "$(dev "$sb" 'cmd package get-home-activity')" == "$STOCK"* ]] \
+[[ "$(home_now "$sb")" == "$STOCK"* ]] \
     && ok "device untouched" || bad "device changed despite refusal"
 rm -rf "$sb"
 
@@ -158,7 +159,7 @@ sb=$(new_sandbox); add_backup "$sb"
 out=$(ui "$sb" PROJECTOR.sh $'2\ny\n\nq\n')
 echo "$out" | grep -q 'All steps applied and verified' \
     && ok "runs the unlock through to the end" || bad "unlock did not complete"
-[[ "$(dev "$sb" 'cmd package get-home-activity')" == "$PROJECTIVY"* ]] \
+[[ "$(home_now "$sb")" == "$PROJECTIVY"* ]] \
     && ok "home screen is Projectivy" || bad "home screen not changed"
 
 out=$(ui "$sb" PROJECTOR.sh $'q\n')
