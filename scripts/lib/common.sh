@@ -465,15 +465,22 @@ get_script_dir() {
     cd -P "$(dirname "$source")" && pwd
 }
 
-# Human readable file size
+# Human readable file size, in decimal units.
+#
+# Decimal, not binary: `blockdev --getsize64` reports 7650410496 for this
+# device, which every document, the manifest and the vendor all call 7.65 GB.
+# The previous version divided by 1073741824 and labelled the result "GB", so
+# the same device read as "7GB" here -- and 1932525568 came out as "1GB" rather
+# than 1.93, because it truncated instead of rounding. Two different numbers
+# for one device is how you end up doubting a backup that is actually fine.
 human_size() {
-    local bytes="$1"
-    if [[ "$bytes" -ge 1073741824 ]]; then
-        echo "$(( bytes / 1073741824 ))GB"
-    elif [[ "$bytes" -ge 1048576 ]]; then
-        echo "$(( bytes / 1048576 ))MB"
-    elif [[ "$bytes" -ge 1024 ]]; then
-        echo "$(( bytes / 1024 ))KB"
+    local bytes="${1:-0}"
+    if [[ "$bytes" -ge 1000000000 ]]; then
+        printf '%d.%02dGB\n' $(( bytes / 1000000000 )) $(( (bytes % 1000000000) / 10000000 ))
+    elif [[ "$bytes" -ge 1000000 ]]; then
+        echo "$(( bytes / 1000000 ))MB"
+    elif [[ "$bytes" -ge 1000 ]]; then
+        echo "$(( bytes / 1000 ))KB"
     else
         echo "${bytes}B"
     fi

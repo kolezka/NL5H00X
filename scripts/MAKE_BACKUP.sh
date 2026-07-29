@@ -97,6 +97,27 @@ backup_partition() {
         return 1
     fi
 
+    # A resumed run used to re-pull every partition from scratch: 1.93 GB and
+    # about three minutes of the system partition, each time, for a file
+    # already sitting complete on disk. Skip it when what is there is provably
+    # this partition -- right length AND a matching tail, since length alone
+    # cannot tell one 1.93 GB file from another.
+    local have
+    have=$(local_size "$output_file")
+    if [[ "$have" -eq "$expected" && "$expected" -ge 1048576 ]]; then
+        local probe_mb=$(( expected / 1048576 - 1 ))
+        adb_root_stream_watched "dd if=$partition bs=1048576 skip=$probe_mb count=1" "$output_file.probe" 20 || true
+        dd if="$output_file" of="$output_file.tail" bs=1048576 skip="$probe_mb" count=1 2>/dev/null
+        local dev_md5 loc_md5
+        dev_md5=$(local_md5 "$output_file.probe"); loc_md5=$(local_md5 "$output_file.tail")
+        rm -f "$output_file.probe" "$output_file.tail"
+        if [[ -n "$dev_md5" && "$dev_md5" == "$loc_md5" ]]; then
+            print_success "$description already present and verified ($(human_size "$have"))"
+            return 0
+        fi
+        print_warning "$description: existing file is the right size but does not match the device - re-pulling"
+    fi
+
     local dd_out
     if ! dd_out=$(adb_root_exec "dd if=$partition of=/sdcard/temp_backup.img bs=$DD_BLOCK_SIZE"); then
         print_error "$description: dd failed on device"

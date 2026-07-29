@@ -119,6 +119,65 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+head_ "sizes are reported in the same units the device uses"
+# blockdev reports 7650410496 and everyone calls that 7.65 GB. An earlier
+# human_size divided by 1073741824 and labelled it GB, so the same device read
+# as "7GB" -- and truncation turned 1932525568 into "1GB" instead of 1.93.
+
+check_size() {
+    local got; got=$(bash -c 'source "'"$SCRIPTS"'/lib/common.sh"; human_size '"$1")
+    if [[ "$got" == "$2" ]]; then ok "$1 -> $2"; else bad "$1 -> '$got', expected '$2'"; fi
+}
+check_size 7650410496 "7.65GB"
+check_size 1932525568 "1.93GB"
+check_size 8388608    "8MB"
+
+# ---------------------------------------------------------------------------
+head_ "a resumed run does not re-pull partitions it already has"
+# Every restart used to re-fetch boot.img and the 1.93 GB system.img from
+# scratch -- three minutes each time for files already complete on disk.
+
+sandbox=$(new_sandbox)
+rundir=$(run_backup "$sandbox")
+first_ok=$(grep -c 'partition backed up' "$rundir/log" 2>/dev/null)
+bdir=$(ls -d "$sandbox/run"/projector-backup-* | tail -1)
+
+if [[ "$first_ok" -gt 0 ]]; then
+    ok "first run pulls the partitions ($first_ok of them)"
+else
+    bad "first run pulled nothing, so nothing below proves anything"
+fi
+
+# Reuse only applies to a run that did not finish -- a completed one has a
+# manifest and correctly starts a fresh directory. Drop the manifest and
+# shorten the image to make this look like an interrupted run.
+rm -f "$bdir/backup-manifest.txt"
+dd if="$bdir/full-system-backup.img" of="$bdir/tmp" bs=1048576 count=8 2>/dev/null
+mv "$bdir/tmp" "$bdir/full-system-backup.img"
+
+rundir=$(run_backup "$sandbox")
+if grep -q 'already present and verified' "$rundir/log"; then
+    ok "a resumed run reuses the partitions it already has"
+else
+    bad "resumed run re-pulled partitions it already had"
+fi
+
+# Reuse must not mean "trust the length": a same-size impostor has to be caught.
+rm -f "$bdir/backup-manifest.txt"
+dd if="$bdir/full-system-backup.img" of="$bdir/tmp" bs=1048576 count=8 2>/dev/null
+mv "$bdir/tmp" "$bdir/full-system-backup.img"
+sz=$(file_size "$bdir/system.img")
+head -c "$sz" /dev/urandom > "$bdir/system.img"
+
+rundir=$(run_backup "$sandbox")
+if grep -q 'does not match the device' "$rundir/log"; then
+    ok "a same-size file that is not the partition is re-pulled"
+else
+    bad "accepted a same-size file without checking its content"
+fi
+rm -rf "$sandbox"
+
+# ---------------------------------------------------------------------------
 head_ "healthy device produces a complete backup"
 
 sandbox=$(new_sandbox)

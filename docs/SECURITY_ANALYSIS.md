@@ -137,17 +137,37 @@ com.hisilicon.miracast       → Wireless display
 com.hisilicon.tvinput.external → HDMI input handling
 ```
 
-### 2. Chunked Backup Necessity
+### 2. Why the image is not staged on the device
 
-**Problem:** Device has 4.2GB free space but 7.65GB total storage
+**Problem:** the device holds 7,650,410,496 bytes (7.65 GB) but `/sdcard` has
+only about 3.7 GB free — and `/sdcard` lives on the very flash being imaged, so
+staging a copy there competes for space with the thing being copied.
 
-**Solution:** 3GB chunks with automatic combination
+**Solution:** stream the image straight to the host with `adb exec-out`, which
+needs no device-side space at all. The whole device moves in roughly 13 minutes
+over Wi-Fi at the measured 10.4 MB/s.
+
+The transfer runs in 256 MB blocks rather than one long read. A single 7.65 GB
+`dd` has to survive 13 minutes, and on this hardware it does not: the remote
+process gets reaped part-way and the stream simply stops. Blocks bound that
+exposure — each `dd` lives about 25 seconds, a killed one is retried, and a run
+that dies anyway resumes from the last completed block. Three such kills during
+one successful run is normal here.
+
+**Fallback:** if `adb exec-out` is unavailable, the older staged path still
+works, pulling `CHUNK_SIZE_MB` slices through `/sdcard` and joining them
+host-side. At the default 3000 MiB that is:
+
 ```
-Chunk 1: 0MB → 3GB     (3,072MB)
-Chunk 2: 3GB → 6GB     (3,072MB) 
-Chunk 3: 6GB → 7.65GB  (1,506MB)
-Combined: Full 7.65GB system image
+Block 1: 0          → 3,145,728,000   (3000 MiB)
+Block 2: 3,145,728,000 → 6,291,456,000 (3000 MiB)
+Block 3: 6,291,456,000 → 7,650,410,496 (1,296 MiB, short by design)
+Combined: 7,650,410,496 bytes, asserted exactly before the parts are deleted
 ```
+
+Earlier revisions of this document quoted 3,072 MiB blocks and a 1,506 MiB
+tail. Neither matched the code, and the two did not add up to the device size
+either.
 
 ### 3. Verification Requirements
 

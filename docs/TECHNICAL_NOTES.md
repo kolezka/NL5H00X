@@ -66,9 +66,10 @@ Total partitions: 25
 
 ### Storage Limitations
 
-- Total device storage: 7.65GB
-- Available free space: ~4.2GB
-- Full backup requires chunked approach (3GB chunks)
+- Total device storage: 7,650,410,496 bytes (7.65 GB)
+- Available free space on `/sdcard`: 3,923,068 KB (~3.7 GB, measured 2026-07-28)
+- Full backup streams to the host in 256 MB blocks and stages nothing on the
+  device; the older `/sdcard`-staged path remains only as a fallback
 
 ## System Packages
 
