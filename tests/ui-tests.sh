@@ -15,11 +15,17 @@ head_() { echo; echo "=== $1 ==="; }
 
 STOCK=com.newlink.hisilauncher
 NOVA=com.teslacoilsw.launcher
+PROJECTIVY=com.spocky.projengmenu
 
 new_sandbox() {
     local sb; sb=$(mktemp -d)
     bash "$TEST_DIR/device-emu/seed.sh" "$sb/state" >/dev/null
-    mkdir -p "$sb/run"
+    mkdir -p "$sb/run" "$sb/apks"
+    echo "not a real apk" > "$sb/apks/projectivy-launcher-4.71.apk"
+    cat > "$sb/apks/projectivy-launcher-4.71.apk.meta" <<EOF
+pkg=$PROJECTIVY
+home=$PROJECTIVY/com.spocky.projengmenu.ui.home.MainActivity
+EOF
     echo "$sb"
 }
 add_backup() {
@@ -33,7 +39,7 @@ add_backup() {
 ui() {
     local sb="$1" script="$2" input="$3"; shift 3
     ( cd "$sb/run" || exit 1
-      PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" "$@" \
+      PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" "$@" \
         /bin/bash "$SCRIPTS/$script" <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 }
 dev() { PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$1/state" adb shell "$2" 2>/dev/null | tr -d '\r'; }
@@ -88,7 +94,7 @@ head_ "TOOLS.sh does not silently fail to reset the launcher"
 # the unlock leaves it in. This used to fire the command and report nothing.
 
 sb=$(new_sandbox); add_backup "$sb"
-( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" \
+( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
     bash "$SCRIPTS/UNLOCK.sh" --apply-all --yes >/dev/null 2>&1 )
 
 out=$(ui "$sb" TOOLS.sh $'19\n\nq\n')
@@ -100,10 +106,10 @@ fi
 echo "$out" | grep -q 'UNLOCK.sh --revert' \
     && ok "points at the command that actually works" \
     || bad "does not say what to do instead"
-[[ "$(dev "$sb" 'cmd package get-home-activity')" == "$NOVA"* ]] \
+[[ "$(dev "$sb" 'cmd package get-home-activity')" == "$PROJECTIVY"* ]] \
     && ok "home screen left alone" || bad "home screen changed unexpectedly"
 
-( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" \
+( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
     bash "$SCRIPTS/UNLOCK.sh" --revert --yes >/dev/null 2>&1 )
 out=$(ui "$sb" TOOLS.sh $'19\n\nq\n')
 [[ "$(dev "$sb" 'cmd package get-home-activity')" == "$STOCK"* ]] \
@@ -152,8 +158,8 @@ sb=$(new_sandbox); add_backup "$sb"
 out=$(ui "$sb" PROJECTOR.sh $'2\ny\n\nq\n')
 echo "$out" | grep -q 'All steps applied and verified' \
     && ok "runs the unlock through to the end" || bad "unlock did not complete"
-[[ "$(dev "$sb" 'cmd package get-home-activity')" == "$NOVA"* ]] \
-    && ok "home screen is Nova" || bad "home screen not changed"
+[[ "$(dev "$sb" 'cmd package get-home-activity')" == "$PROJECTIVY"* ]] \
+    && ok "home screen is Projectivy" || bad "home screen not changed"
 
 out=$(ui "$sb" PROJECTOR.sh $'q\n')
 echo "$out" | grep -qi 'launcher .*unlocked' && ok "header shows unlocked" || bad "header still says locked"

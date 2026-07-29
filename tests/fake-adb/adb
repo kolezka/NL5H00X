@@ -90,6 +90,45 @@ setting_put() {
     mv "$STATE/settings.new" "$STATE/settings"
 }
 pkg_enabled() { ! grep -qx "$1" "$STATE/packages_disabled" 2>/dev/null; }
+pkg_known()   { grep -q "=$1\$" "$STATE/packages" 2>/dev/null; }
+
+# Which packages currently have a process. `am start` adds one, a reboot clears
+# them all. This is what lets the emulator distinguish "installed" from
+# "actually runs", which is the distinction the unlock's safety gate rests on.
+proc_running() { grep -qx "$1" "$STATE/running" 2>/dev/null; }
+proc_start()   { proc_running "$1" || echo "$1" >> "$STATE/running"; }
+
+# Identity of an APK being installed. Real pm reads the manifest; there is no
+# manifest parser here, so a test can drop a "<apk>.meta" sidecar with pkg= and
+# home= lines. Without one, both are looked up below.
+#
+# The activity strings are the ones actually declared in the shipped APKs --
+# read out of their manifests with apkanalyzer, see apks/PROVENANCE.md. Nothing
+# in the toolkit depends on them being right, because it resolves the component
+# off the device with query-activities, but an invented string sitting in the
+# repo is a lie waiting to be believed.
+apk_meta() {
+    local apk="$1" key="$2"
+    if [[ -f "$apk.meta" ]]; then
+        sed -n "s/^$key=//p" "$apk.meta" | head -1
+        return
+    fi
+    local base pkg home
+    base=$(basename "$apk")
+    case "$base" in
+        *projectivy*|*projengmenu*)
+            pkg="com.spocky.projengmenu"
+            home="$pkg/com.spocky.projengmenu.ui.home.MainActivity" ;;
+        *nova*|*teslacoilsw*)
+            pkg="com.teslacoilsw.launcher"
+            home="$pkg/com.teslacoilsw.launcher.NovaLauncher" ;;
+        *)  return ;;
+    esac
+    case "$key" in
+        pkg)  echo "$pkg" ;;
+        home) echo "$home" ;;
+    esac
+}
 
 run_remote() {
     local cmd="$1"
@@ -175,8 +214,47 @@ run_remote() {
             fi
             [[ -f "${STATE}${apk}" ]] || { echo "Failure [INSTALL_FAILED_INVALID_URI]"; return 1; }
             echo Success; return 0 ;;
+        "pm uninstall "*)
+            local p="${cmd##* }"
+            pkg_known "$p" || { echo "Failure [DELETE_FAILED_INTERNAL_ERROR]"; return 1; }
+            grep -v "=$p\$" "$STATE/packages" > "$STATE/pkg.new" 2>/dev/null || true
+            mv "$STATE/pkg.new" "$STATE/packages"
+            grep -v "^$p/" "$STATE/home_activities" > "$STATE/ha.new" 2>/dev/null || true
+            mv "$STATE/ha.new" "$STATE/home_activities" 2>/dev/null || true
+            grep -vx "$p" "$STATE/running" > "$STATE/run.new" 2>/dev/null || true
+            mv "$STATE/run.new" "$STATE/running" 2>/dev/null || true
+            echo Success; return 0 ;;
+
+        # --- processes ---------------------------------------------------
+        "am start -n "*)
+            [[ -f "$STATE/packages" ]] || return 0     # profile does not model packages
+            local comp="${cmd##* }" p
+            p="${comp%%/*}"
+            pkg_known "$p" || { echo "Error: Activity class {$comp} does not exist."; return 0; }
+            pkg_enabled "$p" || { echo "Error: Activity not started, package $p is currently frozen."; return 0; }
+            echo "Starting: Intent { cmp=$comp }"
+            # A launcher that starts and immediately dies is the case the unlock
+            # has to refuse to build on, so it is reachable from a knob.
+            if [[ "${FAKE_ADB_LAUNCHER_CRASHES:-0}" == "1" && "$p" == "${FAKE_ADB_LAUNCHER_PKG:-com.spocky.projengmenu}" ]]; then
+                return 0
+            fi
+            proc_start "$p"; return 0 ;;
+        "pidof "*)
+            local p="${cmd##* }"
+            proc_running "$p" || return 1
+            echo 4242; return 0 ;;
 
         # --- home activity ----------------------------------------------
+        "cmd package query-activities"*)
+            # --brief style output: one component per line.
+            [[ -f "$STATE/home_activities" ]] || { echo "com.newlink.hisilauncher/.MainActivity"; return 0; }
+            local c p2
+            while read -r c; do
+                [[ -z "$c" ]] && continue
+                p2="${c%%/*}"
+                pkg_enabled "$p2" && echo "$c"
+            done < "$STATE/home_activities"
+            return 0 ;;
         "cmd package set-home-activity "*)
             local comp="${cmd##* }"
             local pkg="${comp%%/*}"
@@ -444,6 +522,27 @@ case "$subcmd" in
         exit 0
         ;;
 
+    install)
+        apk=""
+        while [[ $# -gt 0 ]]; do apk="$1"; shift; done   # last arg is the APK
+        [[ -f "$apk" ]] || { echo "adb: failed to stat $apk: No such file or directory" >&2; exit 1; }
+        pkg=$(apk_meta "$apk" pkg)
+        if [[ -z "$pkg" ]]; then
+            echo "Failure [INSTALL_PARSE_FAILED_NO_CERTIFICATES]"; exit 1
+        fi
+        # The device refuses sideloads until the unlock has allowed them, which
+        # is what makes dev_options a real prerequisite rather than a courtesy.
+        if [[ "$(setting_get secure install_non_market_apps)" == "0" ]]; then
+            echo "Failure [INSTALL_FAILED_VERIFICATION_FAILURE]"; exit 1
+        fi
+        if ! pkg_known "$pkg"; then
+            echo "/data/app/$pkg-1/base.apk=$pkg" >> "$STATE/packages"
+            apk_meta "$apk" home >> "$STATE/home_activities"
+        fi
+        echo Success
+        exit 0
+        ;;
+
     backup)
         out=""
         while [[ $# -gt 0 ]]; do
@@ -466,6 +565,14 @@ case "$subcmd" in
             echo "com.newlink.hisilauncher/.MainActivity" > "$STATE/home_activity"
         fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
+        # Nothing survives a restart except what the system brings back up: the
+        # home package. Without this, a launcher proven alive before a reboot
+        # would still look alive after one, and the gate would never be tested.
+        : > "$STATE/running" 2>/dev/null || true
+        if [[ -f "$STATE/home_activity" ]]; then
+            home_pkg=$(cut -d/ -f1 "$STATE/home_activity")
+            [[ -n "$home_pkg" ]] && echo "$home_pkg" >> "$STATE/running"
+        fi
         echo ro > "$STATE/mount_system" 2>/dev/null || true
         exit 0
         ;;

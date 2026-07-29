@@ -22,6 +22,15 @@ new_sandbox() {
     cp "$sb/state/blockdev" "$sb/run/projector-backup-20260101_000000/full-system-backup.img"
     echo "device_size=$(stat -f%z "$sb/state/blockdev" 2>/dev/null || stat -c%s "$sb/state/blockdev")" \
         > "$sb/run/projector-backup-20260101_000000/backup-manifest.txt"
+    # A stand-in for the shipped launcher APK. The suite stays hermetic this
+    # way: it tests the install path, not whether a particular binary happens
+    # to be committed. The .meta sidecar is how fake-adb learns what is inside.
+    mkdir -p "$sb/apks"
+    echo "not a real apk" > "$sb/apks/projectivy-launcher-4.71.apk"
+    cat > "$sb/apks/projectivy-launcher-4.71.apk.meta" <<EOF
+pkg=$PROJECTIVY
+home=$PROJECTIVY/com.spocky.projengmenu.ui.home.MainActivity
+EOF
     echo "$sb"
 }
 
@@ -34,7 +43,13 @@ unlock() {
         cd "$sb/run" || exit 1
         # stdin from /dev/null: a version that stops to ask a question must fail
         # the test rather than hang it.
-        PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" "${envs[@]}" \
+        # `env` is not decoration. A VAR=val word that arrives from an
+        # expansion is not treated as an assignment -- bash decides that before
+        # expanding -- so "${envs[@]}" in prefix position ran the variable as a
+        # command and returned 127. Tests then read that 127 as the script
+        # failing and passed while proving nothing.
+        PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+            env "${envs[@]}" \
             bash "$SCRIPTS/UNLOCK.sh" "$@" </dev/null 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
         echo "RC=${PIPESTATUS[0]}"
     )
@@ -48,6 +63,7 @@ reboot_dev() { PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$1/state" adb reb
 
 STOCK=com.newlink.hisilauncher
 NOVA=com.teslacoilsw.launcher
+PROJECTIVY=com.spocky.projengmenu
 
 # ---------------------------------------------------------------------------
 head_ "the device starts locked, exactly as the real one does"
@@ -62,6 +78,14 @@ if dev "$sb" 'pm list packages -f' | grep -q "=$NOVA$"; then
     ok "Nova is already present yet the device is still locked"
 else
     bad "seed does not match the real device (Nova missing)"
+fi
+
+# Sharper version of the same point: Nova does not merely exist, it registers a
+# home activity, and the device still will not use it.
+if dev "$sb" 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME' | grep -q "$NOVA"; then
+    ok "an alternative home activity is already registered and still unused"
+else
+    bad "seed does not register Nova as a home activity"
 fi
 rm -rf "$sb"
 
@@ -117,8 +141,11 @@ sb=$(new_sandbox)
 out=$(unlock "$sb" --apply-all --yes)
 [[ "$out" == *"RC=0"* ]] && ok "unlock completes" || { bad "unlock failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
 
+dev "$sb" 'pm list packages -f' | grep -q "=$PROJECTIVY\$" \
+    && ok "Projectivy was installed" || bad "Projectivy is not installed"
+
 home=$(dev "$sb" 'cmd package get-home-activity')
-[[ "$home" == "$NOVA"* ]] && ok "home screen is Nova" || bad "home is '$home'"
+[[ "$home" == "$PROJECTIVY"* ]] && ok "home screen is Projectivy" || bad "home is '$home'"
 
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
     && ok "stock launcher is disabled" || bad "stock launcher still enabled"
@@ -127,7 +154,31 @@ dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
 # stock launcher is enabled -- that is why Nova sat unused since July.
 reboot_dev "$sb"
 home=$(dev "$sb" 'cmd package get-home-activity')
-[[ "$home" == "$NOVA"* ]] && ok "still Nova after a restart" || bad "reverted to '$home' after restart"
+[[ "$home" == "$PROJECTIVY"* ]] && ok "still Projectivy after a restart" || bad "reverted to '$home' after restart"
+rm -rf "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a launcher that does not actually run is never trusted"
+# "Installed" and "usable" are different things. A launcher that starts and
+# dies still appears in pm list packages, and disabling the stock launcher on
+# that basis leaves the projector with no home screen at all.
+
+sb=$(new_sandbox)
+out=$(unlock "$sb" FAKE_ADB_LAUNCHER_CRASHES=1 --apply-all --yes)
+
+[[ "$out" == *"not usable as a home screen"* ]] \
+    && ok "the dead launcher is detected" || bad "did not notice the launcher was dead"
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails rather than proceeding" || bad "unlock claimed success with a dead launcher"
+
+dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
+    && bad "stock launcher was disabled anyway" || ok "stock launcher left enabled"
+
+home=$(dev "$sb" 'cmd package get-home-activity')
+[[ "$home" == "$STOCK"* ]] && ok "home screen still works" || bad "user left with home='$home'"
+
+reboot_dev "$sb"
+home=$(dev "$sb" 'cmd package get-home-activity')
+[[ "$home" == "$STOCK"* ]] && ok "and still works after a restart" || bad "home drifted to '$home' after restart"
 rm -rf "$sb"
 
 # ---------------------------------------------------------------------------
@@ -166,7 +217,7 @@ head_ "a device that will not let go of its launcher fails safely"
 # user with no home screen at all. It backs its own change out.
 
 sb=$(new_sandbox)
-FAKE_ADB_REFUSE_DISABLE=1 unlock "$sb" FAKE_ADB_REFUSE_DISABLE=1 --apply-all --yes >/dev/null 2>&1
+unlock "$sb" FAKE_ADB_REFUSE_DISABLE=1 --apply-all --yes >/dev/null 2>&1
 home=$(dev "$sb" 'cmd package get-home-activity')
 if [[ "$home" == "$STOCK"* ]]; then
     ok "left the stock launcher working when it could not be disabled"
@@ -174,6 +225,30 @@ else
     bad "user left with home='$home' after a failed unlock"
 fi
 rm -rf "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "the shipped launcher APK is the one we say it is"
+# This APK is installed as the home screen on a rooted device, so "where did it
+# come from" has to stay answerable. apks/PROVENANCE.md records the hash that
+# was checked against the developer's signature; if the file and that record
+# ever disagree, one of them is wrong and neither should be trusted quietly.
+
+prov="$REPO_ROOT/apks/PROVENANCE.md"
+apk=$(ls "$REPO_ROOT"/apks/projectivy*.apk 2>/dev/null | head -1)
+if [[ -z "$apk" ]]; then
+    echo "  [SKIP] no Projectivy APK checked in"
+elif [[ ! -f "$prov" ]]; then
+    bad "an APK is shipped with no PROVENANCE.md recording where it came from"
+else
+    want=$(grep -oE '\b[0-9a-f]{64}\b' "$prov" | head -1)
+    got=$(shasum -a 256 "$apk" | cut -d' ' -f1)
+    [[ "$want" == "$got" ]] \
+        && ok "$(basename "$apk") matches the recorded hash" \
+        || bad "$(basename "$apk") is $got, PROVENANCE.md says $want"
+    grep -q 'com.spocky.projengmenu' "$prov" \
+        && ok "PROVENANCE names the package it installs" \
+        || bad "PROVENANCE does not name the package"
+fi
 
 # ---------------------------------------------------------------------------
 echo

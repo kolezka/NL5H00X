@@ -17,7 +17,7 @@ Tools for bypassing security restrictions on locked Android projectors and insta
 
 ## Overview
 
-Fixes Android projectors that won't let you install apps or change launchers. Creates complete device backup and safely installs Nova Launcher or other custom launchers.
+Fixes Android projectors that won't let you install apps or change launchers. Creates a complete device backup and safely replaces the locked stock launcher with [Projectivy](https://github.com/spocky/miproja1), or another launcher of your choice.
 
 ## Quick Start
 
@@ -104,8 +104,8 @@ off the device, not by trusting the command's exit code:
 | Step | Change |
 |------|--------|
 | `dev_options` | Developer options on, install from unknown sources allowed |
-| `launcher_present` | Nova Launcher present in `/system/app` |
-| `launcher_default` | Stock launcher disabled, Nova set as home |
+| `launcher_present` | Projectivy installed (skipped if you already have it) |
+| `launcher_default` | Stock launcher disabled, Projectivy set as home |
 | `cleanup_leftovers` | Removes empty/duplicated folders from earlier attempts |
 
 Safety behaviour worth knowing:
@@ -113,17 +113,48 @@ Safety behaviour worth knowing:
 - Refuses to run on anything that is not an NL5H00X.
 - Refuses to change anything without a verified backup (`--status` is exempt).
 - Re-running it is a no-op; it reports what was already done.
+- **The stock launcher is only disabled after the replacement has been seen to
+  run.** Being installed is not the same as working — a launcher that crashes
+  on start still appears in `pm list packages`, and disabling the stock one on
+  that basis is how you end up with no home screen at all. So the new launcher
+  is started and checked to still be alive before anything is taken away.
 - If the stock launcher cannot be disabled, it re-enables it rather than
   leaving you with no home screen at all.
 - `--revert` restores the stock launcher, and that too is verified.
 
 Restart the projector afterwards for the new home screen to appear.
 
+### Why Projectivy
+
+The projector is driven by a remote, not a touchscreen. Projectivy is a
+leanback launcher: it declares `LEANBACK_LAUNCHER`, lays out for a D-pad, and
+is built for exactly this class of device. Nova — which an earlier attempt left
+sitting in `/system/app` — is a phone launcher, workable with a mouse and
+awkward with the remote that comes in the box.
+
+The APK is taken from the developer's own GitHub releases rather than a mirror,
+and its package, SDK range, ABIs and signing certificate are recorded in
+[`apks/PROVENANCE.md`](apks/PROVENANCE.md). If you already installed Projectivy
+from Google Play, keep it — `launcher_present` sees it and does nothing.
+
+Nothing hardcodes Projectivy. To use a different launcher:
+
+```bash
+LAUNCHER_PKG=com.teslacoilsw.launcher \
+LAUNCHER_NAME=Nova \
+LAUNCHER_APK_GLOB='nova-launcher*.apk' \
+  ./scripts/UNLOCK.sh --apply-all
+```
+
+The home activity is never hardcoded either — it is resolved off the device by
+asking which component actually handles `CATEGORY_HOME`, so a launcher that
+renames its activity between releases does not break anything.
+
 ## Features
 
 - **Hidden Settings Access** - Unlock manufacturer-restricted features without modifications
 - **Complete Backup** - 7GB+ forensic device image with chunked storage support
-- **Custom Launcher** - Install Nova Launcher or other launchers (requires root)
+- **Custom Launcher** - Replace the locked stock launcher with Projectivy, Nova, or another launcher (requires root)
 
 ## Scripts
 
@@ -162,6 +193,7 @@ scripts/
 tests/
   run-tests.sh          # Backup regression suite
   unlock-tests.sh       # Unlock end-to-end suite
+  ui-tests.sh           # TOOLS.sh and PROJECTOR.sh front ends
   fake-adb/adb          # Emulated projector -- no hardware needed
   device-emu/seed.sh    # Seeds the emulator from measured firmware values
 docs/
@@ -169,7 +201,9 @@ docs/
   SECURITY_ANALYSIS.md  # Security analysis
   README.md             # Docs overview
 apks/
-  nova-launcher-7.0.57.apk
+  projectivy-launcher-4.71.apk   # installed by default
+  nova-launcher-7.0.57.apk       # fallback, via LAUNCHER_* overrides
+  PROVENANCE.md                  # where each came from and what was verified
 assets/
   img1.png              # Console demo
 ```

@@ -82,6 +82,19 @@ echo "ro"        > "$STATE/mount_system"     # /system starts read-only
 echo "Enforcing" > "$STATE/selinux"
 echo "0"         > "$STATE/reboots"
 
+# Everything that registers for CATEGORY_HOME. Nova is in here because it is
+# genuinely installed on the real device -- which is the point: the projector
+# has had a perfectly good alternative home activity available since July and
+# still boots the stock one. Projectivy is deliberately absent; installing it
+# is the unlock's job.
+cat > "$STATE/home_activities" <<'EOF'
+com.newlink.hisilauncher/.MainActivity
+com.teslacoilsw.launcher/com.teslacoilsw.launcher.NovaLauncher
+EOF
+
+# Processes. Only the stock launcher is up on a freshly booted device.
+echo "com.newlink.hisilauncher" > "$STATE/running"
+
 # settings: <namespace> <key> <value>
 cat > "$STATE/settings" <<'EOF'
 global development_settings_enabled 0

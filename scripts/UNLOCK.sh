@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
-APK_DIR="$SCRIPT_DIR/../apks"
+APK_DIR="${APK_DIR:-$SCRIPT_DIR/../apks}"
 source "$SCRIPT_DIR/lib/unlock.sh"
 
 # Only these devices. The unlock targets a specific stock launcher and /system
