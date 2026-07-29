@@ -228,6 +228,37 @@ fi
 rm -rf "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "a firmware that owns HOME is detected instead of fought"
+# The real NL5H00X adds CATEGORY_SETUP_WIZARD to the home intent, so
+# com.newlink.wtprovision/.MainActivity wins HOME outright and then starts the
+# stock launcher by name. Setting the preferred launcher does nothing, and
+# disabling the stock launcher would remove what the interceptor starts and
+# leave no home screen at all. The unlock has to refuse, not try.
+
+sb=$(new_sandbox)
+ICEPT=com.newlink.wtprovision/.MainActivity
+out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes)
+
+[[ "$out" == *"com.newlink.wtprovision owns HOME on this firmware"* ]] \
+    && ok "names the component that owns HOME" || bad "did not name the interceptor"
+[[ "$out" == *"would leave none"* ]] \
+    && ok "says why disabling the stock launcher is refused" || bad "did not explain the consequence"
+[[ "$out" != *"RC=0"* ]] && ok "refuses rather than reporting success" || bad "claimed the unlock worked"
+
+dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
+    && bad "disabled the stock launcher anyway - user left with no home screen" \
+    || ok "stock launcher left enabled"
+
+home=$(home_now "$sb")
+[[ "$home" == "$STOCK"* ]] && ok "home screen untouched" || bad "home changed to '$home'"
+
+# and --status has to say so too, rather than offering a step that cannot work
+out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --status)
+[[ "$out" == *"owns HOME on this firmware"* ]] \
+    && ok "--status reports it as blocked" || bad "--status did not flag the interception"
+rm -rf "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "a device that refuses installs still gets the launcher"
 # The real projector rejects every pm install with
 # INSTALL_FAILED_INVALID_INSTALL_LOCATION -- nothing has ever been installed

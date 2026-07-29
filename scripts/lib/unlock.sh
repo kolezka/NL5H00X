@@ -59,11 +59,23 @@ setting() {
 # What it writes lands in the preferred-activity table, so that is where it has
 # to be read from: find the component whose filter carries CATEGORY_HOME and is
 # pinned with mAlways=true.
+# mAlways is not required. `cmd package set-home-activity` records the
+# preference with mAlways=false on this firmware, while the entry that was
+# already there for Nova carried mAlways=true -- so demanding true read back
+# empty immediately after successfully setting the home activity. A pinned
+# entry still wins if there is one, hence the two-pass preference.
 home_activity() {
     adb_root_exec "dumpsys package preferred-activities" 2>/dev/null | tr -d '\r' | awk '
         /^[[:space:]]+[0-9a-f]+ [A-Za-z0-9_.]+\// { comp = $2; always = 0 }
         /mAlways=true/                            { always = 1 }
-        /android\.intent\.category\.HOME/         { if (always && comp != "") { print comp; exit } }
+        /android\.intent\.category\.HOME/ {
+            if (comp != "") {
+                if (always && pinned == "") pinned = comp
+                if (first == "") first = comp
+                comp = ""
+            }
+        }
+        END { print (pinned != "" ? pinned : first) }
     '
 }
 
@@ -99,6 +111,22 @@ package_path() {
 # package registers no home activity at all, which is the honest answer and far
 # better than guessing a component set-home-activity would quietly refuse.
 launcher_component() { home_component_of "$LAUNCHER_PKG"; }
+
+# The activity that owns HOME outright, bypassing the preferred launcher.
+#
+# This firmware always adds CATEGORY_SETUP_WIZARD to the home intent -- stock
+# AOSP only does that on an unprovisioned device, and this one reports
+# device_provisioned=1 and user_setup_complete=1, so it is a vendor patch.
+# Whatever declares that category therefore wins HOME every time and
+# set-home-activity is never consulted. Measured 2026-07-29: HOME goes to
+# com.newlink.wtprovision/.MainActivity, which then starts the stock launcher
+# by explicit component name.
+#
+# Empty on a device that resolves HOME normally.
+home_interceptor() {
+    adb_root_exec "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.SETUP_WIZARD" 2>/dev/null \
+        | tr -d '\r' | grep -oE '[a-z][A-Za-z0-9_.]*/[A-Za-z0-9_.$]+' | head -1
+}
 
 # Prove the replacement launcher works before anything relies on it.
 #
@@ -338,6 +366,16 @@ launcher_default_describe() {
 
 launcher_default_state() {
     package_installed "$LAUNCHER_PKG" || { echo "blocked:install the launcher first"; return; }
+
+    # Refuse before doing harm rather than after. Disabling the stock launcher
+    # on a device whose HOME is intercepted does not hand the home screen over
+    # -- it removes what the interceptor starts, and leaves nothing.
+    local icept; icept=$(home_interceptor)
+    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
+        echo "blocked:${icept%%/*} owns HOME on this firmware, so disabling the stock launcher would leave none"
+        return
+    fi
+
     local home; home=$(home_activity)
     if [[ "$home" == "$LAUNCHER_PKG"* ]] && package_disabled "$STOCK_LAUNCHER"; then
         echo applied
@@ -349,6 +387,14 @@ launcher_default_state() {
 launcher_default_apply() {
     if ! package_installed "$LAUNCHER_PKG"; then
         print_error "$LAUNCHER_PKG is not installed yet"
+        return 1
+    fi
+
+    # Defensive: callers reach this through run_step, which already refuses on
+    # the blocked state above. Kept so the function is safe on its own.
+    local icept; icept=$(home_interceptor)
+    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
+        print_error "$icept owns the home screen on this firmware - refusing"
         return 1
     fi
 

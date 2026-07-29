@@ -255,9 +255,15 @@ run_remote() {
             echo 4242; return 0 ;;
 
         # --- home activity ----------------------------------------------
+        "cmd package query-activities"*SETUP_WIZARD*)
+            # The firmware's home intent carries CATEGORY_SETUP_WIZARD, so
+            # whatever declares it owns HOME regardless of the preferred
+            # launcher. Off by default; a profile opts in to model the lock.
+            [[ -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" ]] && echo "    $FAKE_ADB_HOME_INTERCEPTOR"
+            return 0 ;;
         "cmd package query-activities"*)
             # --brief style output: one component per line.
-            [[ -f "$STATE/home_activities" ]] || { echo "com.newlink.hisilauncher/.MainActivity"; return 0; }
+            [[ -f "$STATE/home_activities" ]] || { echo "com.newlink.hisilauncher/.WizardAciticity"; return 0; }
             local c p2
             while read -r c; do
                 [[ -z "$c" ]] && continue
