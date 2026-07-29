@@ -75,7 +75,7 @@ The individual scripts still work on their own if you prefer them, or want to
 script against them:
 
 ```bash
-./scripts/TOOLS.sh               # read-only, no root, safe any time
+./scripts/TOOLS.sh               # opens hidden settings screens; no root needed
 ./scripts/MAKE_BACKUP.sh         # full device image, resumable
 ./scripts/UNLOCK.sh --status     # what is applied; changes nothing
 ./scripts/UNLOCK.sh --apply-all
@@ -130,7 +130,7 @@ Restart the projector afterwards for the new home screen to appear.
 | Script | Purpose | Root Required |
 |--------|---------|---------------|
 | [`PROJECTOR.sh`](scripts/PROJECTOR.sh) | **Start here** — guided interface over everything below | Depends |
-| [`TOOLS.sh`](scripts/TOOLS.sh) | Access hidden features and settings | No |
+| [`TOOLS.sh`](scripts/TOOLS.sh) | Open hidden settings screens; can also reset the home screen | No |
 | [`MAKE_BACKUP.sh`](scripts/MAKE_BACKUP.sh) | Create complete device backup | Yes |
 | [`UNLOCK.sh`](scripts/UNLOCK.sh) | Replace the locked stock launcher | Yes |
 
@@ -214,7 +214,13 @@ backup you would restore from" or "the launcher you need to boot".
 ```bash
 bash tests/run-tests.sh      # backup suite
 bash tests/unlock-tests.sh   # unlock suite
+bash tests/ui-tests.sh       # TOOLS.sh and PROJECTOR.sh
 ```
+
+The UI suite runs the front ends through `/bin/bash` rather than whatever
+`bash` resolves to on `$PATH`, because that is what the shebang picks. macOS
+still ships bash 3.2, and testing against a newer bash from Homebrew hid a
+`local -n` that broke `TOOLS.sh` outright for every Mac user.
 
 The emulator is seeded from values measured on a real NL5H00X: its
 `build.prop`, its `/system/app` inventory, piped-`su` only (`su -c` is

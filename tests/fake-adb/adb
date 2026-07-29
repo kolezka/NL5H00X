@@ -425,7 +425,7 @@ subcmd="$1"; shift
 case "$subcmd" in
     devices)
         echo "List of devices attached"
-        echo "FAKE0123456	device"
+        [[ "${FAKE_ADB_NO_DEVICE:-0}" == "1" ]] || echo "FAKE0123456	device"
         exit 0
         ;;
 

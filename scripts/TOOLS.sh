@@ -39,9 +39,14 @@ declare -a MENU_MEDIA=(
     "am start -n com.hisilicon.android.videoplayer/.MainActivity|Video Player"
 )
 
+STOCK_LAUNCHER_PKG="com.newlink.hisilauncher"
+
+# Everything above only opens screens. This one changes which launcher the
+# device boots into, so it is routed through reset_default_launcher rather than
+# fired blindly -- see the handler for why.
 declare -a MENU_LAUNCHER=(
     "am start -a android.intent.action.MAIN -c android.intent.category.HOME|Choose Launcher"
-    "cmd package set-home-activity com.newlink.hisilauncher|Reset to Default Launcher"
+    "@reset-launcher|Reset to Default Launcher  (changes the home screen)"
 )
 
 # ============================================================================
@@ -49,59 +54,86 @@ declare -a MENU_LAUNCHER=(
 # ============================================================================
 
 run_adb_command() {
-    local cmd="$1"
-    local desc="$2"
+    local cmd="$1" desc="$2" out rc
 
     echo
     print_status "$desc"
     echo -e "${YELLOW}> adb shell $cmd${NC}"
     echo
 
-    if adb shell "$cmd" 2>&1; then
-        print_success "Done"
-    else
-        print_warning "Command may have failed or app not available"
+    out=$(adb shell "$cmd" 2>&1); rc=$?
+    [[ -n "$out" ]] && echo "$out"
+
+    # `am start` prints "Error: Activity not started" and still exits 0, so the
+    # exit code alone reported "Done" for activities that never opened.
+    if [[ "$rc" -ne 0 ]] || echo "$out" | grep -qiE '^Error|Exception|not found|does not exist'; then
+        print_warning "That did not work -- the app or activity is probably not on this device"
+        return 1
     fi
+    print_success "Done"
+    return 0
 }
 
+# The stock launcher cannot be made the home screen while it is disabled, which
+# is exactly the state UNLOCK.sh leaves it in. Without this check the menu
+# entry appears to do nothing at all.
+reset_default_launcher() {
+    echo
+    print_status "Reset to Default Launcher"
+    if adb shell "pm list packages -d" 2>/dev/null | grep -q "$STOCK_LAUNCHER_PKG"; then
+        print_warning "The stock launcher is currently disabled, so it cannot be set as home."
+        echo
+        echo "  It was disabled by the unlock. To undo that properly:"
+        echo "      ./scripts/UNLOCK.sh --revert"
+        echo "  which re-enables it first and then verifies the home screen."
+        return 1
+    fi
+    run_adb_command "cmd package set-home-activity $STOCK_LAUNCHER_PKG/.MainActivity" \
+                    "Reset to Default Launcher"
+}
+
+# These read an array whose name is in a variable. `local -n` would be the
+# obvious way and it is what this used to do -- but namerefs need bash 4.3 and
+# macOS ships 3.2, so `./scripts/TOOLS.sh` died on line one of the menu for
+# every Mac user. eval-based indirection is uglier and works everywhere.
+# The array names are literals from the loop below, never user input.
+section_items() { eval "printf '%s\n' \"\${$1[@]}\""; }
+
 show_menu_section() {
-    local title="$1"
-    shift
-    local -n items=$1
-    local start_num="$2"
+    local title="$1" name="$2" start_num="$3" entry desc i
 
     echo -e "${GREEN}${title}:${NC}"
-    local i=$start_num
-    for entry in "${items[@]}"; do
-        local desc="${entry#*|}"
+    i=$start_num
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+        desc="${entry#*|}"
         printf "  %2d. %s\n" "$i" "$desc"
-        ((i++))
-    done
+        i=$((i + 1))
+    done < <(section_items "$name")
     echo
 }
 
 get_menu_entry() {
-    local choice="$1"
-    local idx=1
+    local choice="$1" idx=1 section entry
 
     for section in MENU_SYSTEM MENU_PROJECTOR MENU_MEDIA MENU_LAUNCHER; do
-        local -n arr=$section
-        for entry in "${arr[@]}"; do
+        while IFS= read -r entry; do
+            [[ -z "$entry" ]] && continue
             if [[ "$idx" -eq "$choice" ]]; then
                 echo "$entry"
                 return 0
             fi
-            ((idx++))
-        done
+            idx=$((idx + 1))
+        done < <(section_items "$section")
     done
     return 1
 }
 
 count_menu_items() {
-    local count=0
+    local count=0 section n
     for section in MENU_SYSTEM MENU_PROJECTOR MENU_MEDIA MENU_LAUNCHER; do
-        local -n arr=$section
-        count=$((count + ${#arr[@]}))
+        n=$(section_items "$section" | grep -c .)
+        count=$((count + n))
     done
     echo "$count"
 }
@@ -169,16 +201,16 @@ main_menu() {
         print_header "PROJECTOR ACCESS TOOLKIT"
 
         local num=1
-        show_menu_section "SYSTEM SETTINGS" MENU_SYSTEM $num
+        show_menu_section "SYSTEM SETTINGS" MENU_SYSTEM "$num"
         num=$((num + ${#MENU_SYSTEM[@]}))
 
-        show_menu_section "PROJECTOR" MENU_PROJECTOR $num
+        show_menu_section "PROJECTOR" MENU_PROJECTOR "$num"
         num=$((num + ${#MENU_PROJECTOR[@]}))
 
-        show_menu_section "MEDIA & FILES" MENU_MEDIA $num
+        show_menu_section "MEDIA & FILES" MENU_MEDIA "$num"
         num=$((num + ${#MENU_MEDIA[@]}))
 
-        show_menu_section "LAUNCHER" MENU_LAUNCHER $num
+        show_menu_section "LAUNCHER" MENU_LAUNCHER "$num"
         num=$((num + ${#MENU_LAUNCHER[@]}))
 
         echo -e "${YELLOW}DIAGNOSTICS:${NC}"
@@ -197,7 +229,11 @@ main_menu() {
                 if entry=$(get_menu_entry "$choice"); then
                     local cmd="${entry%%|*}"
                     local desc="${entry#*|}"
-                    run_adb_command "$cmd" "$desc"
+                    if [[ "$cmd" == "@reset-launcher" ]]; then
+                        reset_default_launcher || true
+                    else
+                        run_adb_command "$cmd" "$desc" || true
+                    fi
                     pause
                 else
                     print_error "Invalid option"
