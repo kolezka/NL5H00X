@@ -130,34 +130,69 @@ run_backup() {
     local log="$WORK_DIR/.backup-progress.log"
     : > "$log"
     ( cd "$WORK_DIR" && bash "$SCRIPT_DIR/MAKE_BACKUP.sh" > "$log" 2>&1 ) &
-    local pid=$! prev=0 last_t=0 rate=0
+    local pid=$! prev=0 rate=0 started elapsed
 
-    printf "\n  ${BOLD_}Backing up${NC}   ${DIM}Ctrl-C stops the display; the backup keeps running${NC}\n\n"
+    started=$(date +%s)
 
     while kill -0 "$pid" 2>/dev/null; do
-        sleep 2
+        local img size pct blocks_done blocks_total stalls eta
 
-        local img size pct blocks_done blocks_total stalls phase
         img=$(ls "$WORK_DIR"/projector-backup-*/full-system-backup.img 2>/dev/null | tail -1)
         size=$(local_size "${img:-/nonexistent}")
-        stalls=$(grep -c 'stalled' "$log" 2>/dev/null || echo 0)
-        blocks_total=$(grep -o 'Streaming in [0-9]*MB blocks ([0-9]*' "$log" 2>/dev/null | tail -1 | grep -o '([0-9]*' | tr -d '(')
-        phase=$(sed 's/\x1b\[[0-9;]*m//g' "$log" 2>/dev/null | grep -aE '^\[(INFO|STEP|OK)\]' | tail -1 | cut -c1-52)
+        # No `|| echo 0` here: grep -c already prints 0 when it finds nothing,
+        # and exits 1 while doing it, so the fallback appended a second zero and
+        # the variable became "0\n0" -- an arithmetic syntax error downstream.
+        stalls=$(grep -ac 'Transfer stalled' "$log" 2>/dev/null); stalls=${stalls:-0}
+        blocks_total=$(sed 's/\x1b\[[0-9;]*m//g' "$log" 2>/dev/null \
+            | grep -ao 'Streaming in [0-9]*MB blocks ([0-9]* total' | tail -1 \
+            | grep -o '([0-9]*' | tr -d '(')
+        # Each completed block prints its own percentage line, so counting them
+        # is the block counter -- no separate bookkeeping to drift out of sync.
+        blocks_done=$(sed 's/\x1b\[[0-9;]*m//g' "$log" 2>/dev/null | grep -ac '^\[INFO\]   *[0-9]*%')
+        blocks_done=${blocks_done:-0}
+        elapsed=$(( $(date +%s) - started ))
+
+        clear_screen
+        printf "\n  ${BOLD_}Backing up${NC}  ${DIM}%s${NC}\n" "$DEV_MODEL"
+        hr
 
         if [[ "$DEV_SIZE" -gt 0 && "$size" -gt 0 ]]; then
             pct=$(( size * 100 / DEV_SIZE ))
             (( size > prev )) && rate=$(( (size - prev) / 2 ))
             prev=$size
-            printf "\r\033[K  [%s] %3d%%  %s / %s   %d.%d MB/s%s" \
-                "$(bar "$pct")" "$pct" "$(human "$size")" "$(human "$DEV_SIZE")" \
-                $(( rate / 1048576 )) $(( (rate % 1048576) * 10 / 1048576 )) \
-                "$( [[ "$stalls" -gt 0 ]] && printf "  ${YELLOW}stalls killed: %d${NC}" "$stalls" )"
+            # Integer minutes read as "0 min left" for anything under a minute,
+            # which looks like a hang rather than nearly done.
+            if [[ "$rate" -gt 0 ]]; then
+                local secs=$(( (DEV_SIZE - size) / rate ))
+                (( secs >= 60 )) && eta="$(( secs / 60 )) min left" || eta="${secs}s left"
+            else
+                eta="waiting"
+            fi
+
+            printf "  [%s] %3d%%\n\n" "$(bar "$pct" 40)" "$pct"
+            printf "  %-10s %s / %s\n" "pulled" "$(human "$size")" "$(human "$DEV_SIZE")"
+            [[ -n "$blocks_total" ]] && printf "  %-10s %s of %s\n" "block" "$blocks_done" "$blocks_total"
+            printf "  %-10s %d.%d MB/s   ${DIM}%s${NC}\n" "rate" \
+                $(( rate / 1000000 )) $(( (rate % 1000000) / 100000 )) "$eta"
+            if [[ "$stalls" -gt 0 ]]; then
+                printf "  %-10s ${YELLOW}%d killed and retried${NC}  ${DIM}%s${NC}\n" \
+                    "stalls" "$stalls" "expected on this device"
+            fi
         else
-            printf "\r\033[K  %s" "${phase:-preparing...}"
+            printf "  ${DIM}preparing -- system info, app data, boot and system partitions${NC}\n"
+            printf "  ${DIM}the full image starts after those (%ds elapsed)${NC}\n" "$elapsed"
         fi
+
+        hr
+        sed 's/\x1b\[[0-9;]*m//g' "$log" 2>/dev/null | grep -aE '^\[(INFO|OK|WARN|ERROR|STEP)\]' \
+            | tail -8 | cut -c1-70 | sed 's/^/  /'
+        printf "\n  ${DIM}the backup keeps running even if you close this${NC}"
+
+        sleep 2
     done
     wait "$pid"; local rc=$?
-    printf "\n\n"
+    clear_screen
+    printf "\n"
 
     if grep -q "BACKUP COMPLETE" "$log" 2>/dev/null; then
         print_success "Backup complete and verified"

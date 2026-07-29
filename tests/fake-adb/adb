@@ -339,6 +339,27 @@ run_dd() {
             sleep 600
             return 0
         fi
+        # FAKE_ADB_MBPS throttles the stream to a given MB/s. Local disk copies
+        # a block instantly, which is fine for correctness but useless for
+        # exercising anything that watches progress over time -- a UI, a stall
+        # detector, an ETA. Those need a transfer that actually takes a while.
+        if [[ -n "${FAKE_ADB_MBPS:-}" ]]; then
+            # Build the args fresh -- reusing "${args[@]}" here appended a second
+            # skip=/count= to ones already present and dd read nothing.
+            local total want n=0
+            total=$(stat -f%z "$src" 2>/dev/null || stat -c%s "$src")
+            if [[ -n "$count" ]]; then
+                want="$count"
+            else
+                want=$(( (total - skip * bs + bs - 1) / bs ))
+            fi
+            while [[ "$n" -lt "$want" ]]; do
+                dd if="$src" bs="$bs" skip=$(( skip + n )) count=1 2>/dev/null || break
+                n=$((n + 1))
+                perl -e "select(undef,undef,undef,$bs/1048576/$FAKE_ADB_MBPS)" 2>/dev/null || true
+            done
+            return 0
+        fi
         dd "${args[@]}" 2>/dev/null
         dd_summary "$cmd" "$src" "$bs" "$skip" "$count"
         return 0

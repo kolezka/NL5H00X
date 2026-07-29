@@ -180,4 +180,12 @@ echo
 echo "======================================"
 echo "  passed: $PASS   failed: $FAIL"
 echo "======================================"
+
+# A suite that leaks processes poisons whatever runs after it.
+leaked=$(pgrep -f 'sleep 600' 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$leaked" -gt 0 ]]; then
+    echo "  WARNING: $leaked orphaned hang-simulation processes left behind"
+    pkill -f 'sleep 600' 2>/dev/null || true
+fi
+
 [[ "$FAIL" -eq 0 ]]

@@ -215,6 +215,21 @@ adb_root_stream() {
     esac
 }
 
+# Kill a process and everything beneath it.
+#
+# `pkill -P` reaches only direct children. When a stalled transfer is killed,
+# the subshell's child is `adb`, but anything `adb` itself spawned is a
+# grandchild and survives. Measured: repeated stall-kills left dozens of
+# orphaned processes behind, which is how a clean test suite starts failing for
+# reasons that have nothing to do with the code under test.
+kill_tree() {
+    local pid="$1" child
+    for child in $(pgrep -P "$pid" 2>/dev/null); do
+        kill_tree "$child"
+    done
+    kill -9 "$pid" 2>/dev/null || true
+}
+
 # Run a root stream into a file, killing it if the data stops flowing.
 #
 # This is what makes retrying possible at all. A reaped remote dd does NOT
@@ -242,8 +257,7 @@ adb_root_stream_watched() {
             quiet=$((quiet + 2))
             if [[ "$quiet" -ge "$stall_secs" ]]; then
                 print_warning "Transfer stalled ${stall_secs}s at $(human_size "$cur") - killing it"
-                pkill -P "$pid" 2>/dev/null || true   # the adb child
-                kill -9 "$pid" 2>/dev/null || true
+                kill_tree "$pid"
                 wait "$pid" 2>/dev/null || true
                 return 124
             fi

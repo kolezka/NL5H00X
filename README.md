@@ -45,9 +45,31 @@ backup. Nothing is done without asking.
   [q] Quit
 
   > 1
-
-  [#################...........]  62%  4.74 GB / 7.65 GB   10.4 MB/s  stalls killed: 3
 ```
+
+The backup runs behind a live view rather than fifteen minutes of nothing:
+
+```
+  Backing up  NL5H00X_TP
+  -----------------------------------------------------------
+  [########################................]  62%
+
+  pulled     4.74 GB / 7.65 GB
+  block      18 of 29
+  rate       10.4 MB/s   4 min left
+  stalls     3 killed and retried  expected on this device
+  -----------------------------------------------------------
+  [INFO]   56%  4.28 GB / 7.65 GB
+  [WARN] Transfer stalled 30s at 4.41 GB - killing it
+  [WARN] Block at 4.41 GB: got 113156093 bytes, wanted 268435456 (try 1/3)
+  [INFO]   62%  4.74 GB / 7.65 GB
+
+  the backup keeps running even if you close this
+```
+
+`stalls killed` is normal on this hardware, not a warning sign — the remote
+`dd` gets reaped periodically and each block is simply retried. A run that
+shows three of them still produces a byte-exact image.
 
 The individual scripts still work on their own if you prefer them, or want to
 script against them:
