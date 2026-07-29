@@ -557,6 +557,15 @@ case "$subcmd" in
         if [[ -z "$pkg" ]]; then
             echo "Failure [INSTALL_PARSE_FAILED_NO_CERTIFICATES]"; exit 1
         fi
+        # The real NL5H00X refuses every install this way -- measured 2026-07-29
+        # with sideloading on, no restrictions, install location auto and 4.2 GB
+        # free. /data/app is empty and `pm list packages -3` is empty, so nothing
+        # has ever been installed normally on it. The toolkit has to fall back to
+        # /system/app, and that fallback only counts as tested if the emulator
+        # can refuse the same way.
+        if [[ "${FAKE_ADB_REFUSE_INSTALL:-0}" == "1" ]]; then
+            echo "Failure [INSTALL_FAILED_INVALID_INSTALL_LOCATION]"; exit 1
+        fi
         # The device refuses sideloads until the unlock has allowed them, which
         # is what makes dev_options a real prerequisite rather than a courtesy.
         if [[ "$(setting_get secure install_non_market_apps)" == "0" ]]; then

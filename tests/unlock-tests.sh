@@ -228,6 +228,36 @@ fi
 rm -rf "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "a device that refuses installs still gets the launcher"
+# The real projector rejects every pm install with
+# INSTALL_FAILED_INVALID_INSTALL_LOCATION -- nothing has ever been installed
+# normally on it. Copying into /system/app is the only route that works there,
+# so the fallback has to fire, and it must be honest that a restart is needed
+# rather than reporting a launcher that is not registered yet as present.
+
+sb=$(new_sandbox)
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
+
+[[ "$out" == *"INSTALL_FAILED_INVALID_INSTALL_LOCATION"* ]] \
+    && ok "reports why the normal install failed" || bad "swallowed the install failure"
+[[ -f "$sb/state/system/app/Projectivy/Projectivy.apk" ]] \
+    && ok "fell back to /system/app" || bad "no APK in /system/app after the fallback"
+[[ "$out" == *"restart"* ]] \
+    && ok "says a restart is needed" || bad "did not mention the restart"
+[[ "$out" != *"RC=0"* ]] \
+    && ok "does not claim the unlock finished" || bad "claimed success with an unregistered launcher"
+
+# and it must not have touched the stock launcher on the way past
+dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
+    && bad "disabled the stock launcher despite an incomplete install" \
+    || ok "stock launcher left alone"
+
+# /system must not be left writable
+dev "$sb" 'mount' | grep -E ' /system ' | grep -q 'ro' \
+    && ok "/system put back read-only" || bad "/system left writable"
+rm -rf "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "the shipped launcher APK is the one we say it is"
 # This APK is installed as the home screen on a rooted device, so "where did it
 # come from" has to stay answerable. apks/PROVENANCE.md records the hash that

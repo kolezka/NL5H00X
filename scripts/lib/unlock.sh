@@ -32,6 +32,7 @@ STOCK_LAUNCHER="com.newlink.hisilauncher"
 LAUNCHER_PKG="${LAUNCHER_PKG:-com.spocky.projengmenu}"
 LAUNCHER_NAME="${LAUNCHER_NAME:-Projectivy}"
 LAUNCHER_APK_GLOB="${LAUNCHER_APK_GLOB:-projectivy*.apk}"
+LAUNCHER_SYSTEM_DIR="${LAUNCHER_SYSTEM_DIR:-/system/app/Projectivy}"
 
 UNLOCK_STEPS=(dev_options launcher_present launcher_default cleanup_leftovers)
 
@@ -206,14 +207,24 @@ launcher_present_state() {
     package_installed "$LAUNCHER_PKG" && echo applied || echo not-applied
 }
 
-# A normal install, not a copy into /system/app.
+# Try a normal install first, fall back to /system/app.
 #
-# The earlier design pushed the APK into /system/app, which only registers on
-# the next reboot -- and that ordering is what made the unlock unsafe: you had
-# to disable the stock launcher before you could ever see the replacement run.
-# `pm install` registers immediately, so launcher_default can prove the new
-# launcher works while the old one is still there to fall back on. It is also
-# plainly reversible, which /system/app is not.
+# `pm install` is the better path where it works: it registers immediately, so
+# launcher_default can prove the new launcher runs while the stock one is still
+# there to fall back on, and it is plainly reversible.
+#
+# On this projector it does not work. Every install path -- adb install,
+# streamed, and a session install whose write phase succeeds -- fails at commit
+# with INSTALL_FAILED_INVALID_INSTALL_LOCATION, with sideloading fully enabled,
+# no user restrictions, install location on auto and 4.2 GB free. /data/app is
+# empty and `pm list packages -3` returns nothing: nothing has EVER been
+# installed normally on this device. That is the vendor lock this toolkit
+# exists to work around, and it is why APKPure, Magisk and Nova are all sitting
+# in /system/app rather than installed.
+#
+# So: prefer the clean path, and drop to /system/app when the device refuses.
+# The cost of the fallback is that the package only registers on the next boot,
+# which is why this reports needs-restart rather than pretending to be done.
 launcher_present_apply() {
     if package_installed "$LAUNCHER_PKG"; then return 0; fi
 
@@ -224,20 +235,41 @@ launcher_present_apply() {
     fi
 
     out=$(adb install -r "$apk" 2>&1)
-    if ! package_installed "$LAUNCHER_PKG"; then
-        print_error "Install of $(basename "$apk") did not take: $(echo "$out" | tail -1)"
+    if package_installed "$LAUNCHER_PKG"; then return 0; fi
+
+    print_warning "The device refused a normal install: $(echo "$out" | grep -oE 'Failure \[[A-Z_]+\]' | head -1)"
+    print_status "Falling back to $LAUNCHER_SYSTEM_DIR, which is how this device accepts apps"
+
+    system_rw || return 1
+    adb_root_exec "mkdir -p $LAUNCHER_SYSTEM_DIR" >/dev/null || true
+    if ! adb push "$apk" "$LAUNCHER_SYSTEM_DIR/$(basename "$LAUNCHER_SYSTEM_DIR").apk" >/dev/null 2>&1; then
+        print_error "Could not copy the launcher into $LAUNCHER_SYSTEM_DIR"
+        system_ro
         return 1
     fi
-    return 0
+    adb_root_exec "chmod 644 $LAUNCHER_SYSTEM_DIR/$(basename "$LAUNCHER_SYSTEM_DIR").apk" >/dev/null || true
+    system_ro
+
+    print_warning "$LAUNCHER_NAME will only register after a restart - rerun this afterwards"
+    return 1
 }
 
 launcher_present_revert() {
+    # The fallback copy may exist even when the package never registered, so
+    # this runs regardless of whether pm knows about the launcher.
+    if adb_root_exec "ls -d $LAUNCHER_SYSTEM_DIR" >/dev/null 2>&1; then
+        system_rw || return 1
+        adb_root_exec "rm -rf $LAUNCHER_SYSTEM_DIR" >/dev/null || true
+        system_ro
+        print_warning "Removed $LAUNCHER_SYSTEM_DIR; it stops being a package after a restart"
+    fi
+
     package_installed "$LAUNCHER_PKG" || return 0
 
-    # A launcher that shipped in /system is not ours to remove, and on this
-    # device `pm uninstall` on a system package only shells out the update.
+    # A launcher that shipped in /system with the firmware is not ours to
+    # remove, and pm uninstall on a system package only strips the update.
     local path; path=$(package_path "$LAUNCHER_PKG")
-    if [[ "$path" == /system/* ]]; then
+    if [[ "$path" == /system/* && "$path" != "$LAUNCHER_SYSTEM_DIR"/* ]]; then
         print_warning "$LAUNCHER_NAME lives in $path and was not installed by this tool - leaving it"
         return 0
     fi
