@@ -11,6 +11,7 @@ Tools for bypassing security restrictions on locked Android projectors and insta
 - [Documentation](#documentation)
 - [Tested Devices](#tested-devices)
 - [Safety](#safety)
+- [If the projector stops booting: the `wtprovision` brick](#if-the-projector-stops-booting-the-wtprovision-brick)
 - [Emergency Recovery](#emergency-recovery)
 - [Contributing](#contributing)
 - [License](#license)
@@ -213,6 +214,129 @@ assets/
 - **Backup required** - Modification scripts require complete backup first
 - **Root needed** - System modifications require existing root access
 - **Voids warranty** - Use at your own risk
+
+## If the projector stops booting: the `wtprovision` brick
+
+**Never disable `com.newlink.wtprovision/.MainActivity`.** It is not a launcher and
+it is not optional. Disabling it stops this projector from booting, and it takes
+every remote channel down with it. This is the single most destructive thing you
+can do to an NL5H00X short of writing a bad image.
+
+### Why it bricks
+
+This firmware does not dispatch the ordinary home intent. It adds a second
+category:
+
+```
+act=android.intent.action.MAIN
+cat=[android.intent.category.HOME, android.intent.category.SETUP_WIZARD]
+```
+
+Exactly one component on the device declares `SETUP_WIZARD` alongside `HOME`:
+`com.newlink.wtprovision/.MainActivity`. It wins the home intent uniquely and then
+starts `com.newlink.hisilauncher` by explicit component name. That is the vendor's
+designed boot path — the stock launcher is *started by* wtprovision, it does not
+win HOME on its own.
+
+Disable that one component and `ActivityManagerService.systemReady()` logs:
+
+```
+E ActivityManager: No home screen found for Intent { act=android.intent.action.MAIN
+    cat=[android.intent.category.HOME,android.intent.category.SETUP_WIZARD] flg=0x100 }
+```
+
+and then deadlocks:
+
+> no home activity resolves → no activity ever starts → nothing ever goes idle →
+> `finishBooting()` is never called → `sys.boot_completed` is never set → user 0
+> stays in `BOOTING` → components of non-direct-boot-aware apps stay filtered out
+> of resolution → still no home.
+
+`android.intent.category.SETUP_WIZARD` is also why Android's own `FallbackHome`
+cannot rescue the boot by itself: `FallbackHome` declares `HOME` but not
+`SETUP_WIZARD`, so it does not match the intent the firmware actually sends.
+
+### Why you lose every channel at once
+
+All of these are consequences of the same stall, not separate faults:
+
+| Symptom | Cause |
+|---|---|
+| Stuck on the vendor logo forever | `bootanim` exits; the last frame is left on screen. It is frozen, not loading. |
+| No Wi-Fi | The network stack never brings up saved networks because boot never completes. |
+| No adb over network | Follows from the above. |
+| No adb over USB | The chassis USB-A ports are **host** ports. A host cannot enumerate to your PC. The device-side USB footprint on the board is unpopulated. |
+| Recovery unreachable | On the units seen so far, U-Boot accepts `reboot recovery` (`starting system with command 'recovery'`) and then boots the normal Android image anyway — there is no usable recovery partition. |
+
+A device in this state still runs: `system_server` is alive, Bluetooth works, and
+a serial console will give you a root shell. It looks dead and is not.
+
+### Recovering it
+
+You need the UART console. On the `NL-5H000-MAIN-V1` board the pads are two plated
+through-holes labelled `TX RX` on the silkscreen, immediately to the right of the
+4-pin speaker connector (`VOR+ VOR- VOL- VOL+`). There is no ground pad next to
+them — take `GND` from the keypad connector (`LED-G LED-R KEY0-IN2 KEY0-IN1 GND`).
+**115200 8N1**, no flow control, 3.3 V logic. You get `console:/ $`.
+
+Root uses Android's `su`, not the GNU form:
+
+```bash
+su 0 id          # works
+su -c id         # fails: "su: invalid uid/gid '-c'"
+```
+
+**Permanent fix — one command:**
+
+```bash
+su 0 pm enable com.newlink.wtprovision/.MainActivity
+```
+
+Verify before rebooting. This must return `wtprovision`, not "No activity found":
+
+```bash
+su 0 pm resolve-activity --brief \
+  -a android.intent.action.MAIN \
+  -c android.intent.category.HOME \
+  -c android.intent.category.SETUP_WIZARD
+```
+
+**If you need the screen back before you fix it**, start Android's fallback home
+explicitly. This breaks the deadlock for the current boot: an activity finally
+starts, boot completes, the user unlocks, Wi-Fi and adb come back.
+
+```bash
+su 0 am start -n com.android.tv.settings/.system.FallbackHome
+```
+
+Do not expect `am start` on a launcher to work while the device is stuck. During
+`BOOTING`, component resolution is filtered and both
+`com.newlink.hisilauncher/.MainActivity` and `.WizardAciticity` answer
+`Activity class ... does not exist`, even though `pm list packages` shows the
+package installed. Check `su 0 dumpsys user | grep -i State` first — if it reads
+`BOOTING`, only a direct-boot-aware component such as `FallbackHome` can be
+started.
+
+### Diagnosing it yourself
+
+`pm list packages -d` lists disabled **packages** and will show nothing here — the
+package is enabled and only one **component** is disabled. Ask the right question:
+
+```bash
+su 0 dumpsys package com.newlink.wtprovision | grep -A3 disabledComponents
+```
+
+Boot progress markers tell you how far the system got. A healthy boot ends with
+`boot_progress_enable_screen`; this brick stops right after
+`boot_progress_ams_ready`:
+
+```bash
+su 0 logcat -d -b events | grep boot_progress
+```
+
+Note that `load average` near 8.0 with no process using CPU is **normal** on this
+SoC — those are HiSilicon kernel monitor threads parked in uninterruptible sleep.
+It is not evidence of failing storage.
 
 ## Emergency Recovery
 
