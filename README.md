@@ -6,6 +6,8 @@ Tools for bypassing security restrictions on locked Android projectors and insta
 
 - [Overview](#overview)
 - [Quick Start](#quick-start)
+- [Unlocking the launcher](#unlocking-the-launcher)
+- [Installing apps](#installing-apps)
 - [Features](#features)
 - [Scripts](#scripts)
 - [Documentation](#documentation)
@@ -94,35 +96,28 @@ change the home screen from Settings. `UNLOCK.sh` fixes that.
 ./scripts/UNLOCK.sh --revert     # put the stock launcher back
 ```
 
-**Copying a launcher APK into `/system/app` is not enough** — the package must
-also win the home intent. But **do not get there by disabling anything.**
+Getting a launcher onto the device is two problems, not one: the APK has to be
+installed, and it has to win the home intent. **Change the launcher with a
+preference, never by disabling the stock one.**
 
-> ### Corrected 2026-07-30 — the previous advice here bricked a device
->
-> This section used to say the stock launcher "re-claims the home screen on the
-> next boot", so the unlock should disable it first and set the home activity
-> second — "that ordering is the whole trick". **Both halves were wrong.**
->
-> `com.newlink.hisilauncher` never wins HOME on its own. This firmware dispatches
-> home as `MAIN` + `HOME` + **`SETUP_WIZARD`**, and the only component declaring
-> `SETUP_WIZARD` is `com.newlink.wtprovision/.MainActivity` — it wins uniquely and
-> then starts the stock launcher by explicit component name.
->
-> Disabling that dispatcher leaves the intent with **zero** candidates, and the
-> device stops booting: no home resolves → no activity starts → nothing goes idle
-> → `finishBooting()` never runs → `sys.boot_completed` is never set. Wi-Fi, adb
-> and recovery all disappear with it. Recovering ours took a soldered UART
-> console. See [docs/BOOT_DEADLOCK.md](docs/BOOT_DEADLOCK.md).
+This firmware does not dispatch the ordinary home intent. It adds a second
+category — `MAIN` + `HOME` + **`SETUP_WIZARD`** — and the only component that
+declares `SETUP_WIZARD` is `com.newlink.wtprovision/.MainActivity`. That
+component wins the home intent uniquely and then starts `com.newlink.hisilauncher`
+by explicit component name. The stock launcher never wins HOME on its own; it is
+*started by* wtprovision. Disable wtprovision and the home intent has zero
+candidates, and the device stops booting — see
+[docs/BOOT_DEADLOCK.md](docs/BOOT_DEADLOCK.md).
 
-**Change the launcher with a preference, never with a disable.** Leave
-`wtprovision` enabled — it stays as the fallback, so a preference that ever goes
-stale degrades to "boots to the stock launcher" instead of "does not boot".
+So leave `wtprovision` enabled. It stays as the fallback, so a preference that
+ever goes stale degrades to "boots to the stock launcher" instead of "does not
+boot".
 
-The most reliable route is the system's own chooser: with a second launcher
-installed, press HOME and pick it. Android then writes a preference recorded
-against the *real* intent (including `SETUP_WIZARD`) with the correct candidate
-set. `pm set-home-activity` is weaker — it reports `Success` without refreshing
-the recorded candidate set, and a stale set resolves to nothing.
+The reliable route is the system's own chooser: with a second launcher installed,
+press HOME and pick it, choosing **Always**. Android writes a preference recorded
+against the *real* intent — the one carrying `SETUP_WIZARD` — with the correct
+candidate set. `pm set-home-activity` is weaker: it reports `Success` without
+recording a preference that covers that intent, so HOME keeps showing the chooser.
 
 Verify before rebooting. This must name your chosen launcher, not `No activity found`:
 
@@ -145,7 +140,7 @@ off the device, not by trusting the command's exit code:
 |------|--------|
 | `dev_options` | Developer options on, install from unknown sources allowed |
 | `launcher_present` | Projectivy installed (skipped if you already have it) |
-| `launcher_default` | Stock launcher disabled, Projectivy set as home |
+| `launcher_default` | Projectivy set as home via the system home preference; nothing is disabled |
 | `cleanup_leftovers` | Removes empty/duplicated folders from earlier attempts |
 
 Safety behaviour worth knowing:
@@ -153,14 +148,13 @@ Safety behaviour worth knowing:
 - Refuses to run on anything that is not an NL5H00X.
 - Refuses to change anything without a verified backup (`--status` is exempt).
 - Re-running it is a no-op; it reports what was already done.
-- **The stock launcher is only disabled after the replacement has been seen to
-  run.** Being installed is not the same as working — a launcher that crashes
-  on start still appears in `pm list packages`, and disabling the stock one on
-  that basis is how you end up with no home screen at all. So the new launcher
-  is started and checked to still be alive before anything is taken away.
-- If the stock launcher cannot be disabled, it re-enables it rather than
-  leaving you with no home screen at all.
-- `--revert` restores the stock launcher, and that too is verified.
+- **Nothing is ever disabled.** The stock launcher and `wtprovision` are both
+  left enabled, so the worst a stale preference can do is fall back to the stock
+  home — never no home at all.
+- It refuses to write a launcher preference while an interceptor still owns the
+  home intent, rather than leaving you with a preference the firmware ignores.
+- `--revert` clears the preference and puts the stock home back, and that too is
+  verified by reading the resolved home activity off the device.
 
 Restart the projector afterwards for the new home screen to appear.
 
@@ -190,8 +184,49 @@ The home activity is never hardcoded either — it is resolved off the device by
 asking which component actually handles `CATEGORY_HOME`, so a launcher that
 renames its activity between releases does not break anything.
 
+## Installing apps
+
+This projector refuses every normal install. `adb install`, a session install,
+a local `pm install`, `-f`, and the same commands as root all fail with
+`INSTALL_FAILED_INVALID_INSTALL_LOCATION`, with sideloading enabled, no
+restrictions and gigabytes free. `/data/app` is empty — nothing has ever been
+installed the normal way. The failure is an exception inside the vendor's patched
+`PackageManagerService`, not a capacity decision, and it is not something a flag
+works around. [docs/INSTALL_LOCKED.md](docs/INSTALL_LOCKED.md) records everything
+that was ruled out.
+
+The way in is `/system/app`. `INSTALL_APP.sh` does it properly:
+
+```bash
+./scripts/INSTALL_APP.sh SmartTube_stable_31.94_armeabi-v7a.apk
+./scripts/INSTALL_APP.sh app.apk --name MyApp --no-reboot
+./scripts/INSTALL_APP.sh --remove org.smarttube.stable
+```
+
+It tries a normal install first, then falls back to `/system/app`. It picks the
+device's ABI off `ro.product.cpu.abilist` and refuses an APK built for the wrong
+one — this device is 32-bit `armeabi-v7a` only. It **unpacks the native
+libraries** into `lib/<isa>/`, which a plain copy does not: an app whose manifest
+leaves `extractNativeLibs` at its default ships compressed `.so` files that
+nothing extracts, and it then dies at the first `System.loadLibrary`. It verifies
+the APK and every library by checksum, returns `/` to read-only, and after the
+reboot checks that the package registered and its ABI resolved.
+
+Two things worth knowing:
+
+- The app only registers on the **next boot**, and it becomes a system app —
+  removing it means `--remove`, not the launcher.
+- Installing any app that declares a `LAUNCHER` category makes Android clear the
+  recorded home preference, so HOME shows the chooser again afterwards. Set your
+  launcher default **after** installing apps, not before.
+
+`INSTALL_APP.sh` reads the manifest and **refuses any APK that declares
+`CATEGORY_HOME` or `SETUP_WIZARD`** unless you pass `--allow-home`. Getting the
+home intent wrong is what bricks this device.
+
 ## Features
 
+- **App installation** - Install APKs on a device whose package manager refuses every normal install
 - **Hidden Settings Access** - Unlock manufacturer-restricted features without modifications
 - **Complete Backup** - 7GB+ forensic device image with chunked storage support
 - **Custom Launcher** - Replace the locked stock launcher with Projectivy, Nova, or another launcher (requires root)
@@ -204,12 +239,15 @@ renames its activity between releases does not break anything.
 | [`TOOLS.sh`](scripts/TOOLS.sh) | Open hidden settings screens; can also reset the home screen | No |
 | [`MAKE_BACKUP.sh`](scripts/MAKE_BACKUP.sh) | Create complete device backup | Yes |
 | [`UNLOCK.sh`](scripts/UNLOCK.sh) | Replace the locked stock launcher | Yes |
+| [`INSTALL_APP.sh`](scripts/INSTALL_APP.sh) | Install an APK the device otherwise refuses | Yes |
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [Technical Notes](docs/TECHNICAL_NOTES.md) | Device analysis, ADB commands, partition layout |
+| [Boot Deadlock](docs/BOOT_DEADLOCK.md) | The `wtprovision` brick — mechanism, diagnosis, recovery |
+| [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs fail, and the `/system/app` workaround |
 | [Security Analysis](docs/SECURITY_ANALYSIS.md) | Detailed security restriction analysis |
 | [Docs README](docs/README.md) | Documentation overview |
 
@@ -227,6 +265,7 @@ scripts/
   TOOLS.sh              # Access hidden features
   MAKE_BACKUP.sh        # Complete device backup
   UNLOCK.sh             # Launcher unlock, interactive CLI
+  INSTALL_APP.sh        # Install an APK via /system/app fallback
   lib/
     common.sh           # Shared functions
     unlock.sh           # Unlock steps (state/apply/revert per step)
@@ -238,6 +277,8 @@ tests/
   device-emu/seed.sh    # Seeds the emulator from measured firmware values
 docs/
   TECHNICAL_NOTES.md    # Technical documentation
+  BOOT_DEADLOCK.md      # The wtprovision brick and its recovery
+  INSTALL_LOCKED.md     # Why installs fail and the /system/app workaround
   SECURITY_ANALYSIS.md  # Security analysis
   README.md             # Docs overview
 apks/
@@ -246,6 +287,7 @@ apks/
   PROVENANCE.md                  # where each came from and what was verified
 assets/
   img1.png              # Console demo
+  hardware/             # Board and UART photos, referenced from the docs
 ```
 
 ## Safety
@@ -392,8 +434,9 @@ It is not evidence of failing storage.
 # Put the stock launcher back (the supported way -- it verifies the result)
 ./scripts/UNLOCK.sh --revert
 
-# By hand, if you cannot run the script. Note that this alone does not
-# survive a reboot while the stock launcher is disabled.
+# By hand, if you cannot run the script. This writes the home preference back
+# to the stock launcher; the chooser route (press HOME, pick it, Always) is the
+# reliable one on this firmware.
 #
 # The component is .WizardAciticity, spelled exactly like that in the firmware.
 # .MainActivity is the screen you actually see, but it carries no HOME filter,
@@ -436,10 +479,10 @@ still ships bash 3.2, and testing against a newer bash from Homebrew hid a
 
 The emulator is seeded from values measured on a real NL5H00X: its
 `build.prop`, its `/system/app` inventory, piped-`su` only (`su -c` is
-rejected, as on the device), `/system` mounted read-only, and a boot that
-re-asserts the stock launcher while it is enabled. It **refuses what the
-device refuses**, so an unlock that forgets to remount `/system` or forgets to
-disable the stock launcher fails there too.
+rejected, as on the device), `/system` mounted read-only, and the
+`SETUP_WIZARD` home dispatch that makes `wtprovision` the sole home candidate.
+It **refuses what the device refuses**, so an unlock that forgets to remount
+`/system`, or writes a home preference the firmware ignores, fails there too.
 
 To drive the scripts against your own pulled firmware instead of the stand-in:
 
