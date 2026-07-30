@@ -312,7 +312,16 @@ a serial console will give you a root shell. It looks dead and is not.
 
 ### Recovering it
 
-You need the UART console. On the `NL-5H000-MAIN-V1` board the pads are two plated
+If the device still answers adb, the toolkit does it for you:
+
+```bash
+./scripts/UNLOCK.sh --repair
+```
+
+It skips the usual device and backup checks on purpose — this failure leaves
+neither — and with nothing on adb it prints the serial commands instead.
+
+Otherwise you need the UART console. On the `NL-5H000-MAIN-V1` board the pads are two plated
 through-holes labelled `TX RX` on the silkscreen, immediately to the right of the
 4-pin speaker connector (`VOR+ VOR- VOL- VOL+`). There is no ground pad next to
 them — take `GND` from the keypad connector (`LED-G LED-R KEY0-IN2 KEY0-IN1 GND`).

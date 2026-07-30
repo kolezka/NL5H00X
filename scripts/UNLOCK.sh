@@ -207,9 +207,14 @@ Unlock the launcher on a Newlink NL5H00X projector.
   ./UNLOCK.sh --status     show what is and is not applied, change nothing
   ./UNLOCK.sh --apply-all  apply every step, then stop
   ./UNLOCK.sh --revert     put the stock launcher back
+  ./UNLOCK.sh --repair     projector stuck on the vendor logo? diagnose and fix
   ./UNLOCK.sh --yes        do not ask for confirmation (for scripting)
 
 Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+
+--repair is the exception: it needs neither, because the failure it repairs
+leaves the device with no adb at all. Without a device it prints the commands
+to type at a serial console instead. See docs/BOOT_DEADLOCK.md.
 EOF
 }
 
@@ -219,6 +224,7 @@ main() {
             --status)    MODE=status ;;
             --apply-all) MODE=apply ;;
             --revert)    MODE=revert ;;
+            --repair)    MODE=repair ;;
             --yes|-y)    ASSUME_YES=1 ;;
             -h|--help)   usage; exit 0 ;;
             *)           print_error "Unknown option: $1"; usage; exit 1 ;;
@@ -227,6 +233,14 @@ main() {
     done
 
     print_header "PROJECTOR UNLOCK"
+
+    # Before require_device, which exits when nothing answers. A projector stuck
+    # in this failure has no adb by definition, and that is exactly when someone
+    # needs this mode.
+    if [[ "$MODE" == "repair" ]]; then
+        repair_run
+        exit $?
+    fi
 
     require_device true
     check_supported_device

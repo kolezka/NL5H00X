@@ -91,12 +91,13 @@ rm -rf "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "TOOLS.sh does not silently fail to reset the launcher"
-# The stock launcher cannot be set as home while it is disabled -- the state
-# the unlock leaves it in. This used to fire the command and report nothing.
+# The stock launcher cannot be set as home while it is disabled. The unlock no
+# longer leaves it that way -- it disables nothing -- but devices disabled by
+# older versions of this toolkit are out there, so the guard still matters.
+# The disabled state is set up directly now rather than produced by the unlock.
 
 sb=$(new_sandbox); add_backup "$sb"
-( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
-    bash "$SCRIPTS/UNLOCK.sh" --apply-all --yes >/dev/null 2>&1 )
+echo "$STOCK" >> "$sb/state/packages_disabled"
 
 out=$(ui "$sb" TOOLS.sh $'19\n\nq\n')
 if echo "$out" | grep -qi 'currently disabled'; then
@@ -107,8 +108,29 @@ fi
 echo "$out" | grep -q 'UNLOCK.sh --revert' \
     && ok "points at the command that actually works" \
     || bad "does not say what to do instead"
-[[ "$(home_now "$sb")" == "$PROJECTIVY"* ]] \
-    && ok "home screen left alone" || bad "home screen changed unexpectedly"
+rm -rf "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "resetting the launcher works after an unlock, because nothing was disabled"
+# The counterpart to the guard above. The unlock reaches its goal with a
+# preference alone, so the stock launcher stays enabled and TOOLS.sh can hand
+# the home screen straight back without anyone running --revert first.
+
+sb=$(new_sandbox); add_backup "$sb"
+( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+    bash "$SCRIPTS/UNLOCK.sh" --apply-all --yes >/dev/null 2>&1 )
+
+grep -qx "$STOCK" "$sb/state/packages_disabled" 2>/dev/null \
+    && bad "the unlock disabled the stock launcher" \
+    || ok "the unlock left the stock launcher enabled"
+
+out=$(ui "$sb" TOOLS.sh $'19\n\nq\n')
+echo "$out" | grep -qi 'currently disabled' \
+    && bad "claimed the stock launcher is disabled when it is not" \
+    || ok "no bogus 'disabled' excuse"
+[[ "$(home_now "$sb")" == "$STOCK"* ]] \
+    && ok "home screen handed back to the stock launcher" \
+    || bad "home is '$(home_now "$sb")' after a reset"
 
 ( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
     bash "$SCRIPTS/UNLOCK.sh" --revert --yes >/dev/null 2>&1 )

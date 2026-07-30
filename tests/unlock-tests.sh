@@ -55,9 +55,12 @@ unlock() {
     )
 }
 
-dev() { # run a command on the emulated device
+dev() { # run a command on the emulated device; leading VAR=val become env
     local sb="$1"; shift
-    PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" adb shell "$@" 2>/dev/null | tr -d '\r'
+    local envs=()
+    while [[ "${1:-}" == *=* ]]; do envs+=("$1"); shift; done
+    PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" \
+        env "${envs[@]}" adb shell "$@" 2>/dev/null | tr -d '\r'
 }
 home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
 reboot_dev() { PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$1/state" adb reboot >/dev/null 2>&1; }
@@ -148,14 +151,24 @@ dev "$sb" 'pm list packages -f' | grep -q "=$PROJECTIVY\$" \
 home=$(home_now "$sb")
 [[ "$home" == "$PROJECTIVY"* ]] && ok "home screen is Projectivy" || bad "home is '$home'"
 
+# CORRECTED 2026-07-30. This used to assert the opposite -- that the unlock
+# disables the stock launcher -- on the belief that it would otherwise re-claim
+# HOME on boot. It never competes: an interceptor owns the vendor intent and
+# starts the stock launcher by explicit component. Disabling that interceptor is
+# what stopped a real projector booting for three days, so the invariant now is
+# that the unlock disables nothing and leaves a working fallback behind.
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
-    && ok "stock launcher is disabled" || bad "stock launcher still enabled"
+    && bad "stock launcher was disabled - that is the bricking pattern" \
+    || ok "stock launcher left enabled as the fallback"
 
-# The decisive one. Setting the home activity alone reverts on boot while the
-# stock launcher is enabled -- that is why Nova sat unused since July.
+# The decisive one: a home preference survives a restart on its own.
 reboot_dev "$sb"
 home=$(home_now "$sb")
 [[ "$home" == "$PROJECTIVY"* ]] && ok "still Projectivy after a restart" || bad "reverted to '$home' after restart"
+
+dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
+    && bad "stock launcher ended up disabled after a restart" \
+    || ok "and the fallback is still there after a restart"
 rm -rf "$sb"
 
 # ---------------------------------------------------------------------------
@@ -213,49 +226,88 @@ home=$(home_now "$sb")
 rm -rf "$sb"
 
 # ---------------------------------------------------------------------------
-head_ "a device that will not let go of its launcher fails safely"
-# If disabling the stock launcher does not take, the unlock must not leave the
-# user with no home screen at all. It backs its own change out.
+head_ "a device that refuses to disable its launcher is no longer a special case"
+# This scenario used to check that the unlock backed itself out when
+# `pm disable-user` did not take. There is no disable left to fail: the unlock
+# reaches its goal with a preference alone. The scenario is kept, pointed at the
+# invariant that outlived it -- a device that refuses disables must reach the
+# same end state as one that would allow them, because we never ask.
 
 sb=$(new_sandbox)
 unlock "$sb" FAKE_ADB_REFUSE_DISABLE=1 --apply-all --yes >/dev/null 2>&1
 home=$(home_now "$sb")
-if [[ "$home" == "$STOCK"* ]]; then
-    ok "left the stock launcher working when it could not be disabled"
-else
-    bad "user left with home='$home' after a failed unlock"
-fi
+[[ "$home" == "$PROJECTIVY"* ]] \
+    && ok "reaches Projectivy without ever needing a disable" \
+    || bad "home is '$home' on a device that refuses disables"
+
+dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
+    && bad "something disabled the stock launcher" \
+    || ok "and the stock launcher is still enabled"
 rm -rf "$sb"
 
 # ---------------------------------------------------------------------------
-head_ "a firmware that owns HOME is detected instead of fought"
+head_ "a firmware that owns HOME is handed back to the user, not fought"
 # The real NL5H00X adds CATEGORY_SETUP_WIZARD to the home intent, so
 # com.newlink.wtprovision/.MainActivity wins HOME outright and then starts the
-# stock launcher by name. Setting the preferred launcher does nothing, and
-# disabling the stock launcher would remove what the interceptor starts and
-# leave no home screen at all. The unlock has to refuse, not try.
+# stock launcher by name.
+#
+# The refusal is kept but its reason is now the true one. It is NOT that
+# disabling the stock launcher "would leave none" -- that was the model that
+# bricked a device. It is that no command on API 28 writes a preference covering
+# SETUP_WIZARD, so the CLI simply cannot win that intent. A human can, from the
+# device's own chooser, and the step has to say so instead of trying.
 
 sb=$(new_sandbox)
 ICEPT=com.newlink.wtprovision/.MainActivity
 out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes)
 
-[[ "$out" == *"com.newlink.wtprovision owns HOME on this firmware"* ]] \
+[[ "$out" == *"owns the home intent on this firmware"* ]] \
     && ok "names the component that owns HOME" || bad "did not name the interceptor"
-[[ "$out" == *"would leave none"* ]] \
-    && ok "says why disabling the stock launcher is refused" || bad "did not explain the consequence"
+[[ "$out" == *"CATEGORY_SETUP_WIZARD"* ]] \
+    && ok "gives the real reason the CLI cannot win" || bad "did not explain why the CLI cannot do it"
+[[ "$out" == *"press HOME"* && "$out" == *"Always"* ]] \
+    && ok "tells the user how to finish it on the device" || bad "no instruction for the user"
 [[ "$out" != *"RC=0"* ]] && ok "refuses rather than reporting success" || bad "claimed the unlock worked"
 
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
-    && bad "disabled the stock launcher anyway - user left with no home screen" \
+    && bad "disabled the stock launcher anyway - that is the bricking pattern" \
     || ok "stock launcher left enabled"
 
+dev "$sb" 'pm list packages -d' | grep -q 'com.newlink.wtprovision' \
+    && bad "disabled the home interceptor - this is what stops the device booting" \
+    || ok "and the home interceptor was never touched"
+
 home=$(home_now "$sb")
-[[ "$home" == "$STOCK"* ]] && ok "home screen untouched" || bad "home changed to '$home'"
+[[ "$home" == "$STOCK"* ]] && ok "no stale preference was written" || bad "home changed to '$home'"
 
 # and --status has to say so too, rather than offering a step that cannot work
 out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --status)
-[[ "$out" == *"owns HOME on this firmware"* ]] \
+[[ "$out" == *"owns the home intent on this firmware"* ]] \
     && ok "--status reports it as blocked" || bad "--status did not flag the interception"
+rm -rf "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "the launcher the user picked from the chooser survives a restart"
+# The one path that does work on this firmware. The system's own chooser records
+# a preference against the real intent -- including SETUP_WIZARD -- so it wins
+# where set-home-activity cannot. home_pref_strong is how the emulator models a
+# preference written that way; there is no CLI that produces one.
+
+sb=$(new_sandbox)
+ICEPT=com.newlink.wtprovision/.MainActivity
+unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes >/dev/null 2>&1
+
+# the user presses HOME on the device and picks Projectivy
+echo "$PROJECTIVY/com.spocky.projengmenu.ui.home.MainActivity" > "$sb/state/home_activity"
+touch "$sb/state/home_pref_strong"
+
+reboot_dev "$sb"
+home=$(home_now "$sb")
+[[ "$home" == "$PROJECTIVY"* ]] \
+    && ok "the chooser's preference survives a restart" || bad "reverted to '$home'"
+
+dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
+    && bad "the stock launcher ended up disabled" || ok "with nothing disabled to achieve it"
 rm -rf "$sb"
 
 # ---------------------------------------------------------------------------
@@ -314,6 +366,47 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+head_ "--repair fixes a projector that will not finish booting"
+# The failure this repairs: com.newlink.wtprovision/.MainActivity disabled. It
+# owns the vendor home intent, so with it gone the intent has no candidate,
+# no activity ever starts, boot never completes, and Wi-Fi and adb never come
+# back. `pm list packages -d` cannot see it -- the package is enabled and only
+# the component is not, which is why this went undiagnosed for three days.
+
+sb=$(new_sandbox)
+ICEPT=com.newlink.wtprovision/.MainActivity
+echo "$ICEPT" > "$sb/state/components_disabled"
+
+# the trap that hid it: the package-level query says everything is fine
+dev "$sb" 'pm list packages -d' | grep -q 'wtprovision' \
+    && bad "pm list packages -d saw a disabled component (it cannot)" \
+    || ok "pm list packages -d shows nothing, as on hardware"
+
+# and the vendor intent has nobody left to answer it
+out=$(dev "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.SETUP_WIZARD')
+[[ -z "${out// /}" ]] && ok "the home intent resolves to nothing" || bad "still resolves to '$out'"
+
+out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --repair)
+[[ "$out" == *"is disabled"* ]] && ok "names the disabled component" || bad "did not report the disabled component"
+[[ "$out" == *"RC=0"* ]] && ok "repair succeeds" || { bad "repair failed"; echo "$out" | tail -5 | sed 's/^/        /'; }
+
+grep -q . "$sb/state/components_disabled" 2>/dev/null \
+    && bad "the component is still disabled" || ok "the component was re-enabled"
+
+out=$(dev "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.SETUP_WIZARD')
+[[ "$out" == *"wtprovision"* ]] && ok "the home intent resolves again" || bad "intent still unanswered"
+rm -rf "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "--repair says so when there is nothing to repair"
+
+sb=$(new_sandbox)
+out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR=com.newlink.wtprovision/.MainActivity --repair)
+[[ "$out" == *"Nothing to repair"* ]] && ok "reports a healthy device" || bad "did not report a healthy device"
+[[ "$out" == *"RC=0"* ]] && ok "and succeeds" || bad "failed on a healthy device"
+rm -rf "$sb"
+
+# ---------------------------------------------------------------------------
 echo
 echo "======================================"
 echo "  passed: $PASS   failed: $FAIL"
@@ -327,3 +420,4 @@ if [[ "$leaked" -gt 0 ]]; then
 fi
 
 [[ "$FAIL" -eq 0 ]]
+

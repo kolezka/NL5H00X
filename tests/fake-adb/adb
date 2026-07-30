@@ -214,9 +214,32 @@ run_remote() {
             echo "Package $p new state: disabled-user"; return 0 ;;
         "pm enable "*)
             local p="${cmd##* }"
+            # Component-level, e.g. pm enable com.newlink.wtprovision/.MainActivity.
+            # This is the one that matters: the brick disables a single component
+            # inside an otherwise-enabled package, which `pm list packages -d`
+            # cannot see and which stops the device booting.
+            if [[ "$p" == */* ]]; then
+                grep -vx "$p" "$STATE/components_disabled" > "$STATE/cd.new" 2>/dev/null || true
+                mv "$STATE/cd.new" "$STATE/components_disabled" 2>/dev/null || true
+                echo "Component {$p} new state: enabled"; return 0
+            fi
             grep -vx "$p" "$STATE/packages_disabled" > "$STATE/pd.new" 2>/dev/null || true
             mv "$STATE/pd.new" "$STATE/packages_disabled" 2>/dev/null || true
             echo "Package $p new state: enabled"; return 0 ;;
+        # Pattern requires a dot so it cannot swallow "dumpsys package
+        # preferred-activities", which is handled further down. Package names
+        # always contain dots; that subcommand does not.
+        "dumpsys package "*.*)
+            # Only the slice the toolkit reads: which components of this package
+            # are disabled. `pm list packages -d` answers a different question
+            # and returns nothing here, which is exactly the trap.
+            local p="${cmd##* }"
+            if [[ -s "$STATE/components_disabled" ]] \
+               && grep -q "^$p/" "$STATE/components_disabled" 2>/dev/null; then
+                echo "      disabledComponents:"
+                sed -n "s|^$p/|        $p|p" "$STATE/components_disabled"
+            fi
+            return 0 ;;
         "pm install"*)
             local apk="${cmd##* }"
             if [[ "$(setting_get secure install_non_market_apps)" == "0" ]]; then
@@ -259,7 +282,14 @@ run_remote() {
             # The firmware's home intent carries CATEGORY_SETUP_WIZARD, so
             # whatever declares it owns HOME regardless of the preferred
             # launcher. Off by default; a profile opts in to model the lock.
-            [[ -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" ]] && echo "    $FAKE_ADB_HOME_INTERCEPTOR"
+            #
+            # A disabled component registers nothing, so an interceptor that has
+            # been disabled answers this query with silence -- which is the whole
+            # brick: the intent ends up with no candidate at all.
+            if [[ -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" ]] \
+               && ! grep -qx "$FAKE_ADB_HOME_INTERCEPTOR" "$STATE/components_disabled" 2>/dev/null; then
+                echo "    $FAKE_ADB_HOME_INTERCEPTOR"
+            fi
             return 0 ;;
         "cmd package query-activities"*)
             # --brief style output: one component per line.
@@ -278,6 +308,17 @@ run_remote() {
                 echo "Error: component $comp not found" >&2; return 1; }
             pkg_enabled "$pkg" || { echo "Error: package $pkg is disabled" >&2; return 1; }
             echo "$comp" > "$STATE/home_activity"
+            # MEASURED 2026-07-30. set-home-activity answers Success and writes a
+            # preference recorded against MAIN + HOME + DEFAULT -- it does NOT
+            # cover the CATEGORY_SETUP_WIZARD the firmware actually dispatches,
+            # and it does not refresh the recorded candidate set. On hardware the
+            # stale record was byte-identical before and after the call. So the
+            # write "succeeds" and still loses the vendor intent at boot.
+            #
+            # A preference that does win is written by the system's own chooser
+            # (press HOME, pick a launcher). Tests simulate that by touching
+            # home_pref_strong; there is no CLI on API 28 that produces one.
+            rm -f "$STATE/home_pref_strong" 2>/dev/null || true
             echo Success; return 0 ;;
         # API 28 HAS NO get-home-activity. Measured on the device 2026-07-29:
         # it answers exactly this, and set-home-activity works fine. The
@@ -606,14 +647,28 @@ case "$subcmd" in
         ;;
 
     reboot)
-        # MODELLED HYPOTHESIS, not a measured fact. Evidence: Nova Launcher has
-        # been sitting in /system/app since 2025-07-15 and the device still
-        # boots com.newlink.hisilauncher, so something re-asserts the stock
-        # launcher. The simplest model that explains it is that it wins on boot
-        # while it is still enabled. If the real mechanism turns out to differ,
-        # this is the line to change -- and the unlock's "disable the stock
-        # launcher" step is what makes it robust either way.
-        if [[ -f "$STATE/home_activity" ]] && pkg_enabled com.newlink.hisilauncher; then
+        # CORRECTED 2026-07-30 against hardware. The previous model here was a
+        # labelled hypothesis: that the stock launcher re-claims HOME on boot
+        # while it is enabled, which is why Nova sat unused since July. It was
+        # wrong, and the "disable the stock launcher" step it justified is what
+        # stopped a real projector booting for three days.
+        #
+        # What actually happens: the firmware dispatches home as MAIN + HOME +
+        # CATEGORY_SETUP_WIZARD. Only the interceptor declares SETUP_WIZARD, so
+        # it wins that intent and then starts the stock launcher by explicit
+        # component name. The stock launcher never competes at all, and whether
+        # it is enabled is irrelevant to who wins.
+        #
+        # Nova sat unused because the preference it had was recorded against
+        # HOME + DEFAULT with a candidate set that did not include the
+        # interceptor -- stale, so it never applied. Not because anything
+        # re-claimed anything.
+        #
+        # So: a preference survives a reboot. It only fails to take effect when
+        # an interceptor owns the vendor intent and the preference does not
+        # cover it (see set-home-activity above).
+        if [[ -f "$STATE/home_activity" && -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" \
+              && ! -f "$STATE/home_pref_strong" ]]; then
             echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
         fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"

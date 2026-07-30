@@ -22,6 +22,19 @@ _UNLOCK_SH_LOADED=1
 
 STOCK_LAUNCHER="com.newlink.hisilauncher"
 
+# The component that owns the home intent on this firmware and starts the stock
+# launcher by name. Disabling it is what stops the device booting; see
+# docs/BOOT_DEADLOCK.md. Named here so --repair can check and restore it even
+# when the device is too far gone to answer a query about itself.
+HOME_DISPATCHER_PKG="${HOME_DISPATCHER_PKG:-com.newlink.wtprovision}"
+HOME_DISPATCHER_COMP="${HOME_DISPATCHER_COMP:-com.newlink.wtprovision/.MainActivity}"
+
+# Android's own locked-phase home. It declares HOME but not SETUP_WIZARD, which
+# is exactly why it cannot rescue this firmware's boot on its own -- but started
+# by name it breaks the deadlock, because any activity reaching idle is enough
+# to let finishBooting() run.
+FALLBACK_HOME_COMP="com.android.tv.settings/.system.FallbackHome"
+
 # Projectivy Launcher. This projector is driven by a remote, not a touchscreen,
 # and Projectivy is a leanback launcher -- it lays out for a D-pad and declares
 # LEANBACK_LAUNCHER. Nova, which an earlier attempt left in /system/app, is a
@@ -361,27 +374,47 @@ launcher_present_revert() {
 # the replacement has been seen to actually run.
 # ---------------------------------------------------------------------------
 launcher_default_describe() {
-    echo "Make $LAUNCHER_NAME the home screen and disable the locked stock launcher"
+    echo "Make $LAUNCHER_NAME the home screen (preference only -- nothing is disabled)"
+}
+
+# Who actually wins the intent the firmware dispatches at boot.
+#
+# CORRECTED 2026-07-30. This used to be answered with home_activity(), which
+# reads the recorded preference. That is a different question. This firmware
+# adds CATEGORY_SETUP_WIZARD to the home intent, and a preference recorded
+# without that category loses to whatever declares it -- so the preference can
+# read back perfectly while the next boot ignores it. Ask the resolver instead.
+#
+# Empty interceptor means a device that resolves HOME normally; there the
+# recorded preference is the answer.
+home_owner() {
+    local icept; icept=$(home_interceptor)
+    [[ -n "$icept" ]] && { echo "$icept"; return; }
+    home_activity
 }
 
 launcher_default_state() {
     package_installed "$LAUNCHER_PKG" || { echo "blocked:install the launcher first"; return; }
 
-    # Refuse before doing harm rather than after. Disabling the stock launcher
-    # on a device whose HOME is intercepted does not hand the home screen over
-    # -- it removes what the interceptor starts, and leaves nothing.
-    local icept; icept=$(home_interceptor)
-    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
-        echo "blocked:${icept%%/*} owns HOME on this firmware, so disabling the stock launcher would leave none"
+    local owner; owner=$(home_owner)
+    if [[ "$owner" == "$LAUNCHER_PKG"* ]]; then
+        echo applied
         return
     fi
 
-    local home; home=$(home_activity)
-    if [[ "$home" == "$LAUNCHER_PKG"* ]] && package_disabled "$STOCK_LAUNCHER"; then
-        echo applied
-    else
-        echo not-applied
+    # An interceptor owning the vendor intent is no longer a hazard -- nothing
+    # is disabled now, so it is the fallback that keeps the device booting. It
+    # is still a blocker for the *automated* step, for a different and honest
+    # reason: no command on API 28 writes a preference covering
+    # CATEGORY_SETUP_WIZARD, so the CLI cannot win that intent. A human can, from
+    # the device's own chooser.
+    local icept; icept=$(home_interceptor)
+    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
+        echo "blocked:$icept owns the home intent on this firmware (it declares CATEGORY_SETUP_WIZARD); no command on API 28 writes a preference covering that, so no CLI can override it -- press HOME on the device, pick $LAUNCHER_NAME, confirm 'Always'"
+        return
     fi
+
+    echo not-applied
 }
 
 launcher_default_apply() {
@@ -390,11 +423,18 @@ launcher_default_apply() {
         return 1
     fi
 
-    # Defensive: callers reach this through run_step, which already refuses on
-    # the blocked state above. Kept so the function is safe on its own.
+    # Refuse before writing anything. Setting a preference the vendor intent
+    # will ignore does not hand the home screen over -- it just leaves a stale
+    # record, and a stale record is what started the incident this whole file
+    # now carries scars from.
     local icept; icept=$(home_interceptor)
     if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
-        print_error "$icept owns the home screen on this firmware - refusing"
+        print_error "'$icept' owns the home intent on this firmware"
+        print_warning "No command on API 28 writes a preference covering CATEGORY_SETUP_WIZARD,"
+        print_warning "so the CLI cannot win it. Nothing was changed."
+        print_status "Finish it on the device: press HOME, choose $LAUNCHER_NAME, confirm 'Always'."
+        print_status "Nothing is disabled, so the projector keeps booting to the stock launcher"
+        print_status "until you do -- and still would if the preference ever went stale."
         return 1
     fi
 
@@ -405,32 +445,40 @@ launcher_default_apply() {
         return 1
     fi
 
-    # Everything above this line is reversible by doing nothing. Prove the
-    # replacement works while the stock launcher is still enabled and running,
-    # so a broken launcher costs a failed step rather than a home screen.
-    print_status "Checking $LAUNCHER_NAME actually runs before touching the stock launcher"
+    # Nothing has been changed yet, so a launcher that cannot start costs a
+    # failed step and nothing else.
+    print_status "Checking $LAUNCHER_NAME actually runs"
     if ! launcher_runs "$comp"; then
-        print_warning "Refusing to disable the stock launcher - you would have nothing to go back to"
+        print_warning "Nothing was changed; the stock launcher is untouched"
         return 1
     fi
 
-    # Order matters: disable the stock launcher first, so it cannot win the
-    # home-activity race, then point home at the replacement.
-    adb_root_exec "pm disable-user $STOCK_LAUNCHER" >/dev/null || true
-    if ! package_disabled "$STOCK_LAUNCHER"; then
-        print_error "Could not disable $STOCK_LAUNCHER - it is still enabled"
-        return 1
-    fi
-
+    # NOTHING IS DISABLED HERE, AND THAT IS THE POINT.
+    #
+    # This step used to run `pm disable-user` on the stock launcher first, on
+    # the premise that it would otherwise win the home race on the next boot.
+    # It never competes. The firmware dispatches home as MAIN + HOME +
+    # CATEGORY_SETUP_WIZARD; whatever declares SETUP_WIZARD wins and then starts
+    # the stock launcher by explicit component name. Disabling that interceptor
+    # leaves the intent with zero candidates and the device stops booting --
+    # three days and a soldered UART console to undo. See docs/BOOT_DEADLOCK.md.
+    #
+    # Leaving both enabled is what makes this safe to get wrong: a preference
+    # that goes stale degrades to "boots to the stock launcher" rather than
+    # "does not boot".
     adb_root_exec "cmd package set-home-activity $comp" >/dev/null || true
-    local home; home=$(home_activity)
-    if [[ "$home" != "$LAUNCHER_PKG"* ]]; then
-        print_error "Home activity is '$home', expected $LAUNCHER_PKG"
-        print_warning "Re-enabling the stock launcher so you are not left without one"
-        adb_root_exec "pm enable $STOCK_LAUNCHER" >/dev/null || true
-        return 1
+
+    # Read back the question that decides the next boot, not the one that is
+    # convenient to ask. set-home-activity reports Success either way.
+    local owner; owner=$(home_owner)
+    if [[ "$owner" == "$LAUNCHER_PKG"* ]]; then
+        return 0
     fi
-    return 0
+
+    print_error "Home is '$owner', expected $LAUNCHER_PKG"
+    print_warning "set-home-activity reported success and did not take effect. Nothing was"
+    print_warning "disabled, so the projector still boots to the stock launcher."
+    return 1
 }
 
 launcher_default_revert() {
@@ -488,5 +536,112 @@ cleanup_leftovers_revert() {
     # Deliberately not reversible: these are duplicates of files that remain
     # elsewhere on the device. Saying so is better than pretending.
     print_warning "cleanup_leftovers cannot be undone (the duplicates are gone)"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# repair: a device that will not finish booting
+#
+# --revert assumes a device that boots and answers adb. The failure this repairs
+# leaves neither, so it has to work when the only channel left is a soldered
+# UART console -- in which case it prints what to type rather than doing it.
+# ---------------------------------------------------------------------------
+
+# Is one component of a package disabled? `pm list packages -d` cannot answer
+# this: it lists disabled PACKAGES, and here the package is enabled while a
+# single component inside it is not. Reading the wrong one cost this project a
+# day of believing nothing was disabled.
+component_disabled() {
+    local pkg="$1" comp="${2##*/}"
+    adb_root_exec "dumpsys package $pkg" 2>/dev/null \
+        | awk '/disabledComponents:/{f=1;next} /^ *[a-zA-Z]+:/{f=0} f' \
+        | grep -q "${comp#.}" 
+}
+
+repair_describe() {
+    cat <<EOF
+Diagnose a projector that stops at the vendor logo and never finishes booting,
+and re-enable the home dispatcher if that is what is wrong.
+EOF
+}
+
+# The commands that fix it from a serial console, printed when adb is gone.
+repair_manual_instructions() {
+    cat <<EOF
+
+  The device is not reachable over adb. That is expected for this failure:
+  boot never completes, so Wi-Fi never associates and adbd is never reachable.
+  The chassis USB-A ports are host ports and cannot enumerate to a PC either.
+
+  Recover it over the serial console. On an NL-5H000-MAIN-V1 the pads are two
+  plated through-holes marked TX RX, right of the 4-pin speaker connector.
+  Ground comes from the keypad connector. 115200 8N1, 3.3 V logic.
+  See docs/BOOT_DEADLOCK.md for photographs.
+
+  At the console:
+
+    su 0 dumpsys user | grep -i State          # BOOTING means this failure
+    su 0 pm enable $HOME_DISPATCHER_COMP
+
+  If you want the screen back before rebooting:
+
+    su 0 am start -n $FALLBACK_HOME_COMP
+
+  Verify before you reboot. This must name a component, not "No activity found":
+
+    su 0 pm resolve-activity --brief \\
+      -a android.intent.action.MAIN \\
+      -c android.intent.category.HOME \\
+      -c android.intent.category.SETUP_WIZARD
+
+EOF
+}
+
+repair_run() {
+    # Deliberately not require_device: that exits, and the whole point of this
+    # mode is to be useful precisely when there is no device to talk to.
+    if ! adb devices 2>/dev/null | grep -q "device$"; then
+        print_error "No device on adb"
+        repair_manual_instructions
+        return 2
+    fi
+
+    # A device is there, so establish root now. adb_root_exec refuses outright
+    # without it and answers every query with silence -- which reads exactly
+    # like "nothing is disabled" and is how this check first passed on a broken
+    # device.
+    require_device true
+
+    local fixed=0
+
+    print_status "Checking the component that owns the home intent"
+    if component_disabled "$HOME_DISPATCHER_PKG" "$HOME_DISPATCHER_COMP"; then
+        print_error "$HOME_DISPATCHER_COMP is disabled - this is what stops the device booting"
+        adb_root_exec "pm enable $HOME_DISPATCHER_COMP" >/dev/null || true
+        if component_disabled "$HOME_DISPATCHER_PKG" "$HOME_DISPATCHER_COMP"; then
+            print_error "Could not re-enable it"
+            return 1
+        fi
+        print_success "Re-enabled $HOME_DISPATCHER_COMP"
+        fixed=1
+    else
+        print_success "$HOME_DISPATCHER_COMP is enabled"
+    fi
+
+    # The question that decides the next boot.
+    local owner; owner=$(home_interceptor)
+    if [[ -z "$owner" ]]; then
+        print_error "Nothing answers the vendor home intent (MAIN + HOME + SETUP_WIZARD)"
+        print_warning "The next boot will stall with no home screen."
+        repair_manual_instructions
+        return 1
+    fi
+    print_success "Home intent resolves to $owner"
+
+    if [[ "$fixed" == "1" ]]; then
+        print_status "Reboot to confirm it comes up on its own"
+    else
+        print_success "Nothing to repair"
+    fi
     return 0
 }

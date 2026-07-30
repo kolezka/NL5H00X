@@ -184,6 +184,17 @@ false "nothing resolves" that has nothing to do with the bug.
 
 ## Fixing it
 
+### From the toolkit
+
+```bash
+./scripts/UNLOCK.sh --repair
+```
+
+Checks whether the dispatcher component is disabled, re-enables it, and confirms
+the vendor intent resolves again. It deliberately skips the usual device and
+backup requirements, because this failure leaves neither — with no device on adb
+it prints the serial-console commands instead of doing nothing.
+
 ### Permanent
 
 ```bash
