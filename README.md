@@ -248,6 +248,7 @@ home intent wrong is what bricks this device.
 | [Technical Notes](docs/TECHNICAL_NOTES.md) | Device analysis, ADB commands, partition layout |
 | [Boot Deadlock](docs/BOOT_DEADLOCK.md) | The `wtprovision` brick — mechanism, diagnosis, recovery |
 | [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs fail, and the `/system/app` workaround |
+| [Root PoC](root/README.md) | Why setuid `su` can't root an app here, and the socket-daemon that can |
 | [Security Analysis](docs/SECURITY_ANALYSIS.md) | Detailed security restriction analysis |
 | [Docs README](docs/README.md) | Documentation overview |
 

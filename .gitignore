@@ -6,3 +6,8 @@ projector-backup-*/
 
 # Claude Code worktrees and session state
 .claude/
+
+# Compiled root PoC binaries -- built from source via root/build.sh, never committed
+root/sud
+root/suc
+root/privtest
