@@ -280,7 +280,7 @@ remove_app() {
 
     dir="$code"
     print_warning "About to delete $dir"
-    read -r -p "Type the package name to confirm: " confirm
+    read -r -p "Type the package name to confirm: " confirm </dev/tty || confirm=""
     [[ "$confirm" == "$pkg" ]] || { print_status "Cancelled"; return 1; }
 
     system_rw || return 1
@@ -336,13 +336,22 @@ install_app() {
 
     # An existing copy elsewhere would be shadowed rather than replaced, and the
     # operator would be looking at the old code wondering why nothing changed.
+    #
+    # The package database is not evidence on its own: it still names the old
+    # codePath after that directory has been moved or deleted, and only catches
+    # up on the next boot. So the directory is stat'ed. Warning about a conflict
+    # with something that is no longer on disk trains people to click through
+    # the one warning that matters.
     local existing
     existing=$(adb_root_exec "dumpsys package $pkg" 2>/dev/null | tr -d '\r' \
                | sed -n 's/.*codePath=\(.*\)/\1/p' | head -1) || true
-    if [[ -n "$existing" && "$existing" != "$dir" ]]; then
+    if [[ -n "$existing" && "$existing" != "$dir" ]] \
+       && adb_root_exec "ls -d $existing" >/dev/null 2>&1; then
         print_warning "$pkg is already installed at $existing"
         print_warning "Installing to $dir as well would leave two copies on the device"
-        read -r -p "Continue anyway? [y/N] " a
+        # </dev/tty because adb shell swallows this script's stdin: a piped
+        # answer is forwarded to the device instead of reaching this read.
+        read -r -p "Continue anyway? [y/N] " a </dev/tty || a=""
         [[ "$a" =~ ^[Yy]$ ]] || { print_status "Cancelled"; return 1; }
     fi
 
@@ -497,7 +506,7 @@ main() {
     fi
 
     if [[ "$DO_REBOOT" == "ask" ]]; then
-        read -r -p "Reboot now to finish? [y/N] " a
+        read -r -p "Reboot now to finish? [y/N] " a </dev/tty || a=""
         [[ "$a" =~ ^[Yy]$ ]] && DO_REBOOT=yes || DO_REBOOT=no
     fi
 
