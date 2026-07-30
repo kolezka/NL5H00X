@@ -93,13 +93,22 @@ These look like separate hardware faults. They are one stall.
 | Frozen on vendor logo | `bootanim` exits (`init.svc.bootanim=stopped`); the last frame stays on screen. Not "still loading". |
 | No Wi-Fi | Saved networks are brought up after boot completes. It never does. |
 | No adb over network | Follows from no Wi-Fi. |
-| No adb over USB | Chassis USB-A ports are **host** ports; two hosts cannot enumerate each other. The device-side USB footprint on the board is unpopulated. |
+| No adb over USB | Chassis USB-A ports are **host** ports; two hosts cannot enumerate each other. The device-side USB footprint on the board is unpopulated — see below. |
 | Recovery unreachable | U-Boot accepts `reboot recovery` and logs `starting system with command 'recovery'`, then boots the normal Android image. No usable recovery partition on the units seen. |
 | Key combos do nothing | Same reason — nothing to boot into. |
 
 Meanwhile the device is *fine*: kernel up, `system_server` alive, `zygote`
 running, Bluetooth keyboards pair and work, and the serial console offers a
 shell. It looks hard-bricked and is not.
+
+The unpopulated device-side USB footprint sits at the bottom-right board edge —
+5 SMD pads at roughly 0.65 mm pitch, pin 1 silkscreen-marked. Fitting a
+micro-USB socket here (or wiring `VBUS`/`D−`/`D+`/`GND` to pads 1/2/3/5, leaving
+`ID` free) is the only route to USB adb on this board. It was not needed for the
+recovery — UART was enough — and is recorded here because it is not obvious from
+the outside:
+
+![Unpopulated device-side USB footprint](../assets/hardware/board-usb-device-footprint.jpg)
 
 ## Diagnosing it
 
@@ -212,6 +221,13 @@ non-direct-boot-aware components are filtered out and both
 ## Serial console reference
 
 Board `NL-5H000-MAIN-V1`, SoC Hi3751v352F, Android 9 / API 28.
+
+![NL-5H000-MAIN-V1 mainboard](../assets/hardware/board-overview.jpg)
+
+The `TX` and `RX` pads are top-right, immediately to the right of the 4-pin
+speaker connector. Close-up:
+
+![UART TX/RX pads close-up](../assets/hardware/uart-pads-txrx-closeup.jpg)
 
 - **Pads:** two plated through-holes silkscreened `TX RX`, immediately right of
   the 4-pin speaker connector (`VOR+ VOR- VOL- VOL+`).

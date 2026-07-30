@@ -94,10 +94,49 @@ change the home screen from Settings. `UNLOCK.sh` fixes that.
 ./scripts/UNLOCK.sh --revert     # put the stock launcher back
 ```
 
-**Copying a launcher APK into `/system/app` is not enough.** It is the first
-thing everyone tries and it does not work: while the stock launcher is still
-enabled it re-claims the home screen on the next boot. The unlock disables it
-first, then sets the home activity. That ordering is the whole trick.
+**Copying a launcher APK into `/system/app` is not enough** — the package must
+also win the home intent. But **do not get there by disabling anything.**
+
+> ### Corrected 2026-07-30 — the previous advice here bricked a device
+>
+> This section used to say the stock launcher "re-claims the home screen on the
+> next boot", so the unlock should disable it first and set the home activity
+> second — "that ordering is the whole trick". **Both halves were wrong.**
+>
+> `com.newlink.hisilauncher` never wins HOME on its own. This firmware dispatches
+> home as `MAIN` + `HOME` + **`SETUP_WIZARD`**, and the only component declaring
+> `SETUP_WIZARD` is `com.newlink.wtprovision/.MainActivity` — it wins uniquely and
+> then starts the stock launcher by explicit component name.
+>
+> Disabling that dispatcher leaves the intent with **zero** candidates, and the
+> device stops booting: no home resolves → no activity starts → nothing goes idle
+> → `finishBooting()` never runs → `sys.boot_completed` is never set. Wi-Fi, adb
+> and recovery all disappear with it. Recovering ours took a soldered UART
+> console. See [docs/BOOT_DEADLOCK.md](docs/BOOT_DEADLOCK.md).
+
+**Change the launcher with a preference, never with a disable.** Leave
+`wtprovision` enabled — it stays as the fallback, so a preference that ever goes
+stale degrades to "boots to the stock launcher" instead of "does not boot".
+
+The most reliable route is the system's own chooser: with a second launcher
+installed, press HOME and pick it. Android then writes a preference recorded
+against the *real* intent (including `SETUP_WIZARD`) with the correct candidate
+set. `pm set-home-activity` is weaker — it reports `Success` without refreshing
+the recorded candidate set, and a stale set resolves to nothing.
+
+Verify before rebooting. This must name your chosen launcher, not `No activity found`:
+
+```bash
+adb shell 'su 0 pm resolve-activity --brief \
+  -a android.intent.action.MAIN \
+  -c android.intent.category.HOME \
+  -c android.intent.category.SETUP_WIZARD'
+```
+
+Projectivy running as the home screen after a clean boot, with `wtprovision`
+left enabled:
+
+![Projectivy running as the launcher](assets/hardware/projectivy-running.jpg)
 
 What it does, one step at a time — each is checked by reading the value back
 off the device, not by trusting the command's exit code:
