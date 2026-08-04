@@ -246,8 +246,10 @@ home intent wrong is what bricks this device.
 | Document | Description |
 |----------|-------------|
 | [Technical Notes](docs/TECHNICAL_NOTES.md) | Device analysis, ADB commands, partition layout |
+| [Boot Branding](docs/BOOT_BRANDING.md) | Replacing the U-Boot logo and the boot animation — formats, the ~7 fps ceiling, the silent `adb push` trap |
 | [Boot Deadlock](docs/BOOT_DEADLOCK.md) | The `wtprovision` brick — mechanism, diagnosis, recovery |
 | [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs fail, and the `/system/app` workaround |
+| [Developer Options](docs/DEV_OPTIONS_CRASH.md) | Why the Developer options screen crashes, and the AOSP platform key that makes patching it possible |
 | [Root PoC](root/README.md) | Why setuid `su` can't root an app here, and the socket-daemon that can |
 | [Security Analysis](docs/SECURITY_ANALYSIS.md) | Detailed security restriction analysis |
 | [Docs README](docs/README.md) | Documentation overview |
