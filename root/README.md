@@ -31,9 +31,19 @@ $ su 2000 privtest nnp   su 0 id   ->  su: setgid failed
 `PR_SET_NO_NEW_PRIVS`, then execs whatever you give it. It is why we know the
 setuid route is a dead end rather than a bug to chase — and it is the reason
 every real root solution (Magisk, SuperSU, KernelSU) uses a daemon rather than a
-setuid binary. Magisk itself cannot run here for an unrelated reason: this
-firmware's boot and recovery images both carry `ramdisk=0` (the initramfs is
-compiled into the kernel), so there is nothing for it to patch.
+setuid binary. Magisk itself cannot run here for an unrelated reason: both the
+boot and the recovery image carry `ramdisk=0` in their Android headers, so
+`magiskboot unpack` finds no cpio to inject into.
+
+That header field is not the whole story, and the difference matters if anyone
+picks this up again. `boot` genuinely has no ramdisk — its built-in initramfs is
+the stock 462-byte empty cpio, and the kernel mounts `system` directly via
+`root=/dev/mmcblk0p20`. `recovery` is the opposite: its ramdisk is real and
+complete (20,690,944 B, 245 entries, with `init`, `sepolicy` and the UI images),
+compiled into the kernel as a gzip blob rather than appended to the image. So
+the recovery ramdisk exists — it is simply somewhere `magiskboot` does not look,
+and replacing it means editing inside the zImage while preserving the region's
+byte length.
 
 ## How the daemon works
 
