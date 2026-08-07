@@ -136,6 +136,70 @@ $ adb shell dumpsys package org.smarttube.stable | grep -E "primaryCpuAbi|Native
     primaryCpuAbi=armeabi-v7a
 ```
 
+## The other sharp edge: apps that only ship as split bundles
+
+`INSTALL_APP.sh` takes exactly one APK, and a lot of current apps are not
+distributed as one. A Play-style bundle is a base APK plus config splits — one
+per ABI, one per density, one per language — and the `.so` files live in the ABI
+split, not in the base.
+
+Checked 2026-08-07 on Prime Video (Android TV), `com.amazon.amazonvideo.livingroom`:
+eleven releases sampled across the range 6.24.4 down to 6.17.0 (June 2024) are
+**all** bundles — 26 splits each, or 27 for the `allAbis` uploads that carry arm64
+as well. Older releases were not checked. There is no standalone APK anywhere in
+that range, so "find a plain APK instead" is not a strategy for this app.
+
+The obvious route is a split install, and it fails exactly like everything else:
+
+```
+$ adb install-multiple base.apk split_config.armeabi_v7a.apk \
+      split_config.xhdpi.apk split_config.en.apk split_config.pl.apk
+adb: failed to finalize session
+Failure [INSTALL_FAILED_INVALID_INSTALL_LOCATION]
+```
+
+Same error, same patched PMS. Splits change nothing — this is not a separate
+problem to solve, it is the same one.
+
+So the splits have to become a single APK before `/system/app` can take it.
+Merging rewrites the archive, which invalidates the developer's signature, so the
+result must be re-signed with a local key. For a package that has never been
+installed here that is harmless: nothing on the device holds a prior signature to
+match against.
+
+```
+$ java -jar APKEditor.jar m -i app.apkm -o merged.apk
+$ zipalign -f -p 4 merged.apk aligned.apk
+$ apksigner sign --ks local.jks --min-sdk-version 21 --out App.apk aligned.apk
+```
+
+**The trap is `requiredSplitTypes`.** The base manifest declares
+`requiredSplitTypes="base__abi,base__density"`, and a base APK moved on its own
+is a package with no native code and no resources. APKEditor drops the attribute
+in its "Sanitizing manifest" pass — verify that it actually did, because nothing
+downstream will complain until the app fails to start:
+
+```
+$ aapt2 dump xmltree --file AndroidManifest.xml App.apk | grep requiredSplitTypes
+                                              # must print nothing
+$ aapt2 dump badging App.apk | grep -E "^package|native-code"
+package: name='com.amazon.amazonvideo.livingroom' versionCode='606023231' ...
+native-code: 'armeabi-v7a'
+$ zipalign -c -p -v 4 App.apk | tail -1
+Verification successful
+```
+
+That last check is not ceremony. The merged app kept `extractNativeLibs="false"`,
+which means the platform maps the `.so` files straight out of the archive and
+they must stay `Stored` and aligned — a merge that recompresses them produces an
+APK that installs and then dies at the first `System.loadLibrary`, which is the
+same failure mode as the missing `lib/` directory above, from a different cause.
+
+Measured result, 2026-08-07: 26 MB merged APK, registered after the reboot with
+`primaryCpuAbi=armeabi-v7a`, `IgnitionActivity` reached `mResumedActivity`, and
+the leanback UI rendered with artwork. Playback was not tested — that needs an
+account, and this device's Widevine level is still unestablished.
+
 ## Consequences of installing this way
 
 - The app is a **system app**. It cannot be uninstalled through the UI; removing
@@ -147,6 +211,10 @@ $ adb shell dumpsys package org.smarttube.stable | grep -E "primaryCpuAbi|Native
   registers. On this firmware that is exactly how the device stops booting —
   `INSTALL_APP.sh` refuses such APKs unless `--allow-home` is given. See
   [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md).
+- A merged bundle carries a **locally generated signature**, not the developer's.
+  Nothing on this device checked it, but an app that verifies its own signature at
+  runtime would, and there is no upgrade path afterwards: every new version means
+  downloading the bundle and repeating the merge by hand.
 
 ## Related
 
@@ -157,4 +225,4 @@ $ adb shell dumpsys package org.smarttube.stable | grep -E "primaryCpuAbi|Native
 - Same fallback, launcher-specific: `launcher_present_apply()` in
   `scripts/lib/unlock.sh`
 
-_Last updated: 2026-07-30_
+_Last updated: 2026-08-07_
