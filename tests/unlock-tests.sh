@@ -6,17 +6,22 @@ set -uo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+source "$TEST_DIR/local/lifecycle.sh"
+source "$TEST_DIR/local/sandboxes.sh"
+FAKE_ADB_DIR=${PT_FAKE_ADB_CANONICAL:-"$TEST_DIR/fake-adb/adb"}
+FAKE_ADB_DIR=${FAKE_ADB_DIR%/*}
 SCRIPTS="${TOOLKIT_SCRIPTS:-$REPO_ROOT/scripts}"
 
 PASS=0; FAIL=0
 ok()    { echo "  [PASS] $1"; PASS=$((PASS + 1)); }
-bad()   { echo "  [FAIL] $1"; FAIL=$((FAIL + 1)); }
-head_() { echo; echo "=== $1 ==="; }
+bad()   { echo "  [FAIL] $1"; FAIL=$((FAIL + 1)); sandbox_fail; }
+head_() { SCENARIO="$1"; echo; echo "=== $1 ==="; }
 
 # A sandbox is an emulated device plus a working directory that already holds a
 # verified backup, since UNLOCK.sh refuses to run without one.
 new_sandbox() {
-    local sb; sb=$(mktemp -d)
+    sb=$(mktemp -d)
+    sandbox_register "$sb"
     bash "$TEST_DIR/device-emu/seed.sh" "$sb/state" >/dev/null
     mkdir -p "$sb/run/projector-backup-20260101_000000"
     cp "$sb/state/blockdev" "$sb/run/projector-backup-20260101_000000/full-system-backup.img"
@@ -31,10 +36,10 @@ new_sandbox() {
 pkg=$PROJECTIVY
 home=$PROJECTIVY/com.spocky.projengmenu.ui.home.MainActivity
 EOF
-    echo "$sb"
 }
 
 # Run UNLOCK.sh in a sandbox. Extra env goes before the command.
+# Guard empty env arrays: Bash 3.2 treats them as unset under set -u.
 unlock() {
     local sb="$1"; shift
     local envs=()
@@ -48,8 +53,8 @@ unlock() {
         # expanding -- so "${envs[@]}" in prefix position ran the variable as a
         # command and returned 127. Tests then read that 127 as the script
         # failing and passed while proving nothing.
-        PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
-            env "${envs[@]}" \
+        PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+            env ${envs[@]+"${envs[@]}"} \
             bash "$SCRIPTS/UNLOCK.sh" "$@" </dev/null 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
         echo "RC=${PIPESTATUS[0]}"
     )
@@ -59,11 +64,11 @@ dev() { # run a command on the emulated device; leading VAR=val become env
     local sb="$1"; shift
     local envs=()
     while [[ "${1:-}" == *=* ]]; do envs+=("$1"); shift; done
-    PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" \
-        env "${envs[@]}" adb shell "$@" 2>/dev/null | tr -d '\r'
+    PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" \
+        env ${envs[@]+"${envs[@]}"} adb shell "$@" 2>/dev/null | tr -d '\r'
 }
 home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
-reboot_dev() { PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$1/state" adb reboot >/dev/null 2>&1; }
+reboot_dev() { PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$1/state" adb reboot >/dev/null 2>&1; }
 
 STOCK=com.newlink.hisilauncher
 NOVA=com.teslacoilsw.launcher
@@ -72,7 +77,7 @@ PROJECTIVY=com.spocky.projengmenu
 # ---------------------------------------------------------------------------
 head_ "the device starts locked, exactly as the real one does"
 
-sb=$(new_sandbox)
+new_sandbox
 home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "home screen is the stock launcher" || bad "unexpected home: $home"
 
@@ -91,12 +96,12 @@ if dev "$sb" 'cmd package query-activities --brief -a android.intent.action.MAIN
 else
     bad "seed does not register Nova as a home activity"
 fi
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "--status changes nothing and needs no backup"
 
-sb=$(new_sandbox)
+new_sandbox
 rm -rf "$sb"/run/projector-backup-*          # no backup at all
 before=$(cat "$sb/state/settings" "$sb/state/home_activity")
 out=$(unlock "$sb" --status)
@@ -105,12 +110,12 @@ after=$(cat "$sb/state/settings" "$sb/state/home_activity")
 [[ "$out" == *"RC=0"* ]] && ok "--status succeeds without a backup" || bad "--status failed without a backup"
 [[ "$before" == "$after" ]] && ok "--status left the device untouched" || bad "--status modified device state"
 [[ "$out" == *"CURRENT STATE"* ]] && ok "--status reports the state" || bad "no state in output"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "applying without a backup is refused"
 
-sb=$(new_sandbox)
+new_sandbox
 rm -rf "$sb"/run/projector-backup-*
 out=$(unlock "$sb" --apply-all --yes)
 if [[ "$out" != *"RC=0"* ]] && [[ "$out" == *"backup"* ]]; then
@@ -120,12 +125,12 @@ else
 fi
 home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "device untouched after refusal" || bad "device changed despite refusal"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "a different projector model is refused"
 
-sb=$(new_sandbox)
+new_sandbox
 sed -i '' 's/^ro.product.model=.*/ro.product.model=SOMETHING_ELSE/' "$sb/state/props" 2>/dev/null || \
     sed -i 's/^ro.product.model=.*/ro.product.model=SOMETHING_ELSE/' "$sb/state/props"
 sed -i '' 's/^ro.product.device=.*/ro.product.device=other/' "$sb/state/props" 2>/dev/null || \
@@ -136,12 +141,12 @@ if [[ "$out" != *"RC=0"* ]] && [[ "$out" == *"Unsupported device"* ]]; then
 else
     bad "did not refuse an unsupported device"
 fi
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "the full unlock works and survives a restart"
 
-sb=$(new_sandbox)
+new_sandbox
 out=$(unlock "$sb" --apply-all --yes)
 [[ "$out" == *"RC=0"* ]] && ok "unlock completes" || { bad "unlock failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
 
@@ -169,7 +174,7 @@ home=$(home_now "$sb")
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
     && bad "stock launcher ended up disabled after a restart" \
     || ok "and the fallback is still there after a restart"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "a launcher that does not actually run is never trusted"
@@ -177,7 +182,7 @@ head_ "a launcher that does not actually run is never trusted"
 # dies still appears in pm list packages, and disabling the stock launcher on
 # that basis leaves the projector with no home screen at all.
 
-sb=$(new_sandbox)
+new_sandbox
 out=$(unlock "$sb" FAKE_ADB_LAUNCHER_CRASHES=1 --apply-all --yes)
 
 [[ "$out" == *"not usable as a home screen"* ]] \
@@ -193,12 +198,12 @@ home=$(home_now "$sb")
 reboot_dev "$sb"
 home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "and still works after a restart" || bad "home drifted to '$home' after restart"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "running it twice changes nothing the second time"
 
-sb=$(new_sandbox)
+new_sandbox
 unlock "$sb" --apply-all --yes >/dev/null
 snap1=$(cat "$sb/state/settings" "$sb/state/home_activity" "$sb/state/packages_disabled")
 out=$(unlock "$sb" --apply-all --yes)
@@ -207,12 +212,12 @@ snap2=$(cat "$sb/state/settings" "$sb/state/home_activity" "$sb/state/packages_d
 [[ "$out" == *"RC=0"* ]] && ok "second run succeeds" || bad "second run failed"
 [[ "$snap1" == "$snap2" ]] && ok "second run left the device identical" || bad "second run changed state"
 [[ "$out" == *"already"* ]] && ok "says it had nothing to do" || bad "did not report a no-op"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "undo puts the stock launcher back"
 
-sb=$(new_sandbox)
+new_sandbox
 unlock "$sb" --apply-all --yes >/dev/null
 out=$(unlock "$sb" --revert --yes)
 
@@ -223,7 +228,7 @@ dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
 reboot_dev "$sb"
 home=$(home_now "$sb")
 [[ "$home" == "$STOCK"* ]] && ok "still stock after a restart" || bad "home drifted to '$home'"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "a device that refuses to disable its launcher is no longer a special case"
@@ -233,7 +238,7 @@ head_ "a device that refuses to disable its launcher is no longer a special case
 # invariant that outlived it -- a device that refuses disables must reach the
 # same end state as one that would allow them, because we never ask.
 
-sb=$(new_sandbox)
+new_sandbox
 unlock "$sb" FAKE_ADB_REFUSE_DISABLE=1 --apply-all --yes >/dev/null 2>&1
 home=$(home_now "$sb")
 [[ "$home" == "$PROJECTIVY"* ]] \
@@ -243,7 +248,7 @@ home=$(home_now "$sb")
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
     && bad "something disabled the stock launcher" \
     || ok "and the stock launcher is still enabled"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "a firmware that owns HOME is handed back to the user, not fought"
@@ -257,7 +262,7 @@ head_ "a firmware that owns HOME is handed back to the user, not fought"
 # SETUP_WIZARD, so the CLI simply cannot win that intent. A human can, from the
 # device's own chooser, and the step has to say so instead of trying.
 
-sb=$(new_sandbox)
+new_sandbox
 ICEPT=com.newlink.wtprovision/.MainActivity
 out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes)
 
@@ -284,7 +289,7 @@ home=$(home_now "$sb")
 out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --status)
 [[ "$out" == *"owns the home intent on this firmware"* ]] \
     && ok "--status reports it as blocked" || bad "--status did not flag the interception"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "the launcher the user picked from the chooser survives a restart"
@@ -293,7 +298,7 @@ head_ "the launcher the user picked from the chooser survives a restart"
 # where set-home-activity cannot. home_pref_strong is how the emulator models a
 # preference written that way; there is no CLI that produces one.
 
-sb=$(new_sandbox)
+new_sandbox
 ICEPT=com.newlink.wtprovision/.MainActivity
 unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes >/dev/null 2>&1
 
@@ -308,7 +313,7 @@ home=$(home_now "$sb")
 
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
     && bad "the stock launcher ended up disabled" || ok "with nothing disabled to achieve it"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "a device that refuses installs still gets the launcher"
@@ -318,7 +323,7 @@ head_ "a device that refuses installs still gets the launcher"
 # so the fallback has to fire, and it must be honest that a restart is needed
 # rather than reporting a launcher that is not registered yet as present.
 
-sb=$(new_sandbox)
+new_sandbox
 out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
 
 [[ "$out" == *"INSTALL_FAILED_INVALID_INSTALL_LOCATION"* ]] \
@@ -339,7 +344,7 @@ dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
 # is / -- it is system-as-root, so /system is never its own mount.
 dev "$sb" 'cat /proc/mounts' | awk '$2 == "/" && $4 ~ /^ro(,|$)/ { f = 1 } END { exit !f }' \
     && ok "/ put back read-only" || bad "/ left writable"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "the shipped launcher APK is the one we say it is"
@@ -373,7 +378,7 @@ head_ "--repair fixes a projector that will not finish booting"
 # back. `pm list packages -d` cannot see it -- the package is enabled and only
 # the component is not, which is why this went undiagnosed for three days.
 
-sb=$(new_sandbox)
+new_sandbox
 ICEPT=com.newlink.wtprovision/.MainActivity
 echo "$ICEPT" > "$sb/state/components_disabled"
 
@@ -395,16 +400,16 @@ grep -q . "$sb/state/components_disabled" 2>/dev/null \
 
 out=$(dev "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.SETUP_WIZARD')
 [[ "$out" == *"wtprovision"* ]] && ok "the home intent resolves again" || bad "intent still unanswered"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "--repair says so when there is nothing to repair"
 
-sb=$(new_sandbox)
+new_sandbox
 out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR=com.newlink.wtprovision/.MainActivity --repair)
 [[ "$out" == *"Nothing to repair"* ]] && ok "reports a healthy device" || bad "did not report a healthy device"
 [[ "$out" == *"RC=0"* ]] && ok "and succeeds" || bad "failed on a healthy device"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 echo
@@ -412,12 +417,8 @@ echo "======================================"
 echo "  passed: $PASS   failed: $FAIL"
 echo "======================================"
 
-# A suite that leaks processes poisons whatever runs after it.
-leaked=$(pgrep -f 'sleep 600' 2>/dev/null | wc -l | tr -d ' ')
-if [[ "$leaked" -gt 0 ]]; then
-    echo "  WARNING: $leaked orphaned hang-simulation processes left behind"
-    pkill -f 'sleep 600' 2>/dev/null || true
-fi
+# Pattern reapers can signal unrelated host processes. Release owned jobs only.
+child_release_all
 
 [[ "$FAIL" -eq 0 ]]
 

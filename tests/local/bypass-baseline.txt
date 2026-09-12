@@ -1,0 +1,133 @@
+# Format: repository-relative-v1
+# Scope: all of scripts/, including scripts/lib/transport/.
+# Historical absolute-path baseline remains in git blob 69abc5299bb94ca102df558f8d4fc1f15ab0a30e.
+# Each result is sorted and recorded with repository-relative filenames.
+COMMAND rg -n '(^|[^-_./[:alnum:]])adb[[:space:]]' scripts/
+scripts/INSTALL_APP.sh:208:    before=$(adb shell 'cat /proc/uptime' 2>/dev/null | awk '{print int($1)}')
+scripts/INSTALL_APP.sh:212:    adb reboot >/dev/null 2>&1 || true
+scripts/INSTALL_APP.sh:216:        [[ "$(adb shell 'getprop sys.boot_completed' 2>/dev/null | tr -d '\r')" == "1" ]] || continue
+scripts/INSTALL_APP.sh:217:        after=$(adb shell 'cat /proc/uptime' 2>/dev/null | awk '{print int($1)}')
+scripts/INSTALL_APP.sh:352:        # </dev/tty because adb shell swallows this script's stdin: a piped
+scripts/INSTALL_APP.sh:362:        dev_abis=$(adb shell 'getprop ro.product.cpu.abilist' 2>/dev/null | tr -d '\r')
+scripts/INSTALL_APP.sh:381:    local out; out=$(adb install -r "$apk" 2>&1 || true)
+scripts/INSTALL_APP.sh:390:    # Staged through $STAGING because `adb push` runs as the shell user, which
+scripts/INSTALL_APP.sh:393:    adb push "$apk" "$remote" >/dev/null || { print_error "Could not upload to $remote"; return 1; }
+scripts/INSTALL_APP.sh:415:        adb shell "mkdir -p $STAGING/applibs" >/dev/null 2>&1 || true
+scripts/INSTALL_APP.sh:416:        adb push "$libtmp/." "$STAGING/applibs/" >/dev/null || {
+scripts/INSTALL_APP.sh:5:# path there is -- adb streamed, session, local file, with -f, and as uid 0 --
+scripts/MAKE_BACKUP.sh:125:        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:133:        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:138:    if ! adb pull /sdcard/temp_backup.img "$output_file" >/dev/null 2>&1; then
+scripts/MAKE_BACKUP.sh:140:        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:148:        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:152:    adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:281:            adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:290:            adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:294:        if ! adb pull /sdcard/chunk.img "$chunk_file" >/dev/null 2>&1; then
+scripts/MAKE_BACKUP.sh:296:            adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:304:            adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:308:        adb shell "rm -f /sdcard/chunk.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:359:        adb shell "rm -f /sdcard/full_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:367:        adb shell "rm -f /sdcard/full_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:372:    if ! adb pull /sdcard/full_backup.img full-system-backup.img >/dev/null 2>&1; then
+scripts/MAKE_BACKUP.sh:384:    adb shell "rm -f /sdcard/full_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:40:    adb shell df /sdcard/ 2>/dev/null | tail -1 | awk '{print $4 * 1024}'
+scripts/MAKE_BACKUP.sh:416:        adb shell cmd package set-home-activity "${HOME:-com.newlink.hisilauncher}"
+scripts/MAKE_BACKUP.sh:420:        [[ -f complete-app-backup.ab ]] && adb restore complete-app-backup.ab || echo "No app backup found"
+scripts/MAKE_BACKUP.sh:425:            adb push system.img /sdcard/
+scripts/MAKE_BACKUP.sh:426:            adb shell "su -c 'dd if=/sdcard/system.img of=/dev/block/mmcblk0p20 bs=1048576'"
+scripts/MAKE_BACKUP.sh:427:            adb shell rm -f /sdcard/system.img
+scripts/MAKE_BACKUP.sh:459:            adb push full-system-backup.img /sdcard/ || {
+scripts/MAKE_BACKUP.sh:461:                cat full-system-backup.img | adb shell "su -c 'dd of=/dev/block/mmcblk0 bs=1048576'"
+scripts/MAKE_BACKUP.sh:463:            adb reboot
+scripts/MAKE_BACKUP.sh:475:adb shell cmd package set-home-activity com.newlink.hisilauncher
+scripts/MAKE_BACKUP.sh:476:adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
+scripts/MAKE_BACKUP.sh:47:    adb shell getprop > system-properties.txt
+scripts/MAKE_BACKUP.sh:51:    adb shell pm list packages -f > installed-packages.txt
+scripts/MAKE_BACKUP.sh:52:    adb shell pm list packages -e > enabled-packages.txt
+scripts/MAKE_BACKUP.sh:53:    adb shell pm list packages -d > disabled-packages.txt
+scripts/MAKE_BACKUP.sh:57:    adb shell "su -c 'cat /proc/partitions'" > partition-info.txt 2>/dev/null || \
+scripts/MAKE_BACKUP.sh:58:        adb shell "echo 'cat /proc/partitions' | su" > partition-info.txt 2>/dev/null
+scripts/MAKE_BACKUP.sh:62:    adb shell cmd package get-home-activity > current-home-activity.txt 2>/dev/null || \
+scripts/MAKE_BACKUP.sh:73:    if adb backup -all -f complete-app-backup.ab 2>/dev/null; then
+scripts/PROJECTOR.sh:269:    if ! command -v adb >/dev/null; then
+scripts/PROJECTOR.sh:270:        print_error "adb is not installed or not in PATH"
+scripts/PROJECTOR.sh:61:        printf "  ${DIM}%s${NC}\n" "connect over USB, or: adb connect <ip>:5555"
+scripts/PROJECTOR.sh:92:    command -v adb >/dev/null || return 0
+scripts/PROJECTOR.sh:93:    adb devices 2>/dev/null | grep -q "device$" || return 0
+scripts/PROJECTOR.sh:95:    DEV_MODEL=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
+scripts/TOOLS.sh:156:    adb shell getprop | grep -E "ro.product.model|ro.product.manufacturer|ro.build.version.release" | \
+scripts/TOOLS.sh:162:    adb shell df -h /sdcard/ 2>/dev/null | tail -1 | awk '{print "  Total: "$2"  Used: "$3"  Free: "$4}'
+scripts/TOOLS.sh:166:    adb shell cat /proc/meminfo 2>/dev/null | head -3 | sed 's/^/  /'
+scripts/TOOLS.sh:175:    adb shell cat /proc/cpuinfo 2>/dev/null | grep -E "^Hardware|^processor" | head -5 | sed 's/^/  /'
+scripts/TOOLS.sh:179:    adb shell dumpsys display 2>/dev/null | grep -E "mDisplayId=0|mCurrentDisplayRect" | head -2 | sed 's/^/  /'
+scripts/TOOLS.sh:186:    adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | head -30
+scripts/TOOLS.sh:196:        if adb shell ps 2>/dev/null | grep -q "$svc"; then
+scripts/TOOLS.sh:61:    echo -e "${YELLOW}> adb shell $cmd${NC}"
+scripts/TOOLS.sh:64:    out=$(adb shell "$cmd" 2>&1); rc=$?
+scripts/TOOLS.sh:83:    if adb shell "pm list packages -d" 2>/dev/null | grep -q "$STOCK_LAUNCHER_PKG"; then
+scripts/TOOLS.sh:95:    comp=$(adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
+scripts/UNLOCK.sh:123:    print_warning "Restart the projector for the new home screen to appear:  adb reboot"
+scripts/UNLOCK.sh:195:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
+scripts/UNLOCK.sh:213:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+scripts/UNLOCK.sh:216:leaves the device with no adb at all. Without a device it prints the commands
+scripts/UNLOCK.sh:238:    # in this failure has no adb by definition, and that is exactly when someone
+scripts/UNLOCK.sh:29:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
+scripts/UNLOCK.sh:30:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
+scripts/lib/common.sh:125:# Usage: adb_exec "description" "adb shell command"
+scripts/lib/common.sh:144:# `adb shell` cannot be trusted to propagate the far-side status: on older shell
+scripts/lib/common.sh:163:        direct) raw=$(adb shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/common.sh:164:        piped)  raw=$(adb shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/common.sh:192:#   exec-out, not shell -- `adb shell` runs the far side on a pty on some
+scripts/lib/common.sh:209:        direct) adb exec-out "su -c '$cmd 2>/dev/null'" ;;
+scripts/lib/common.sh:210:        piped)  adb exec-out "echo '$cmd 2>/dev/null' | su" ;;
+scripts/lib/common.sh:275:    out=$(adb shell "ls -l $path" 2>/dev/null | tr -d '\r' | awk 'NR==1 {print $5}')
+scripts/lib/common.sh:298:    if adb shell am start -n "$activity" 2>/dev/null | grep -q "Error"; then
+scripts/lib/common.sh:313:    adb shell am start -a "$action" 2>/dev/null
+scripts/lib/common.sh:60:    if ! command -v adb &>/dev/null; then
+scripts/lib/common.sh:69:    if ! adb devices 2>/dev/null | grep -q "device$"; then
+scripts/lib/common.sh:86:    result=$(adb shell "su -c 'whoami'" 2>/dev/null | tr -d '\r\n')
+scripts/lib/common.sh:92:    result=$(adb shell "echo 'whoami' | su" 2>/dev/null | tr -d '\r\n')
+scripts/lib/transport/select.sh:32:                PT_ADB_BIN=$(command -v adb 2>/dev/null) || {
+scripts/lib/transport/select.sh:33:                    printf 'transport: adb not on PATH\n' >&2
+scripts/lib/unlock.sh:14:#   value back off the device. `adb shell ... || true` is how you end up telling
+scripts/lib/unlock.sh:280:# On this projector it does not work. Every install path -- adb install,
+scripts/lib/unlock.sh:301:    out=$(adb install -r "$apk" 2>&1)
+scripts/lib/unlock.sh:307:    # Staged through /data/local/tmp on purpose. `adb push` runs as the shell
+scripts/lib/unlock.sh:310:    # `adb root` is unavailable, which is every Magisk-rooted one.
+scripts/lib/unlock.sh:314:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
+scripts/lib/unlock.sh:568:# The commands that fix it from a serial console, printed when adb is gone.
+scripts/lib/unlock.sh:603:    if ! adb devices 2>/dev/null | grep -q "device$"; then
+MATCHED_LINES 95
+
+COMMAND rg -n '/adb|\$\{?ADB|command -v adb|which adb' scripts/
+scripts/PROJECTOR.sh:269:    if ! command -v adb >/dev/null; then
+scripts/PROJECTOR.sh:92:    command -v adb >/dev/null || return 0
+scripts/lib/common.sh:60:    if ! command -v adb &>/dev/null; then
+scripts/lib/transport/select.sh:32:                PT_ADB_BIN=$(command -v adb 2>/dev/null) || {
+MATCHED_LINES 4
+
+COMMAND rg -n '\beval\b' scripts/
+scripts/TOOLS.sh:107:# every Mac user. eval-based indirection is uglier and works everywhere.
+scripts/TOOLS.sh:109:section_items() { eval "printf '%s\n' \"\${$1[@]}\""; }
+scripts/lib/common.sh:133:    if eval "$cmd" 2>/dev/null; then
+MATCHED_LINES 3
+
+COMMAND rg -n '\$\{?PT_ADB_BIN|(^|[[:space:];|&()])/[[:alnum:]_.~+/@:-]*/adb([[:space:];|&()]|$)' scripts/
+scripts/lib/transport/adb.sh:146:    out=$("$PT_ADB_BIN" shell "ls -l $path" 2>&1) || return 1
+scripts/lib/transport/adb.sh:21:    "$PT_ADB_BIN" "$verb" "$@"
+scripts/lib/transport/adb.sh:28:    result=$("$PT_ADB_BIN" shell "su -c 'whoami'" 2>/dev/null | tr -d '\r\n')
+scripts/lib/transport/adb.sh:34:    result=$("$PT_ADB_BIN" shell "echo 'whoami' | su" 2>/dev/null | tr -d '\r\n')
+scripts/lib/transport/adb.sh:57:        direct) raw=$("$PT_ADB_BIN" shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/transport/adb.sh:58:        piped) raw=$("$PT_ADB_BIN" shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/transport/adb.sh:90:        direct) "$PT_ADB_BIN" exec-out "su -c '$cmd 2>/dev/null'" ;;
+scripts/lib/transport/adb.sh:91:        piped) "$PT_ADB_BIN" exec-out "echo '$cmd 2>/dev/null' | su" ;;
+scripts/lib/transport/select.sh:11:            [[ -n "${PT_ADB_BIN:-}" ]] || {
+scripts/lib/transport/select.sh:15:            [[ "$PT_ADB_BIN" == /* && -f "$PT_ADB_BIN" && -x "$PT_ADB_BIN" ]] || {
+scripts/lib/transport/select.sh:19:            [[ "$PT_ADB_BIN" == "${PT_FAKE_ADB_CANONICAL:-}" ]] || {
+scripts/lib/transport/select.sh:26:            if [[ "${PT_ADB_BIN+x}" == x ]]; then
+scripts/lib/transport/select.sh:27:                [[ "$PT_ADB_BIN" == /* && -f "$PT_ADB_BIN" && -x "$PT_ADB_BIN" ]] || {
+scripts/lib/transport/select.sh:36:                [[ "$PT_ADB_BIN" == /* && -f "$PT_ADB_BIN" && -x "$PT_ADB_BIN" ]] || {
+scripts/lib/transport/select.sh:52:    printf '%s\n' "$PT_ADB_BIN"
+MATCHED_LINES 15
+

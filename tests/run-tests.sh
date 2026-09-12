@@ -6,6 +6,10 @@ set -uo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+source "$TEST_DIR/local/lifecycle.sh"
+source "$TEST_DIR/local/sandboxes.sh"
+FAKE_ADB_DIR=${PT_FAKE_ADB_CANONICAL:-"$TEST_DIR/fake-adb/adb"}
+FAKE_ADB_DIR=${FAKE_ADB_DIR%/*}
 # Overridable so the suite can be pointed at an older checkout to confirm it
 # actually goes red on the behaviour it is guarding against.
 SCRIPTS="${TOOLKIT_SCRIPTS:-$REPO_ROOT/scripts}"
@@ -14,8 +18,8 @@ PASS=0
 FAIL=0
 
 ok()   { echo "  [PASS] $1"; PASS=$((PASS + 1)); }
-bad()  { echo "  [FAIL] $1"; FAIL=$((FAIL + 1)); }
-head_() { echo; echo "=== $1 ==="; }
+bad()  { echo "  [FAIL] $1"; FAIL=$((FAIL + 1)); sandbox_fail; }
+head_() { SCENARIO="$1"; echo; echo "=== $1 ==="; }
 
 # Small stand-in device: 40 MB in 15 MB chunks -> 3 chunks, the last one a
 # legitimately short 10 MB. Same arithmetic as 7.65 GB / 3000 MB, 200x faster.
@@ -23,12 +27,11 @@ DEV_SIZE_MB=40
 CHUNK_MB=15
 
 new_sandbox() {
-    local sandbox
     sandbox=$(mktemp -d)
+    sandbox_register "$sandbox"
     mkdir -p "$sandbox/state/sdcard"
     dd if=/dev/urandom of="$sandbox/state/blockdev" \
         bs=1048576 count="$DEV_SIZE_MB" 2>/dev/null
-    echo "$sandbox"
 }
 
 # Run MAKE_BACKUP.sh against the fake device. Echoes the run directory; the
@@ -40,7 +43,7 @@ run_backup() {
 
     (
         cd "$rundir" || exit 1
-        PATH="$TEST_DIR/fake-adb:$PATH" \
+        PATH="$FAKE_ADB_DIR:$PATH" \
         FAKE_ADB_STATE="$sandbox/state" \
         CHUNK_SIZE_MB="$CHUNK_MB" \
         "$@" \
@@ -137,7 +140,7 @@ head_ "a resumed run does not re-pull partitions it already has"
 # Every restart used to re-fetch boot.img and the 1.93 GB system.img from
 # scratch -- three minutes each time for files already complete on disk.
 
-sandbox=$(new_sandbox)
+new_sandbox
 rundir=$(run_backup "$sandbox")
 first_ok=$(grep -c 'partition backed up' "$rundir/log" 2>/dev/null)
 bdir=$(ls -d "$sandbox/run"/projector-backup-* | tail -1)
@@ -175,12 +178,12 @@ if grep -q 'does not match the device' "$rundir/log"; then
 else
     bad "accepted a same-size file without checking its content"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "healthy device produces a complete backup"
 
-sandbox=$(new_sandbox)
+new_sandbox
 rundir=$(run_backup "$sandbox")
 rc=$(cat "$rundir/rc")
 img=$(backup_img "$rundir")
@@ -221,14 +224,14 @@ if grep -q '^method=stream$' "$manifest" 2>/dev/null; then
 else
     bad "expected method=stream, got: $(grep '^method=' "$manifest" 2>/dev/null)"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "a reaped remote dd is retried, not fatal"
 # The failure measured on hardware: the remote dd dies partway and the stream
 # simply stops. One short block must not cost the whole transfer.
 
-sandbox=$(new_sandbox)
+new_sandbox
 rundir=$(run_backup "$sandbox" env FAKE_ADB_SHORT_STREAM_ONCE=1 STREAM_CHUNK_MB=8)
 rc=$(cat "$rundir/rc")
 img=$(backup_img "$rundir")
@@ -248,7 +251,7 @@ if grep -q "wanted" "$rundir/log"; then
 else
     bad "no mention of the short block in the log"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "a HUNG transfer is killed and retried, not waited on forever"
@@ -258,7 +261,7 @@ head_ "a HUNG transfer is killed and retried, not waited on forever"
 # the first block-retry implementation passed its tests and still hung on the
 # device -- the fake returned short instantly instead of hanging.
 
-sandbox=$(new_sandbox)
+new_sandbox
 rundir=$(run_backup "$sandbox" env FAKE_ADB_HANG_STREAM_ONCE=1 STREAM_CHUNK_MB=8 STREAM_STALL_SECS=6)
 rc=$(cat "$rundir/rc")
 img=$(backup_img "$rundir")
@@ -278,12 +281,12 @@ if [[ -n "$img" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
 else
     bad "image differs after a hung block"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "an interrupted transfer resumes instead of restarting"
 
-sandbox=$(new_sandbox)
+new_sandbox
 bdir="$sandbox/run/projector-backup-20260101_000000"
 mkdir -p "$bdir"
 # 20 MB of a 40 MB device already pulled, plus a 3 MB partial tail that must
@@ -309,14 +312,14 @@ if [[ "$rc" == "0" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
 else
     bad "resumed image differs (rc=$rc)"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "a resumed prefix that does not match the device is rejected"
 # Size alone cannot distinguish a good prefix from a corrupt one, so a
 # mismatched carry-over must be refused rather than extended.
 
-sandbox=$(new_sandbox)
+new_sandbox
 bdir="$sandbox/run/projector-backup-20260101_000000"
 mkdir -p "$bdir"
 dd if=/dev/urandom of="$bdir/full-system-backup.img" bs=1048576 count=16 2>/dev/null
@@ -337,7 +340,7 @@ if [[ -n "$img" ]] && cmp -s "$img" "$sandbox/state/blockdev"; then
 else
     bad "corrupt bytes survived into the final image"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "device diagnostics cannot pass as image data"
@@ -345,7 +348,7 @@ head_ "device diagnostics cannot pass as image data"
 # stdout. adb_root_stream suppresses it; if a device merges it anyway, the
 # image comes back LARGER than the device and must be rejected, not trusted.
 
-sandbox=$(new_sandbox)
+new_sandbox
 rundir=$(run_backup "$sandbox" env FAKE_ADB_FORCE_DD_SUMMARY=1)
 rc=$(cat "$rundir/rc")
 img=$(backup_img "$rundir")
@@ -374,12 +377,12 @@ if grep -qE '^method=(chunked|direct)$' "$manifest" 2>/dev/null; then
 else
     bad "manifest method wrong: $(grep '^method=' "$manifest" 2>/dev/null)"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "falls back to a staged backup when exec-out is unavailable"
 
-sandbox=$(new_sandbox)
+new_sandbox
 rundir=$(run_backup "$sandbox" env FAKE_ADB_NO_EXEC_OUT=1)
 rc=$(cat "$rundir/rc")
 img=$(backup_img "$rundir")
@@ -402,14 +405,14 @@ if grep -qE '^method=(chunked|direct)$' "$manifest" 2>/dev/null; then
 else
     bad "manifest method wrong: $(grep '^method=' "$manifest" 2>/dev/null)"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "truncated chunk is caught (the bug this suite exists for)"
 # dd silently writes short and reports success. Every chunk comes back
 # non-empty, so a size-blind script concatenates them and declares victory.
 
-sandbox=$(new_sandbox)
+new_sandbox
 # Chunk 0 lands intact; chunk 1 (skip=15) comes back short. exec-out is
 # disabled so the run actually reaches the chunked path under test.
 rundir=$(run_backup "$sandbox" env \
@@ -444,13 +447,14 @@ if find "$rundir" -name 'backup_chunk_*.img' -print -quit | grep -q .; then
 else
     bad "chunk files deleted despite the failure"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "require_backup rejects a truncated image"
 # The gate UNLOCK.sh depends on. A short image must not satisfy it.
 
 sandbox=$(mktemp -d)
+sandbox_register "$sandbox"
 (
     cd "$sandbox" || exit 1
     mkdir -p projector-backup-20260727_000000
@@ -471,13 +475,13 @@ if [[ "$rc" != "0" ]]; then
 else
     bad "require_backup accepted a truncated image (exit 0)"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 head_ "remote failure is not mistaken for success"
 # adb returns 0 regardless; the real status has to come back another way.
 
-sandbox=$(new_sandbox)
+new_sandbox
 rundir=$(run_backup "$sandbox" env FAKE_ADB_SU_MODE=none)
 rc=$(cat "$rundir/rc")
 
@@ -486,7 +490,7 @@ if [[ "$rc" != "0" ]]; then
 else
     bad "exited 0 with no working su"
 fi
-rm -rf "$sandbox"
+sandbox_finish "$sandbox"
 
 # ---------------------------------------------------------------------------
 echo
