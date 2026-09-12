@@ -1,0 +1,86 @@
+MAKE_BACKUP baseline. ANSI removed; sandbox paths and created timestamp normalized.
+
+Historical front-end observation, not a source assertion: the current UI reads the producer strings "Transfer stalled", "Streaming in ... blocks (... total", percentage lines, and "BACKUP COMPLETE".
+
+[healthy] exit=0
+last nonempty line: [INFO] Backup location: <SANDBOX>/healthy-backup
+completion signal: BACKUP COMPLETE - Safe to proceed with modifications
+progress producer lines:
+[INFO] Streaming in 1MB blocks (4 total, nothing staged on the device)
+[INFO]   25%  1MB / 4MB
+[INFO]   50%  2MB / 4MB
+[INFO]   75%  3MB / 4MB
+[INFO]   100%  4MB / 4MB
+progress inputs: total=4 done=4 stalls=0
+manifest filename: backup-manifest.txt
+device_size=4194304
+device_block=/dev/block/mmcblk0
+method=stream
+created=<UTC timestamp>
+artifact state (regular files, bytes):
+RESTORE.sh 2753
+backup-manifest.txt 95
+boot.img 4194304
+complete-app-backup.ab 24
+current-home-activity.txt 35
+disabled-packages.txt 0
+enabled-packages.txt 251
+full-system-backup.img 4194304
+installed-packages.txt 616
+partition-info.txt 0
+reset-launcher.sh 191
+system-properties.txt 299
+system.img 4194304
+
+[truncated] exit=1
+last nonempty line: [INFO] Backup location: <SANDBOX>/truncated-backup
+completion signal: BACKUP INCOMPLETE - Do NOT modify system
+progress producer lines:
+[INFO] Streaming in 1MB blocks (4 total, nothing staged on the device)
+progress inputs: total=4 done=0 stalls=0
+manifest filename: backup-manifest.txt
+manifest: absent
+artifact state (regular files, bytes):
+RESTORE.sh 2753
+backup_chunk_000.img 2097152
+boot.img 4194304
+complete-app-backup.ab 24
+current-home-activity.txt 35
+disabled-packages.txt 0
+enabled-packages.txt 251
+installed-packages.txt 616
+partition-info.txt 0
+reset-launcher.sh 191
+system-properties.txt 299
+system.img 4194304
+
+[stall] exit=0
+last nonempty line: [INFO] Backup location: <SANDBOX>/stall-backup
+completion signal: BACKUP COMPLETE - Safe to proceed with modifications
+progress producer lines:
+[INFO] Streaming in 1MB blocks (4 total, nothing staged on the device)
+[WARN] Transfer stalled 2s at 1KB - killing it
+[INFO]   25%  1MB / 4MB
+[INFO]   50%  2MB / 4MB
+[INFO]   75%  3MB / 4MB
+[INFO]   100%  4MB / 4MB
+progress inputs: total=4 done=4 stalls=1
+manifest filename: backup-manifest.txt
+device_size=4194304
+device_block=/dev/block/mmcblk0
+method=stream
+created=<UTC timestamp>
+artifact state (regular files, bytes):
+RESTORE.sh 2753
+backup-manifest.txt 95
+boot.img 4194304
+complete-app-backup.ab 24
+current-home-activity.txt 35
+disabled-packages.txt 0
+enabled-packages.txt 251
+full-system-backup.img 4194304
+installed-packages.txt 616
+partition-info.txt 0
+reset-launcher.sh 191
+system-properties.txt 299
+system.img 4194304

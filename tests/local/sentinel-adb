@@ -1,0 +1,9 @@
+#!/bin/bash
+set -u
+record=PT_SENTINEL
+for arg in "$@"; do
+    printf -v quoted '%q' "$arg"
+    record="$record"$'\t'"$quoted"
+done
+printf '%s\n' "$record" >> "${PT_SENTINEL_LOG:?PT_SENTINEL_LOG not set}"
+exit 0

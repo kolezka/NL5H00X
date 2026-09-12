@@ -1,0 +1,2 @@
+adb	shell	cmd	package	set-home-activity	com.newlink.hisilauncher
+adb	shell	am	start	-a	android.intent.action.MAIN	-c	android.intent.category.HOME

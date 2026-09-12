@@ -1,0 +1,22 @@
+adb	devices
+adb	shell	su\ -c\ \'whoami\'
+adb	shell	su\ -c\ \'dumpsys\ package\ com.example.utf16\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	install	-r	<SANDBOX>/utf16.apk
+adb	push	<SANDBOX>/utf16.apk	/data/local/tmp/utf16.apk
+adb	shell	su\ -c\ \'md5sum\ /data/local/tmp/utf16.apk\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'mount\ -o\ remount\,rw\ /\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'mkdir\ -p\ /system/app/Fixture\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'cp\ /data/local/tmp/utf16.apk\ /system/app/Fixture/Fixture.apk\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'chmod\ 755\ /system/app/Fixture\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'chmod\ 644\ /system/app/Fixture/Fixture.apk\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'chown\ -R\ root:root\ /system/app/Fixture\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'mount\ -o\ remount\,ro\ /\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'rm\ -f\ /data/local/tmp/utf16.apk\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'rm\ -rf\ /data/local/tmp/applibs\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	shell	su\ -c\ \'md5sum\ /system/app/Fixture/Fixture.apk\'\ 2\>\&1\;\ echo\ __RC__=\$\?

@@ -15,6 +15,17 @@
 #                         a short write that dd does not report
 #   FAKE_ADB_FREE_KB      free space on /sdcard in KB (default: tiny, forces
 #                         the chunked path)
+#   FAKE_ADB_REMOTE_MD5   1 = hash mapped remote files for checksum contracts
+#   FAKE_ADB_CORRUPT_PUSH_TARGET
+#                         exact remote push target to corrupt after copying
+#   FAKE_ADB_PUSH_FAIL_TARGET
+#                         exact remote push target that returns a configured error
+#   FAKE_ADB_RESTORE_RC   enable intercept-only adb restore with this status
+#   FAKE_ADB_INTERCEPT_BLOCK_DD
+#                         1 = record block-target dd without writing its target
+#
+# The contract-only knobs above are disabled by default. Unhandled commands keep
+# their legacy failures unless a scoped characterization explicitly enables one.
 
 set -uo pipefail
 
@@ -27,7 +38,73 @@ SU_MODE="${FAKE_ADB_SU_MODE:-piped}"
 PROPAGATE_RC="${FAKE_ADB_PROPAGATE_RC:-0}"
 FREE_KB="${FAKE_ADB_FREE_KB:-1024}"
 
+file_md5() {
+    if [[ -x /sbin/md5 ]]; then
+        /sbin/md5 -q "$1"
+    else
+        md5sum "$1" | awk '{print $1}'
+    fi
+}
+
+file_sha256() {
+    if [[ -x /usr/bin/shasum ]]; then
+        /usr/bin/shasum -a 256 "$1" | awk '{print $1}'
+    else
+        sha256sum "$1" | awk '{print $1}'
+    fi
+}
+
 mkdir -p "$STATE/sdcard"
+
+invocation=adb
+for arg in "$@"; do
+    printf -v quoted '%q' "$arg"
+    invocation="$invocation"$'\t'"$quoted"
+done
+printf '%s\n' "$invocation" >> "$STATE/invocations.log"
+
+hang_child=
+FAKE_CANCEL_STATUS=
+FAKE_CLEANING=0
+
+hang_child_active() {
+    local active
+    for active in $(jobs -pr; jobs -ps); do
+        [[ "$active" == "$hang_child" ]] && return 0
+    done
+    return 1
+}
+
+release_hang_child() {
+    local status=$?
+    trap - EXIT
+    trap '' INT TERM
+    if [[ "$FAKE_CLEANING" == 0 ]]; then
+        FAKE_CLEANING=1
+        if [[ -n "$hang_child" ]] && hang_child_active; then
+            kill -TERM "$hang_child" 2>/dev/null || true
+        fi
+        if [[ -n "$hang_child" ]]; then
+            wait "$hang_child" 2>/dev/null || true
+            hang_child=
+        fi
+        FAKE_CLEANING=0
+    fi
+    exit "$status"
+}
+
+cancel_fake() {
+    local status="$1"
+    if [[ -z "$FAKE_CANCEL_STATUS" ]]; then
+        FAKE_CANCEL_STATUS=$status
+        trap '' INT TERM
+    fi
+    exit "$FAKE_CANCEL_STATUS"
+}
+
+trap release_hang_child EXIT
+trap 'cancel_fake 130' INT
+trap 'cancel_fake 143' TERM
 
 # adb's own exit status. Real adb on older devices returns 0 regardless of what
 # happened on the far side; that is the default here because it is the case the
@@ -411,6 +488,21 @@ run_remote() {
             rm -f "${STATE}${path}"
             return 0
             ;;
+        "md5sum "*)
+            if [[ "${FAKE_ADB_REMOTE_MD5:-0}" != "1" ]]; then
+                echo "fake-adb: unhandled remote command: $cmd" >&2
+                return 127
+            fi
+            local path="${cmd#md5sum }" local_path="${STATE}${cmd#md5sum }" digest
+            if [[ ! -f "$local_path" ]]; then
+                echo "md5sum: $path: No such file or directory" >&2
+                return 1
+            fi
+            digest=$(file_md5 "$local_path") || return 1
+            printf '%s  %s\n' "$digest" "$path"
+            printf '%s\t%s\n' "$path" "$digest" >> "$STATE/remote-md5.log"
+            return 0
+            ;;
         "dd "*)
             run_dd "$cmd"
             return $?
@@ -466,6 +558,22 @@ run_dd() {
         esac
     done
 
+    if [[ "${FAKE_ADB_INTERCEPT_BLOCK_DD:-0}" == "1" && "$of_" == /dev/block/* ]]; then
+        local intercept_rc="${FAKE_ADB_INTERCEPT_DD_RC:-0}"
+        printf '%s\n' "$cmd" >> "$STATE/block-dd.log"
+        if [[ -z "$if_" ]]; then
+            cat > "$STATE/block-dd.stdin"
+            local captured_bytes captured_hash
+            captured_bytes=$(wc -c < "$STATE/block-dd.stdin" | tr -d ' ')
+            captured_hash=$(file_sha256 "$STATE/block-dd.stdin") || return 1
+            printf 'bytes=%s\nsha256=%s\n' "$captured_bytes" "$captured_hash" > "$STATE/block-dd.stdin.meta"
+        fi
+        if [[ "$intercept_rc" != "0" ]]; then
+            echo "fake-adb: intercepted block dd failed with configured rc $intercept_rc" >&2
+        fi
+        return "$intercept_rc"
+    fi
+
     # Map device paths onto the state dir.
     local src dst
     case "$if_" in
@@ -498,7 +606,11 @@ run_dd() {
         if [[ "${FAKE_ADB_HANG_STREAM_ONCE:-0}" == "1" && ! -f "$STATE/.hang_used" ]]; then
             touch "$STATE/.hang_used"
             dd "${args[@]}" 2>/dev/null | dd bs=1024 count=1 2>/dev/null
-            sleep 600
+            sleep 600 &
+            hang_child=$!
+            printf '%s %s\n' "$$" "$hang_child" > "$STATE/hang-pids"
+            wait "$hang_child" || true
+            hang_child=
             return 0
         fi
         # FAKE_ADB_MBPS throttles the stream to a given MB/s. Local disk copies
@@ -585,6 +697,13 @@ unwrap_su() {
 subcmd="$1"; shift
 
 case "$subcmd" in
+    __pt_control)
+        [[ -r "$STATE/control-seed" ]] || { echo 'fake-adb: control seed missing' >&2; exit 2; }
+        printf 'pt-control:'
+        tr '0123456789abcdef' 'fedcba9876543210' < "$STATE/control-seed"
+        exit 0
+        ;;
+
     devices)
         echo "List of devices attached"
         [[ "${FAKE_ADB_NO_DEVICE:-0}" == "1" ]] || echo "FAKE0123456	device"
@@ -602,7 +721,19 @@ case "$subcmd" in
         ;;
 
     push)
-        cp "$1" "${STATE}${2}"
+        push_source="$1"; push_target="$2"
+        if [[ -n "${FAKE_ADB_PUSH_FAIL_TARGET:-}" && "$push_target" == "$FAKE_ADB_PUSH_FAIL_TARGET" ]]; then
+            push_rc="${FAKE_ADB_PUSH_FAIL_RC:-1}"
+            echo "adb: configured push failure for $push_target (rc $push_rc)" >&2
+            exit "$push_rc"
+        fi
+        cp "$push_source" "${STATE}${push_target}"
+        if [[ -n "${FAKE_ADB_CORRUPT_PUSH_TARGET:-}" && "$push_target" == "$FAKE_ADB_CORRUPT_PUSH_TARGET" \
+              && -f "${STATE}${push_target}" ]]; then
+            printf 'corrupt\n' >> "${STATE}${push_target}"
+        fi
+        # Preserve the legacy fake: an ordinary cp error is diagnostic-only and
+        # still exits zero unless the scoped failure knob above is active.
         exit 0
         ;;
 
@@ -644,6 +775,27 @@ case "$subcmd" in
         done
         [[ -n "$out" ]] && printf 'ANDROID BACKUP\n5\n0\nnone\n' > "$out"
         exit 0
+        ;;
+
+    restore)
+        if [[ -z "${FAKE_ADB_RESTORE_RC+x}" ]]; then
+            echo "fake-adb: unhandled subcommand: restore" >&2
+            exit 1
+        fi
+        restore_file="${1:-}"
+        [[ -f "$restore_file" ]] || {
+            echo "adb: restore file not found: $restore_file" >&2
+            exit 1
+        }
+        restore_bytes=$(wc -c < "$restore_file" | tr -d ' ')
+        restore_hash=$(file_sha256 "$restore_file") || exit 1
+        printf 'path=%s\nbytes=%s\nsha256=%s\n' "$restore_file" "$restore_bytes" "$restore_hash" > "$STATE/restore.log"
+        if [[ "$FAKE_ADB_RESTORE_RC" == "0" ]]; then
+            echo 'restore completed'
+            exit 0
+        fi
+        echo "adb: restore failed with configured rc $FAKE_ADB_RESTORE_RC" >&2
+        exit "$FAKE_ADB_RESTORE_RC"
         ;;
 
     reboot)

@@ -1,0 +1,2 @@
+adb	devices
+adb	shell	su\ -c\ \'whoami\'

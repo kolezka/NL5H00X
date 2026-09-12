@@ -6,19 +6,24 @@ set -uo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+source "$TEST_DIR/local/lifecycle.sh"
+source "$TEST_DIR/local/sandboxes.sh"
+FAKE_ADB_DIR=${PT_FAKE_ADB_CANONICAL:-"$TEST_DIR/fake-adb/adb"}
+FAKE_ADB_DIR=${FAKE_ADB_DIR%/*}
 SCRIPTS="${TOOLKIT_SCRIPTS:-$REPO_ROOT/scripts}"
 
 PASS=0; FAIL=0
 ok()    { echo "  [PASS] $1"; PASS=$((PASS + 1)); }
-bad()   { echo "  [FAIL] $1"; FAIL=$((FAIL + 1)); }
-head_() { echo; echo "=== $1 ==="; }
+bad()   { echo "  [FAIL] $1"; FAIL=$((FAIL + 1)); sandbox_fail; }
+head_() { SCENARIO="$1"; echo; echo "=== $1 ==="; }
 
 STOCK=com.newlink.hisilauncher
 NOVA=com.teslacoilsw.launcher
 PROJECTIVY=com.spocky.projengmenu
 
 new_sandbox() {
-    local sb; sb=$(mktemp -d)
+    sb=$(mktemp -d)
+    sandbox_register "$sb"
     bash "$TEST_DIR/device-emu/seed.sh" "$sb/state" >/dev/null
     mkdir -p "$sb/run" "$sb/apks"
     echo "not a real apk" > "$sb/apks/projectivy-launcher-4.71.apk"
@@ -26,7 +31,6 @@ new_sandbox() {
 pkg=$PROJECTIVY
 home=$PROJECTIVY/com.spocky.projengmenu.ui.home.MainActivity
 EOF
-    echo "$sb"
 }
 add_backup() {
     local sb="$1" d="$1/run/projector-backup-20260101_000000"
@@ -39,11 +43,11 @@ add_backup() {
 ui() {
     local sb="$1" script="$2" input="$3"; shift 3
     ( cd "$sb/run" || exit 1
-      PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" "$@" \
+      PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" "$@" \
         /bin/bash "$SCRIPTS/$script" <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 }
 home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
-dev() { PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$1/state" adb shell "$2" 2>/dev/null | tr -d '\r'; }
+dev() { PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$1/state" adb shell "$2" 2>/dev/null | tr -d '\r'; }
 
 # ---------------------------------------------------------------------------
 head_ "every entry script runs under the system bash"
@@ -62,7 +66,7 @@ for s in TOOLS.sh UNLOCK.sh PROJECTOR.sh MAKE_BACKUP.sh; do
     fi
 done
 
-sb=$(new_sandbox)
+new_sandbox
 for s in TOOLS.sh PROJECTOR.sh; do
     out=$(ui "$sb" "$s" $'q\n')
     if echo "$out" | grep -qiE 'invalid option|unbound variable|syntax error|command not found'; then
@@ -71,12 +75,12 @@ for s in TOOLS.sh PROJECTOR.sh; do
         ok "$s runs under /bin/bash"
     fi
 done
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "TOOLS.sh menu is complete and numbered"
 
-sb=$(new_sandbox)
+new_sandbox
 out=$(ui "$sb" TOOLS.sh $'q\n')
 count=$(echo "$out" | grep -cE '^ *[0-9]+\. ')
 if [[ "$count" -ge 19 ]]; then
@@ -87,7 +91,7 @@ fi
 echo "$out" | grep -q '19\. Reset to Default Launcher' \
     && ok "numbering runs continuously across sections" \
     || bad "numbering is wrong across sections"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "TOOLS.sh does not silently fail to reset the launcher"
@@ -96,7 +100,7 @@ head_ "TOOLS.sh does not silently fail to reset the launcher"
 # older versions of this toolkit are out there, so the guard still matters.
 # The disabled state is set up directly now rather than produced by the unlock.
 
-sb=$(new_sandbox); add_backup "$sb"
+new_sandbox; add_backup "$sb"
 echo "$STOCK" >> "$sb/state/packages_disabled"
 
 out=$(ui "$sb" TOOLS.sh $'19\n\nq\n')
@@ -108,7 +112,7 @@ fi
 echo "$out" | grep -q 'UNLOCK.sh --revert' \
     && ok "points at the command that actually works" \
     || bad "does not say what to do instead"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "resetting the launcher works after an unlock, because nothing was disabled"
@@ -116,8 +120,8 @@ head_ "resetting the launcher works after an unlock, because nothing was disable
 # preference alone, so the stock launcher stays enabled and TOOLS.sh can hand
 # the home screen straight back without anyone running --revert first.
 
-sb=$(new_sandbox); add_backup "$sb"
-( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+new_sandbox; add_backup "$sb"
+( cd "$sb/run" && PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
     bash "$SCRIPTS/UNLOCK.sh" --apply-all --yes >/dev/null 2>&1 )
 
 grep -qx "$STOCK" "$sb/state/packages_disabled" 2>/dev/null \
@@ -132,18 +136,18 @@ echo "$out" | grep -qi 'currently disabled' \
     && ok "home screen handed back to the stock launcher" \
     || bad "home is '$(home_now "$sb")' after a reset"
 
-( cd "$sb/run" && PATH="$TEST_DIR/fake-adb:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+( cd "$sb/run" && PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
     bash "$SCRIPTS/UNLOCK.sh" --revert --yes >/dev/null 2>&1 )
 out=$(ui "$sb" TOOLS.sh $'19\n\nq\n')
 [[ "$(home_now "$sb")" == "$STOCK"* ]] \
     && ok "works normally once the stock launcher is enabled" \
     || bad "could not reset the launcher even when enabled"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "PROJECTOR.sh reports the state it is actually in"
 
-sb=$(new_sandbox)
+new_sandbox
 out=$(ui "$sb" PROJECTOR.sh $'q\n' env FAKE_ADB_NO_DEVICE=1)
 echo "$out" | grep -qi 'not connected' \
     && ok "says so when nothing is connected" || bad "did not report a missing device"
@@ -158,12 +162,12 @@ add_backup "$sb"
 out=$(ui "$sb" PROJECTOR.sh $'q\n')
 echo "$out" | grep -qi 'backup .*verified' && ok "sees a verified backup" || bad "verified backup not recognised"
 echo "$out" | grep -qi 'launcher .*locked' && ok "reports the launcher as locked" || bad "launcher state wrong"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "PROJECTOR.sh refuses to unlock without a backup"
 
-sb=$(new_sandbox)
+new_sandbox
 out=$(ui "$sb" PROJECTOR.sh $'2\n\nq\n')
 if echo "$out" | grep -qi 'verified backup is required'; then
     ok "refuses and says why"
@@ -172,12 +176,12 @@ else
 fi
 [[ "$(home_now "$sb")" == "$STOCK"* ]] \
     && ok "device untouched" || bad "device changed despite refusal"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "PROJECTOR.sh drives a real unlock and reflects it afterwards"
 
-sb=$(new_sandbox); add_backup "$sb"
+new_sandbox; add_backup "$sb"
 out=$(ui "$sb" PROJECTOR.sh $'2\ny\n\nq\n')
 echo "$out" | grep -q 'All steps applied and verified' \
     && ok "runs the unlock through to the end" || bad "unlock did not complete"
@@ -187,12 +191,12 @@ echo "$out" | grep -q 'All steps applied and verified' \
 out=$(ui "$sb" PROJECTOR.sh $'q\n')
 echo "$out" | grep -qi 'launcher .*unlocked' && ok "header shows unlocked" || bad "header still says locked"
 echo "$out" | grep -qi 'already unlocked' && ok "menu stops offering it" || bad "menu still offers the unlock"
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "PROJECTOR.sh runs a backup to a verified result"
 
-sb=$(new_sandbox)
+new_sandbox
 out=$(ui "$sb" PROJECTOR.sh $'1\n\nq\n' env STREAM_CHUNK_MB=8)
 echo "$out" | grep -qi 'Backup complete and verified' \
     && ok "reports a verified backup" || bad "backup did not complete"
@@ -202,7 +206,7 @@ if [[ -n "$img" ]] && cmp -s "$img" "$sb/state/blockdev"; then
 else
     bad "image differs from the device"
 fi
-rm -rf "$sb"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 echo
