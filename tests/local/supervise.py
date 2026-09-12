@@ -168,35 +168,79 @@ class BoundedSupervisor:
             self.read_status_messages()
             time.sleep(0.02)
 
-    def reap_leader(self) -> None:
-        if self.leader_pid is None:
-            return
-        while True:
-            try:
-                os.waitpid(self.leader_pid, 0)
-                break
-            except InterruptedError:
-                continue
-            except ChildProcessError:
-                break
-        self.record(f"reaped leader={self.leader_pid}")
-        self.leader_pid = None
-        if self.status_fd is not None:
-            os.close(self.status_fd)
-            self.status_fd = None
+    def reap_leader(self) -> bool:
+        leader_pid = self.leader_pid
+        reaped = leader_pid is None
+        failure_detail: Optional[str] = None
+        if leader_pid is not None:
+            deadline = time.monotonic() + self.grace
+            while True:
+                try:
+                    waited_pid, _ = os.waitpid(leader_pid, os.WNOHANG)
+                except InterruptedError:
+                    waited_pid = 0
+                except ChildProcessError:
+                    reaped = True
+                    break
+                except OSError as error:
+                    failure_detail = f"waitpid-error-{error.errno or 'unknown'}"
+                    break
+                if waited_pid == leader_pid:
+                    reaped = True
+                    break
+                if waited_pid != 0:
+                    failure_detail = f"waitpid-unexpected-{waited_pid}"
+                    break
+                now = time.monotonic()
+                if now >= deadline:
+                    failure_detail = "reap-timeout"
+                    break
+                time.sleep(min(0.02, deadline - now))
 
-    def release_group(self, initial_signal: int) -> None:
+        self.leader_pid = None
+        status_fd = self.status_fd
+        self.status_fd = None
+        close_error: Optional[OSError] = None
+        if status_fd is not None:
+            try:
+                os.close(status_fd)
+            except OSError as error:
+                close_error = error
+
+        if reaped and leader_pid is not None:
+            self.record(f"reaped leader={leader_pid}")
+        if failure_detail is not None and leader_pid is not None:
+            self.record(f"cleanup failed leader={leader_pid} detail={failure_detail}")
+            if failure_detail == "reap-timeout":
+                print(
+                    f"[CLEANUP ERROR] leader {leader_pid} was not reaped within {self.grace:g}s",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"[CLEANUP ERROR] leader {leader_pid} reap failed: {failure_detail}",
+                    file=sys.stderr,
+                )
+        if close_error is not None:
+            self.record(
+                f"cleanup failed status-fd={status_fd} detail=close-error-{close_error.errno or 'unknown'}"
+            )
+            print(
+                f"[CLEANUP ERROR] status descriptor {status_fd} could not be closed",
+                file=sys.stderr,
+            )
+        return reaped and failure_detail is None and close_error is None
+
+    def release_group(self, initial_signal: int) -> bool:
         if not self.signal_group(initial_signal):
-            self.reap_leader()
-            return
+            return self.reap_leader()
         self.grace_wait(initial_signal)
         if initial_signal != signal.SIGTERM:
             if not self.signal_group(signal.SIGTERM):
-                self.reap_leader()
-                return
+                return self.reap_leader()
             self.grace_wait(signal.SIGTERM)
-        if self.signal_group(signal.SIGKILL):
-            self.reap_leader()
+        self.signal_group(signal.SIGKILL)
+        return self.reap_leader()
 
     def final_status(self, fallback: int) -> int:
         if self.requested_signal is not None:
@@ -215,15 +259,17 @@ class BoundedSupervisor:
             self.read_status_messages()
             if self.requested_signal is not None:
                 requested = self.requested_signal
-                self.release_group(requested)
-                status = self.final_status(128 + requested)
+                cleanup_succeeded = self.release_group(requested)
+                fallback = 128 + requested if cleanup_succeeded else 125
+                status = self.final_status(fallback)
                 self.record(f"exit status={status}")
                 return status
 
             if self.command_status is not None:
                 child_status = self.command_status
-                self.release_group(signal.SIGTERM)
-                status = self.final_status(child_status)
+                cleanup_succeeded = self.release_group(signal.SIGTERM)
+                fallback = child_status if cleanup_succeeded else 125
+                status = self.final_status(fallback)
                 self.record(f"exit status={status}")
                 return status
 
@@ -233,8 +279,9 @@ class BoundedSupervisor:
                     f"[TIMEOUT] {self.timeout:g}s expired; terminating owned process group {self.leader_pid}",
                     file=sys.stderr,
                 )
-                self.release_group(signal.SIGTERM)
-                status = self.final_status(124)
+                cleanup_succeeded = self.release_group(signal.SIGTERM)
+                fallback = 124 if cleanup_succeeded else 125
+                status = self.final_status(fallback)
                 self.record(f"exit status={status}")
                 return status
 

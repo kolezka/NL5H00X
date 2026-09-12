@@ -10,7 +10,6 @@ control=$(mktemp -d "${TMPDIR:-/tmp}/pt-runner.XXXXXX") || exit 2
 PASS=0
 FAIL=0
 active_runner=
-active_runner_script=
 active_signal_ready=
 active_witness=
 active_witness_ready=
@@ -18,15 +17,20 @@ active_witness_ready=
 ok() { printf '[PASS] %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf '[FAIL] %s\n' "$1"; FAIL=$((FAIL + 1)); }
 
+is_active_child() {
+    local child
+    for child in $(jobs -pr); do
+        [[ "$child" == "$1" ]] && return 0
+    done
+    return 1
+}
+
 cleanup() {
-    local status=$? runner_command fixture_pid descendant_pid ready_token fixture_pgid descendant_pgid child_parent
+    local status=$? fixture_pid descendant_pid ready_token fixture_pgid descendant_pgid child_parent
     trap - EXIT INT TERM
-    if [[ -n "$active_runner" && -n "$active_runner_script" ]]; then
-        runner_command=$(ps -o command= -p "$active_runner" 2>/dev/null)
-        if [[ "$runner_command" == *"$active_runner_script"* ]] && builtin kill -0 "$active_runner" 2>/dev/null; then
-            builtin kill -TERM "$active_runner"
-            wait "$active_runner" 2>/dev/null || true
-        fi
+    if [[ -n "$active_runner" ]] && is_active_child "$active_runner"; then
+        builtin kill -TERM "$active_runner"
+        wait "$active_runner" 2>/dev/null || true
     fi
     if [[ -n "$active_signal_ready" && -s "$active_signal_ready" ]]; then
         set -- $(cat "$active_signal_ready")
@@ -89,12 +93,14 @@ make_fixture() {
     [[ ! -e "$repo/tests/local/supervise.py" ]] || chmod +x "$repo/tests/local/supervise.py"
     make_suite "$repo/tests/local/lifecycle-tests.sh" 'lifecycle: passed: 1   failed: 0' 0 \
         'nested=$(bash -c '\''printf "%s" "$BASH"'\''); printf "nested-bash=%s\\n" "$nested"'
-    make_suite "$repo/tests/run-tests.sh" 'legacy-run: passed: 1   failed: 0' 0
-    make_suite "$repo/tests/unlock-tests.sh" 'legacy-unlock: passed: 1   failed: 0' 0
-    make_suite "$repo/tests/ui-tests.sh" 'legacy-ui: passed: 1   failed: 0' 0
-    make_suite "$repo/tests/contracts/a-colon.sh" 'contract-a: passed: 2   failed: 0' 0
-    make_suite "$repo/tests/contracts/b-equals.sh" 'contract-b: passed=3 failed=0' 0
+    make_suite "$repo/tests/run-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/unlock-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/ui-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/contracts/a-colon.sh" 'a-colon: passed: 2   failed: 0' 0
+    make_suite "$repo/tests/contracts/b-equals.sh" 'b-equals: passed=3 failed=0' 0
     make_suite "$repo/tests/contracts/c-words.sh" 'Summary: 4 passed, 0 failed' 0
+    make_suite "$repo/tests/contracts/characterize-d-summary-exit.sh" \
+        'SUMMARY d-summary-exit passed=5 failed=0 exit=0' 0
     rm -f "$repo/tests/local/bypass-baseline.txt"
     PT_TEST_RG="$RG" "$TEST_BASH" "$repo/tests/local/bypass-audit.sh" --record > "$repo/baseline-record.log" 2>&1 || return 1
     printf '%s\n' "$repo"
@@ -144,7 +150,7 @@ repo=$(make_fixture discovery) || { bad 'create discovery fixture'; exit 1; }
 run_runner "$repo" "$repo/output"
 rc=$?
 actual=$(awk '/^SUITE / { print $2 }' "$repo/output" | paste -sd ' ' -)
-expected='local/lifecycle-tests.sh contracts/a-colon.sh contracts/b-equals.sh contracts/c-words.sh run-tests.sh unlock-tests.sh ui-tests.sh'
+expected='local/lifecycle-tests.sh contracts/a-colon.sh contracts/b-equals.sh contracts/c-words.sh contracts/characterize-d-summary-exit.sh run-tests.sh unlock-tests.sh ui-tests.sh'
 if [[ "$rc" == 0 && "$actual" == "$expected" ]]; then
     ok 'default discovery runs contract shell files in lexical order plus fixed suites'
 else
@@ -152,7 +158,7 @@ else
 fi
 
 repo=$(make_fixture failed-contract) || { bad 'create failing contract fixture'; exit 1; }
-make_suite "$repo/tests/contracts/b-equals.sh" 'contract-b: passed=0 failed=1' 9
+make_suite "$repo/tests/contracts/b-equals.sh" 'b-equals: passed=0 failed=1' 9
 run_runner "$repo" "$repo/output" contracts
 rc=$?
 if [[ "$rc" == 1 ]] \
@@ -173,12 +179,55 @@ else
     bad "missing summary rc=$rc"
 fi
 
+repo=$(make_fixture nested-summary-only) || { bad 'create nested-summary-only fixture'; exit 1; }
+make_suite "$repo/tests/local/nested-suite.sh" 'runner-regressions: passed: 5   failed: 0' 0
+cat > "$repo/tests/local/lifecycle-tests.sh" <<'EOF_NESTED_SUMMARY'
+#!/bin/bash
+"$BASH" "$(dirname "$0")/nested-suite.sh"
+exit 0
+EOF_NESTED_SUMMARY
+chmod +x "$repo/tests/local/lifecycle-tests.sh"
+run_runner "$repo" "$repo/output" local
+rc=$?
+if [[ "$rc" == 1 ]] \
+   && grep -q '^SUMMARY local/lifecycle-tests.sh missing meaningful summary exit=0 ' "$repo/output" \
+   && ! grep -q '^SUMMARY local/lifecycle-tests.sh passed:' "$repo/output"; then
+    ok 'lifecycle cannot pass on a nested suite summary without its own footer'
+else
+    bad "nested summary without lifecycle footer rc=$rc"
+fi
+
+repo=$(make_fixture terminal-summary-trailer) || { bad 'create terminal-summary-trailer fixture'; exit 1; }
+cat > "$repo/tests/local/lifecycle-tests.sh" <<'EOF_SUMMARY_TRAILER'
+#!/bin/bash
+printf 'lifecycle: passed: 1   failed: 0\n'
+printf '%s\n' '======================================'
+exit 0
+EOF_SUMMARY_TRAILER
+chmod +x "$repo/tests/local/lifecycle-tests.sh"
+run_runner "$repo" "$repo/output" local
+rc=$?
+if [[ "$rc" == 0 ]] \
+   && grep -q '^SUMMARY local/lifecycle-tests.sh passed: 1   failed: 0 exit=0 ' "$repo/output"; then
+    ok 'a lifecycle footer remains valid before its separator trailer'
+else
+    bad "lifecycle summary trailer rc=$rc"
+fi
+
 repo=$(make_fixture nonzero-summary) || { bad 'create nonzero-summary fixture'; exit 1; }
-make_suite "$repo/tests/contracts/b-equals.sh" 'contract-b: passed=3 failed=0' 7
+cat > "$repo/tests/contracts/b-equals.sh" <<'EOF_NONZERO_SUMMARY'
+#!/bin/bash
+printf 'b-equals: passed=3 failed=0\n'
+printf 'Retained sandbox: /tmp/runner-contract\n'
+exit 7
+EOF_NONZERO_SUMMARY
+chmod +x "$repo/tests/contracts/b-equals.sh"
 run_runner "$repo" "$repo/output" contracts
 rc=$?
-if [[ "$rc" == 1 ]] && grep -q '^SUMMARY contracts/b-equals.sh passed: 3   failed: 0 exit=7 ' "$repo/output"; then
-    ok 'a nonzero suite exit cannot pass despite a passing summary'
+if [[ "$rc" == 1 ]] \
+   && grep -q '^SUMMARY contracts/b-equals.sh passed: 3   failed: 0 exit=7 ' "$repo/output" \
+   && grep -q '^Retained sandbox: /tmp/runner-contract$' "$repo/output"; then
+    ok 'a nonzero suite exit cannot pass despite its summary and diagnostic trailer'
 else
     bad "nonzero passing summary rc=$rc"
 fi
@@ -215,7 +264,7 @@ else
     bad "selected interpreter shim rc=$rc"
 fi
 
-repo=$(make_fixture repeated-signal) || { bad 'create repeated-signal fixture'; exit 1; }
+repo=$(make_fixture sentinel-repeated-signal) || { bad 'create sentinel-repeated-signal fixture'; exit 1; }
 rm -f "$repo/tests/contracts/"*.sh
 signal_evidence="$repo/signal-fixture"
 mkdir -p "$signal_evidence"
@@ -225,6 +274,7 @@ trap 'printf "TERM signal-token\\n" >> "$PT_RUNNER_SIGNAL_EVIDENCE/suite-signals
 trap 'printf "INT signal-token\\n" >> "$PT_RUNNER_SIGNAL_EVIDENCE/suite-signals"' INT
 "$BASH" -c 'trap "" INT TERM; while :; do sleep 1; done' &
 descendant=$!
+printf 'sentinel signal-token\n' >> "$PT_SENTINEL_LOG"
 printf '%s %s %s\n' "$$" "$descendant" signal-token > "$PT_RUNNER_SIGNAL_EVIDENCE/ready"
 while :; do sleep 1; done
 EOF_HANG
@@ -242,7 +292,6 @@ PT_RUNNER_SIGNAL_EVIDENCE="$signal_evidence" PT_TEST_BASH="$TEST_BASH" PT_TEST_R
     PT_TEST_SCOPE=local-legacy PT_KEEP_RUNNER_EVIDENCE=1 "$TEST_BASH" "$repo/tests/local/run.sh" > "$repo/output" 2>&1 &
 runner_pid=$!
 active_runner=$runner_pid
-active_runner_script="$repo/tests/local/run.sh"
 active_signal_ready="$signal_evidence/ready"
 ready=
 for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60; do
@@ -254,13 +303,12 @@ if [[ -n "$ready" ]]; then
     fixture_pid="$1"
     descendant_pid="$2"
     ready_token="$3"
-    runner_command=$(ps -o command= -p "$runner_pid")
     fixture_pgid=$(ps -o pgid= -p "$fixture_pid" | tr -d ' ')
     descendant_pgid=$(ps -o pgid= -p "$descendant_pid" | tr -d ' ')
     set -- $(cat "$witness_ready")
     witness_recorded_pid="$1"
     witness_token="$2"
-    if [[ "$ready_token" == signal-token && "$runner_command" == *"$repo/tests/local/run.sh"* ]] \
+    if [[ "$ready_token" == signal-token ]] \
        && [[ -n "$fixture_pgid" && "$descendant_pgid" == "$fixture_pgid" ]] \
        && [[ "$witness_recorded_pid" == "$witness" && "$witness_token" == runner-witness ]] \
        && builtin kill -0 "$runner_pid" 2>/dev/null \
@@ -273,25 +321,27 @@ if [[ -n "$ready" ]]; then
             if grep -q '^TERM signal-token$' "$signal_evidence/suite-signals" 2>/dev/null; then cleanup_started=1; break; fi
             sleep 0.05
         done
-        runner_command=$(ps -o command= -p "$runner_pid" 2>/dev/null)
         child_parent=$(ps -o ppid= -p "$descendant_pid" 2>/dev/null | tr -d ' ')
-        if [[ -n "$cleanup_started" && "$runner_command" == *"$repo/tests/local/run.sh"* \
-           && "$child_parent" == "$fixture_pid" ]] && builtin kill -0 "$runner_pid" 2>/dev/null; then
+        if [[ -n "$cleanup_started" && "$child_parent" == "$fixture_pid" ]] \
+           && builtin kill -0 "$runner_pid" 2>/dev/null; then
             builtin kill -TERM "$runner_pid"
         else
             bad 'runner was not still owned after cleanup reached its suite group'
         fi
         wait "$runner_pid" 2>/dev/null
         rc=$?
+        printf '%s\n' "$rc" > "$signal_evidence/runner-exit-status"
         active_runner=
         if [[ "$rc" == 143 ]] \
            && ! builtin kill -0 "$fixture_pid" 2>/dev/null \
            && ! builtin kill -0 "$descendant_pid" 2>/dev/null \
            && builtin kill -0 "$witness" 2>/dev/null \
+           && grep -q '^\[FAIL\] sentinel was reached during the run$' "$repo/output" \
+           && grep -q '^sentinel signal-token$' "$repo/output" \
            && grep -q '^\[KEEP\] runner evidence: ' "$repo/output"; then
-            ok 'runner ignores repeated TERM during cleanup and preserves exit 143'
+            ok 'runner records sentinel failure and preserves exit 143 across repeated TERM cleanup'
         else
-            bad "runner repeated-signal cleanup rc=$rc"
+            bad "runner sentinel repeated-signal cleanup rc=$rc"
         fi
     else
         bad 'runner signal ownership positive control'

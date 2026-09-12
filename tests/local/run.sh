@@ -101,7 +101,7 @@ runner_cleanup() {
         if [[ -s "$PT_SENTINEL_LOG" ]]; then
             echo '[FAIL] sentinel was reached during the run' >&2
             cat "$PT_SENTINEL_LOG" >&2
-            status=1
+            [[ "$status" != 0 ]] || status=1
         fi
         if [[ "$status" != 0 || "${PT_KEEP_RUNNER_EVIDENCE:-0}" == 1 ]]; then
             echo "[KEEP] runner evidence: $PT_CONTROL_DIR"
@@ -179,25 +179,50 @@ case "$PT_TEST_SCOPE" in
 esac
 
 parse_summary() {
-    "$PT_TEST_PYTHON" - "$1" <<'PY'
+    "$PT_TEST_PYTHON" - "$1" "$2" <<'PY'
 import re
 import sys
 from pathlib import Path
 
+suite = sys.argv[1]
+stem = Path(suite).stem.casefold()
+expected_labels = {stem}
+if stem.startswith("characterize-"):
+    expected_labels.add(stem[len("characterize-"):])
+if stem.endswith("-tests"):
+    expected_labels.add(stem[:-len("-tests")])
+requires_label = suite == "local/lifecycle-tests.sh"
+if requires_label:
+    expected_labels = {"lifecycle"}
+
 patterns = (
-    re.compile(r"passed:\s*(\d+)\s+failed:\s*(\d+)", re.I),
-    re.compile(r"passed=(\d+)\s+failed=(\d+)", re.I),
-    re.compile(r"(\d+)\s+passed,\s*(\d+)\s+failed", re.I),
+    (re.compile(r"\s*([a-z0-9][a-z0-9_-]*):\s*passed:\s*(\d+)\s+failed:\s*(\d+)\s*", re.I), 1, 2, 3),
+    (re.compile(r"\s*passed:\s*(\d+)\s+failed:\s*(\d+)\s*", re.I), None, 1, 2),
+    (re.compile(r"\s*([a-z0-9][a-z0-9_-]*):\s*passed=(\d+)\s+failed=(\d+)\s*", re.I), 1, 2, 3),
+    (re.compile(r"\s*SUMMARY\s+([a-z0-9][a-z0-9_-]*)\s+passed=(\d+)\s+failed=(\d+)(?:\s+exit=\d+)?\s*", re.I), 1, 2, 3),
+    (re.compile(r"\s*passed=(\d+)\s+failed=(\d+)\s*", re.I), None, 1, 2),
+    (re.compile(r"\s*Summary:\s*(\d+)\s+passed,\s*(\d+)\s+failed\s*", re.I), None, 1, 2),
 )
-last = None
-for line in Path(sys.argv[1]).read_text(errors="replace").splitlines():
-    for pattern in patterns:
-        match = pattern.search(line)
-        if match:
-            last = match.groups()
-            break
-if last is not None:
-    print(*last)
+trailers = (
+    re.compile(r"\s*"),
+    re.compile(r"\s*=+\s*"),
+    re.compile(r"Retained sandbox:\s+.*"),
+    re.compile(r"\[CLEANUP ERROR\]\s+.*"),
+)
+lines = Path(sys.argv[2]).read_text(errors="replace").splitlines()
+for index in range(len(lines) - 1, -1, -1):
+    for pattern, label_group, pass_group, fail_group in patterns:
+        match = pattern.fullmatch(lines[index])
+        if match is None:
+            continue
+        if label_group is None:
+            if requires_label:
+                continue
+        elif match.group(label_group).casefold() not in expected_labels:
+            continue
+        if all(any(trailer.fullmatch(line) for trailer in trailers) for line in lines[index + 1:]):
+            print(match.group(pass_group), match.group(fail_group))
+            raise SystemExit
 PY
 }
 
@@ -214,7 +239,7 @@ run_suite() {
     pid=$CHILD_PID
     child_wait_reap "$pid" || rc=$?
     cat "$log"
-    summary=$(parse_summary "$log")
+    summary=$(parse_summary "$suite" "$log")
     if [[ -n "$summary" ]]; then
         set -- $summary
         pass="$1"

@@ -1,0 +1,122 @@
+
+[utf16] exit=0
+PKG=com.example.utf16
+HOME=no
+[INFO] Checking root access...
+[OK] Root access confirmed
+[STEP] Reading the manifest
+[OK] Does not claim the home intent
+[INFO] Package: com.example.utf16
+[INFO] No native libraries in this APK
+[STEP] Trying a normal install
+[OK] Installed normally - no /system/app copy needed
+
+[utf8] exit=0
+PKG=com.example.utf8
+HOME=no
+[INFO] Checking root access...
+[OK] Root access confirmed
+[STEP] Reading the manifest
+[OK] Does not claim the home intent
+[INFO] Package: com.example.utf8
+[INFO] No native libraries in this APK
+[STEP] Trying a normal install
+[OK] Installed normally - no /system/app copy needed
+
+[home] exit=1
+PKG=com.example.home
+HOME=yes
+[INFO] Checking root access...
+[OK] Root access confirmed
+[STEP] Reading the manifest
+[ERROR] This APK declares CATEGORY_HOME or CATEGORY_SETUP_WIZARD
+[WARN] On this firmware a wrong home candidate stops the device booting.
+[WARN] See docs/BOOT_DEADLOCK.md. Pass --allow-home if you mean it.
+
+[native] exit=1
+PKG=com.example.native
+HOME=no
+[INFO] Checking root access...
+[OK] Root access confirmed
+[STEP] Reading the manifest
+[OK] Does not claim the home intent
+[INFO] Package: com.example.native
+[ERROR] APK has native code for [x86_64 ]
+[ERROR] but this device is [armeabi-v7a]. Get the matching build.
+
+[native-empty] exit=1
+PKG=com.example.native
+HOME=no
+[INFO] Checking root access...
+[OK] Root access confirmed
+[STEP] Reading the manifest
+[OK] Does not claim the home intent
+[INFO] Package: com.example.native
+[ERROR] APK has native code for [x86_64 ]
+[ERROR] but this device is []. Get the matching build.
+
+[text] exit=1
+ERROR=not-an-android-manifest
+[INFO] Checking root access...
+[OK] Root access confirmed
+[STEP] Reading the manifest
+[ERROR] Could not read the manifest: not-an-android-manifest
+[WARN] Refusing to install an APK whose home declaration cannot be checked
+
+[remove-com.newlink.wtprovision] exit=1
+[INFO] Checking root access...
+[OK] Root access confirmed
+[ERROR] Refusing to remove com.newlink.wtprovision - it is required for this device to boot
+
+[remove-com.newlink.hisilauncher] exit=1
+[INFO] Checking root access...
+[OK] Root access confirmed
+[ERROR] Refusing to remove com.newlink.hisilauncher - it is required for this device to boot
+
+[remove-com.android.tv.settings] exit=1
+[INFO] Checking root access...
+[OK] Root access confirmed
+[ERROR] Refusing to remove com.android.tv.settings - it is required for this device to boot
+
+[remove-com.android.settings] exit=1
+[INFO] Checking root access...
+[OK] Root access confirmed
+[ERROR] Refusing to remove com.android.settings - it is required for this device to boot
+
+[upload-success] exit=0
+PKG=com.example.utf16
+HOME=no
+[INFO] Checking root access...
+[OK] Root access confirmed
+[STEP] Reading the manifest
+[OK] Does not claim the home intent
+[INFO] Package: com.example.utf16
+[INFO] No native libraries in this APK
+[STEP] Trying a normal install
+[WARN] Refused: Failure [INSTALL_FAILED_VERIFICATION_FAILURE]
+[INFO] Falling back to /system/app/Fixture
+[STEP] Uploading
+[STEP] Installing into /system/app/Fixture
+[STEP] Verifying
+[OK] APK verified
+[OK] Staged. The package registers on the next boot, not before.
+[WARN] Not rebooting. The change takes effect on the next boot.
+CHECKSUM local=176718c82d2ee89d1c1603b6fb8b3343 staged=176718c82d2ee89d1c1603b6fb8b3343 final=176718c82d2ee89d1c1603b6fb8b3343
+
+[upload-corrupt] exit=1
+PKG=com.example.utf16
+HOME=no
+[INFO] Checking root access...
+[OK] Root access confirmed
+[STEP] Reading the manifest
+[OK] Does not claim the home intent
+[INFO] Package: com.example.utf16
+[INFO] No native libraries in this APK
+[STEP] Trying a normal install
+[WARN] Refused: Failure [INSTALL_FAILED_VERIFICATION_FAILURE]
+[INFO] Falling back to /system/app/Fixture
+[STEP] Uploading
+[ERROR] Upload corrupted (176718c82d2ee89d1c1603b6fb8b3343 vs 0a1a295d30621ddf7f71706a1553f78b)
+CHECKSUM local=176718c82d2ee89d1c1603b6fb8b3343 staged=0a1a295d30621ddf7f71706a1553f78b result=refused-before-placement
+
+[help] exit=0; empty state; invocations.log absent or empty.

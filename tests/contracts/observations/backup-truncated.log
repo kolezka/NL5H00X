@@ -1,0 +1,70 @@
+
+==================================================
+                 PROJECTOR BACKUP
+==================================================
+
+[INFO] Checking root access...
+[OK] Root access confirmed
+[INFO] Using backup directory: <SANDBOX>/truncated-backup
+[INFO] Getting device information...
+[OK] Device size: 4MB
+
+=== SYSTEM INFORMATION ===
+
+[INFO] Saving system properties...
+[OK] system-properties.txt
+[INFO] Saving package lists...
+[OK] Package lists saved
+[INFO] Saving partition info...
+[OK] partition-info.txt
+[INFO] Saving current launcher...
+[OK] current-home-activity.txt
+
+=== APPLICATION DATA ===
+
+[INFO] Creating app backup (this may take 10-20 minutes)...
+[WARN] You may need to confirm on device screen
+[OK] App backup complete (4,0K)
+
+=== PARTITION BACKUPS ===
+
+[INFO] Backing up boot partition...
+[INFO] Pulling from device (4194304 bytes)...
+[OK] boot partition backed up (4MB)
+[INFO] Backing up system partition...
+[INFO] Pulling from device (4194304 bytes)...
+[OK] system partition backed up (4MB)
+
+=== FULL DEVICE BACKUP ===
+
+[WARN] Backing up 4MB - this takes 20-60 minutes
+[INFO] Streaming in 1MB blocks (4 total, nothing staged on the device)
+adb: unknown command exec-out
+[WARN] Block at 0B: got 0 bytes, wanted 1048576 (try 1/1)
+[ERROR] Block at 0B failed 1 times
+[ERROR] 0B kept in full-system-backup.img -- re-run to resume from here
+[WARN] Streaming failed - falling back to a staged backup
+[WARN] Device space limited - using chunked backup
+[INFO] Using chunked backup (2 chunks of 2MB)
+[INFO] Chunk 1/2 (offset 0MB, expect 2MB)...
+[OK] Chunk 1 complete (2MB)
+[INFO] Chunk 2/2 (offset 2MB, expect 2MB)...
+[ERROR] Chunk 2: device wrote 4096 bytes, expected 2097152
+[ERROR] dd reported success -- this is a silent short write, not a warning
+
+=== RESTORE SCRIPTS ===
+
+[OK] RESTORE.sh created
+[OK] reset-launcher.sh created
+
+=== VERIFICATION ===
+
+[ERROR] Full backup: MISSING
+[OK] System partition: 4,0M
+[OK] Boot partition: 4,0M
+[OK] App backup: 4,0K
+
+BACKUP INCOMPLETE - Do NOT modify system
+
+[INFO] Backup location: <SANDBOX>/truncated-backup
+

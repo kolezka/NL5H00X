@@ -1,0 +1,4 @@
+adb	devices
+adb	shell	su\ -c\ \'whoami\'
+adb	shell	su\ -c\ \'dumpsys\ package\ com.example.utf8\'\ 2\>\&1\;\ echo\ __RC__=\$\?
+adb	install	-r	<SANDBOX>/utf8.apk

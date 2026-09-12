@@ -1,0 +1,14 @@
+Usage:
+  INSTALL_APP.sh <file.apk> [--name NAME] [--allow-home] [--reboot|--no-reboot]
+  INSTALL_APP.sh --remove <package.name> [--reboot|--no-reboot]
+
+  <file.apk>      APK to install.
+  --name NAME     Directory under /system/app. Defaults to the leading
+                  alphanumeric run of the APK filename (SmartTube_stable_31.94
+                  -> SmartTube).
+  --allow-home    Permit an APK that declares CATEGORY_HOME or
+                  CATEGORY_SETUP_WIZARD. Refused by default: on this firmware a
+                  wrong home candidate is how the device stops booting.
+  --remove PKG    Delete a package this script installed, by package name.
+  --reboot        Reboot without asking. --no-reboot skips it, and the app then
+                  stays unregistered until the next boot.

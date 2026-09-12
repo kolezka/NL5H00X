@@ -1,0 +1,1 @@
+adb	shell	cmd	package	set-home-activity	Unknown\ command:\ get-home-activity
