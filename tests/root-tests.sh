@@ -39,6 +39,11 @@ new_sandbox() {
     cp "$REPO_ROOT/root/sud.rc" "$sb/artifacts/sud.rc"
 }
 
+# Drop the colour codes ROOT.sh prints, so an assertion can match across them.
+# The escape is written as $'\033' on purpose: BSD sed (macOS) does not read
+# \x1b as an escape, so that spelling leaves every code in place there.
+strip_ansi() { sed $'s/\033\\[[0-9;]*m//g'; }
+
 # Run ROOT.sh in a sandbox. Extra env goes before the command.
 root_sh() {
     local sb="$1"; shift
@@ -48,7 +53,7 @@ root_sh() {
         cd "$sb/run" || exit 1
         PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" ROOT_ARTIFACT_DIR="$sb/artifacts" \
             env ${envs[@]+"${envs[@]}"} \
-            bash "$SCRIPTS/ROOT.sh" "$@" </dev/null 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+            bash "$SCRIPTS/ROOT.sh" "$@" </dev/null 2>&1 | strip_ansi
         echo "RC=${PIPESTATUS[0]}"
     )
 }
@@ -229,6 +234,50 @@ snap2=$(find "$sb/state/system" "$sb/state/data/adb" -type f -exec sha256_of {} 
 [[ "$out" == *"RC=0"* ]] && ok "second run succeeds" || bad "second run failed"
 [[ "$snap1" == "$snap2" ]] && ok "second run left the device identical" || bad "second run changed device state"
 [[ "$out" == *"already"* ]] && ok "reports it had nothing to do" || bad "did not report a no-op"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "with no override, artifacts are read from the repo's own root/"
+# Every other case sets ROOT_ARTIFACT_DIR, so the default path is only covered
+# here. It has to land on <repo>/root -- the directory root/build.sh writes to
+# and where the checked-in sud.rc lives. A default that resolves anywhere else
+# blocks every artifact step for a user who did nothing wrong.
+
+expected="$(cd "$SCRIPTS/.." && pwd)/root"
+resolved=$(SCRIPT_DIR="$SCRIPTS" bash -c 'source "$1"; cd "$ROOT_ARTIFACT_DIR" 2>/dev/null && pwd' _ "$SCRIPTS/lib/root.sh" 2>/dev/null)
+[[ "$resolved" == "$expected" ]] \
+    && ok "the default artifact dir is $expected" \
+    || bad "the default artifact dir is '$resolved', not $expected"
+[[ -f "$expected/sud.rc" ]] \
+    && ok "the shipped sud.rc is reachable at the default artifact dir" \
+    || bad "no sud.rc at $expected"
+
+# End to end: ROOT.sh --status with no override must name that same directory
+# when it reports a missing artifact, not a path outside the repo.
+new_sandbox
+out=$(
+    cd "$sb/run" || exit 1
+    PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" \
+        bash "$SCRIPTS/ROOT.sh" --status </dev/null 2>&1 | strip_ansi
+)
+[[ "$out" != *"[blocked] daemon_service"* ]] \
+    && ok "daemon_service is not blocked: it finds the shipped sud.rc" \
+    || { bad "daemon_service is blocked with no override"; echo "$out" | grep 'daemon_service' | sed 's/^/        /'; }
+# The message prints the path unresolved, so compare where it lands, not how
+# it is spelled.
+missing=$(sed -n 's/.*(no \(.*\/sud\) - run root\/build\.sh first).*/\1/p' <<<"$out" | head -1)
+if [[ -f "$expected/sud" ]]; then
+    [[ -z "$missing" ]] \
+        && ok "--status does not report a built sud as missing" || bad "--status misses the sud built at $expected"
+elif [[ -n "$missing" ]]; then
+    landed=$(cd "$(dirname "$missing")" 2>/dev/null && pwd)
+    [[ "$landed" == "$expected" ]] \
+        && ok "--status looks for the unbuilt sud in $expected" \
+        || bad "--status looks for sud in '$landed', not $expected"
+else
+    bad "--status reported no missing sud, yet none is built at $expected"
+    echo "$out" | grep -i 'sud' | sed 's/^/        /'
+fi
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

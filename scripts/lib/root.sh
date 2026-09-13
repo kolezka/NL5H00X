@@ -18,7 +18,8 @@ _ROOT_SH_LOADED=1
 
 # Built artifacts. Default: the repo's own root/ directory, where
 # root/build.sh puts sud, su and sud.rc lives alongside the C sources.
-ROOT_ARTIFACT_DIR="${ROOT_ARTIFACT_DIR:-$SCRIPT_DIR/../../root}"
+# SCRIPT_DIR is the caller's scripts/ directory, so root/ is one level up.
+ROOT_ARTIFACT_DIR="${ROOT_ARTIFACT_DIR:-$SCRIPT_DIR/../root}"
 
 # Device paths -- shared contract with the C side (root/sud.c, root/su.c).
 # Changing any of these here without changing them there breaks the daemon.
