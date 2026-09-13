@@ -4,11 +4,13 @@ Giving an **app** root on this projector is not a matter of dropping a `su`
 binary in place. This is the proof-of-concept that shows what actually works,
 and why. It is for owners of this device modifying their own hardware.
 
-**Status: proof of concept.** It has been built and verified on hardware — an
-app-uid process with `NO_NEW_PRIVS` set gets root through the daemon, and an
-unlisted app is refused — but it is **not yet wired into boot**. Making it
-permanent (an `init.rc` service plus a hybrid `su` that keeps the shell/root
-path working for the rest of the toolkit) is the next step and is not done here.
+**Status.** The daemon itself is built and verified on hardware: an app-uid
+process with `NO_NEW_PRIVS` set gets root through it, and an unlisted app is
+refused. It is now also wired into boot by an init service, and there is an
+opt-in hybrid `su` that keeps the shell/root fast path the rest of the toolkit
+depends on. Installing all of that is [`scripts/ROOT.sh`](../scripts/ROOT.sh),
+covered below. The install path is green against the emulator; **the boot itself
+has not been watched on hardware yet.**
 
 ## Why a setuid `su` cannot work here
 
@@ -109,14 +111,72 @@ adb shell 'su 10029 /data/local/tmp/privtest nnp /data/local/tmp/suc 0 -c id'
 Tear down by killing `sud`; the binaries and `/data/adb/su-allow` are the only
 traces, and a reboot removes the daemon regardless.
 
+## Making it persistent
+
+Two pieces turn the PoC above into something that is still there after a reboot.
+
+**`sud.rc`**, an init service that starts the daemon at boot:
+
+```
+service sud /system/xbin/sud
+    class late_start
+    user root
+    seclabel u:r:su:s0
+```
+
+The `seclabel` line is not optional and not decoration. AOSP pie init
+(`system/core/init/service.cpp`, `ComputeContextFromExecutable`) rejects a
+service whose executable has no policy-defined domain transition, and it returns
+that error *before* fork. It is a policy computation, not an AVC decision, so
+SELinux Permissive does not bypass it. `u:r:su:s0` is used because this firmware
+is userdebug and Permissive, where the `su` domain exists. Name a domain the
+device's policy does not define and init logs an error, the service never
+starts, and boot continues normally. The failure mode is a missing daemon.
+
+The service is deliberately not `oneshot`, so init restarts `sud` about five
+seconds after a crash.
+
+**`su.c`**, a hybrid `su` that keeps both callers working. It dispatches on its
+own uid, because that is what decides whether it can elevate at all:
+
+- **uid 0 or 2000 (`AID_SHELL`)** have no `NO_NEW_PRIVS`, so the stock setuid
+  `su` still works. It is exec'd unchanged with argv untouched, which keeps the
+  behaviour byte-identical to stock for every script in this toolkit. The stock
+  binary is preserved as `/system/xbin/su_orig` and is never deleted.
+- **any other uid** is an app, where setuid is already neutralised. The request
+  goes to `sud` over the socket, same as `suc`.
+
+Both clients share one implementation of the wire protocol in `suclient.c`, so
+they cannot drift apart.
+
+Installing it is [`scripts/ROOT.sh`](../scripts/ROOT.sh), which handles the
+`/system` remount, the hashes, the allow-list and the revert path:
+
+```bash
+NDK=/path/to/android-ndk ./build.sh
+../scripts/ROOT.sh --status
+../scripts/ROOT.sh --apply-all              # daemon + service + allow-list
+../scripts/ROOT.sh --apply-all --with-su    # and the hybrid su, opt-in
+```
+
+The hybrid `su` is opt-in because it replaces the channel the rest of the
+toolkit runs on. `ROOT.sh` stages it to a separate path, proves `su 0 id` still
+returns uid 0 through that path, and only then promotes it.
+
+`bash ../tests/root-tests.sh` exercises all of this against the emulator,
+including a hybrid that fails live-verify and must leave the live `su` alone.
+
 ## Files
 
 | File | What it is |
 |---|---|
 | `sud.c` | The root daemon: socket, `SO_PEERCRED` gate, allow-list, fd-passed exec |
 | `suc.c` | The client (PoC subset) that talks to it |
+| `su.c` | The hybrid `su`: stock fast path for shell/root, daemon for app uids |
+| `suclient.c`, `suclient.h` | The wire protocol, shared by `suc` and `su` |
+| `sud.rc` | init service that starts `sud` at boot |
 | `privtest.c` | Diagnostic: sets `PR_SET_NO_NEW_PRIVS`, then execs — proves why setuid fails |
-| `build.sh` | Builds all three for `armeabi-v7a` |
+| `build.sh` | Builds all of them for `armeabi-v7a` |
 
 ## Related
 

@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- `ROOT.sh` - Persistent root: installs the `sud` daemon, its init service and the su allow-list, with an opt-in hybrid `su` behind `--with-su`
+- `root/sud.rc`, `root/su.c`, `root/suclient.{c,h}` - init service and the hybrid `su` that keeps the shell/root fast path
+- `tests/root-tests.sh` - End-to-end root suite against the fake-adb emulator
 - Initial release of Android Projector Toolkit
 - `TOOLS.sh` - Hidden feature access script with 34 menu options
 - `MAKE_BACKUP.sh` - Complete device backup system with chunked storage
