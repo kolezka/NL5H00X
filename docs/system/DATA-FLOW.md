@@ -2,7 +2,7 @@
 block: _root
 doc: DATA-FLOW
 verified_against: f04ee86
-verified_on: 2026-09-12
+verified_on: 2026-09-14
 ---
 
 # System data flow
@@ -56,11 +56,11 @@ The tests drive backup, unlock and front-end entry points, not `INSTALL_APP.sh`;
 
 | Hop | Owner | Evidence |
 |---|---|---|
-| Guided menu to backup or unlock subprocess | [front-ends](front-ends/README.md), pending integration | `scripts/PROJECTOR.sh::run_backup()` and `scripts/PROJECTOR.sh::run_unlock()`. [verified] |
-| Capture to image and restore-script output | [backup](backup/README.md), pending integration | `scripts/MAKE_BACKUP.sh::create_restore_scripts()`. [verified] |
-| Launcher step dispatch | [unlock](unlock/README.md), pending integration | `scripts/UNLOCK.sh::run_step()`. [verified] |
-| APK install or removal | [app-install](app-install/README.md), pending integration | `scripts/INSTALL_APP.sh::main()`. [verified] |
-| Shared root command transport | [device-access](device-access/README.md), pending integration | `scripts/lib/common.sh::adb_root_exec()`. [verified] |
+| Guided menu to backup or unlock subprocess | [front-ends](front-ends/README.md) | `scripts/PROJECTOR.sh::run_backup()` and `scripts/PROJECTOR.sh::run_unlock()`. [verified] |
+| Capture to image and restore-script output | [backup](backup/README.md) | `scripts/MAKE_BACKUP.sh::create_restore_scripts()`. [verified] |
+| Launcher step dispatch | [unlock](unlock/README.md) | `scripts/UNLOCK.sh::run_step()`. [verified] |
+| APK install or removal | [app-install](app-install/README.md) | `scripts/INSTALL_APP.sh::main()`. [verified] |
+| Shared root command transport | [device-access](device-access/README.md) | `scripts/lib/common.sh::adb_root_exec()`. [verified] |
 | Script run to emulated device state | [test-harness](test-harness/README.md) | `tests/fake-adb/adb::run_remote()`. [verified] |
 
-Only test-harness is integrated with these candidate root pages; the pending links retain their intended final paths. [verified]
+Every hop above has an owning block page in this tree. [verified] One device write escapes the two CLIs the diagram treats as the operation owners: `scripts/TOOLS.sh::reset_default_launcher()` calls `cmd package set-home-activity` itself instead of starting `scripts/UNLOCK.sh`, which is why the front ends carry a direct ADB arrow. [verified]

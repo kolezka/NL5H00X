@@ -2,39 +2,50 @@
 block: _root
 doc: REVIEW
 verified_against: f04ee86
-verified_on: 2026-09-12
+verified_on: 2026-09-14
 ---
 
-# Pending draft corrections
+# Review record
 
-The operator chose to leave the existing main-checkout drafts in place after their relocation was blocked; the findings below are recorded, not applied to those drafts. [verified] They were checked against the actual draft text and pinned source during this continuation, not established by executing the toolkit. [verified]
+This page records two things: the draft corrections raised on 2026-09-12, with where each one landed, and the source findings this campaign produced that need code work rather than a documentation edit. [verified] Nothing here was established by running the toolkit or by touching the projector. [verified]
 
-## Unlock recovery distinguishes the blocked causes
+## Draft corrections, now applied
 
-The main-checkout `unlock/OPERATIONS.md` says a blocked step only means a component owns the vendor home intent. [verified] `scripts/lib/unlock.sh::launcher_default_state()` first emits `blocked:install the launcher first` when the package is absent, before checking for an interceptor. [verified]
+The four findings were first raised against drafts held outside this tree. [historical: 2026-09-12, docs/system/REVIEW.md] Each was re-read at the pin during this campaign and written into the integrated pages, so the correction is in the text rather than in a pending list. [verified]
 
-Correct the recovery guidance to distinguish installing the launcher from selecting an installed launcher through the device chooser; chooser advice alone cannot install a missing package. [inferred]
+| Finding | Where it landed |
+|---|---|
+| A blocked launcher step has two causes, and `scripts/lib/unlock.sh::launcher_default_state()` reports the missing package before it queries the interceptor, so chooser advice cannot clear the first cause. | [unlock CONTRACTS](unlock/CONTRACTS.md) and [unlock OPERATIONS](unlock/OPERATIONS.md). [verified] |
+| Not every device call in the unlock block uses `scripts/lib/common.sh::adb_root_exec()`: `scripts/UNLOCK.sh::check_supported_device()`, `scripts/UNLOCK.sh::interactive()`, `scripts/lib/unlock.sh::launcher_present_apply()` and `scripts/lib/unlock.sh::repair_run()` call `adb` directly. | [unlock README](unlock/README.md) boundary section. [verified] |
+| The return value 125 is not enforced by `tests/run-tests.sh::"remote failure is not mistaken for success"`, whose run exits at the `scripts/lib/common.sh::require_device()` gate before a root helper runs. | [device-access CONTRACTS](device-access/CONTRACTS.md) cites the helper bodies as the runtime guard, and [device-access GAPS](device-access/GAPS.md) records the missing assertion. [verified] |
+| `scripts/MAKE_BACKUP.sh::STREAM_STALL_SECS` covers transfer block reads only, while both md5 probes use a fixed 20 seconds. | [backup OPERATIONS](backup/OPERATIONS.md). [verified] |
 
-## Unlock uses direct ADB calls as well as shared helpers
+## Source findings that need code work
 
-The main-checkout `unlock/README.md` says every device call goes through `adb_root_exec()`. [verified] `scripts/UNLOCK.sh::check_supported_device()` instead uses plain `adb shell getprop`, and `scripts/lib/unlock.sh::launcher_present_apply()` invokes `adb install` and `adb push` directly. [verified]
+These are defects in the toolkit, not in the documentation. They are described where their block owns the code and repeated here so one page carries the list. [verified]
 
-Narrow the dependency description to the calls actually using shared root helpers, and retain the direct-call exceptions when describing this boundary. [inferred]
+### The full-device restore writes nothing on the success path
 
-## The cited test does not establish the root-helper return code
+In `scripts/MAKE_BACKUP.sh::create_restore_scripts()` the raw `dd` write sits inside the failure branch of `adb push`. [verified] A push that reports success copies the image to `/sdcard`, never writes the block device, and then reboots, immediately after the script printed its verification line and took a typed confirmation. [verified] No suite runs the generated `RESTORE.sh`. [verified] See [backup GAPS](backup/GAPS.md).
 
-The root-helper contract in the main-checkout `device-access/CONTRACTS.md` cites `tests/run-tests.sh::"remote failure is not mistaken for success"` as enforcement for the helpers' return value of 125 when root is unestablished. [verified] That scenario selects `FAKE_ADB_SU_MODE=none` and starts the backup script, whose `scripts/lib/common.sh::require_device()` gate exits before a root helper is reached. [verified]
+### The streaming give-up message contradicts its caller
 
-Use `scripts/lib/common.sh::adb_root_exec()` and `scripts/lib/common.sh::adb_root_stream()` as the runtime enforcement citations. [inferred] The separate `tests/run-tests.sh::"diagnostics reach the operator, not the caller's variable"` scenario does call `adb_root_exec` with an empty `SU_MODE`, but asserts diagnostic routing rather than the return value 125. [verified] Do not describe that return value as tested by either scenario. [inferred]
+`scripts/MAKE_BACKUP.sh::backup_full_device_stream()` reports that the partial image is kept for a resumed run. [verified] The caller in `scripts/MAKE_BACKUP.sh::main()` deletes `full-system-backup.img` as its next action on that return. [verified] An operator who follows the message resumes nothing.
 
-## Transfer and probe watchdogs have different configuration
+### A successful `/system` write is reported as a failure
 
-The main-checkout `device-access/OPERATIONS.md` points operators to `STREAM_STALL_SECS` without distinguishing transfer reads from probe reads. [verified] `scripts/MAKE_BACKUP.sh::backup_full_device_stream()` passes that variable for transfer blocks but a literal 20 for its resume probe; `scripts/MAKE_BACKUP.sh::backup_partition()` also passes a literal 20 for its tail probe. [verified]
+`scripts/lib/unlock.sh::launcher_present_apply()` returns 1 after it has remounted `/system`, copied the APK and confirmed the copy, because the package only registers after a restart. [verified] `scripts/UNLOCK.sh::run_step()` renders that return with a message stating that nothing further was changed, which is false on this path. [verified] See [unlock GAPS](unlock/GAPS.md).
 
-Document the tunable's transfer-only scope and the fixed probe thresholds; increasing it does not change those probe arguments. [inferred]
+### One menu entry writes to the device with no confirmation
 
-## Completion conditions
+`scripts/TOOLS.sh::reset_default_launcher()` changes the home activity through `cmd package set-home-activity`. [verified] The string `confirm` does not occur in either front-end file, `scripts/lib/common.sh::require_backup()` is never called from this block, and `main()` passes `false` to `require_device`. [verified] Reproduce with `git grep -c -i confirm f04ee86 -- scripts/PROJECTOR.sh scripts/TOOLS.sh`, which reports no match. [verified] See [front-ends GAPS](front-ends/GAPS.md).
 
-Integration remains pending, app-root remains blocked, and these main-checkout draft corrections remain unapplied. [verified] The worktree's test-harness pages received separate corrections to distinguish fixture assertions from standalone coverage, permissive fake-ADB branches from the unmatched-command fallback, and PATH routing from isolation. [verified]
+### The installer continues without root
 
-Before treating the tree as complete, apply the draft corrections in an authorized workspace, integrate the remaining blocks, resolve app-root, and run a full inventory, link, ownership, citation and evidence review. A lint of the currently present pages is not that completion gate. [inferred]
+`scripts/INSTALL_APP.sh::main()` runs `check_root_access >/dev/null 2>&1 || true` after a reboot, so a run can continue with an empty `SU_MODE` and take the untested 125 refusal path in the shared helpers. [verified] See [app-install GAPS](app-install/GAPS.md) and [device-access GAPS](device-access/GAPS.md).
+
+## Open scope
+
+app-root stays blocked, so `root/` is a reserved unassigned path and not a documented block. [verified] The pin `f04ee86` is an ancestor of the current branch head, and source added after it, including the root daemon scripts and the newer test trees, is not described anywhere in this tree. [verified] Covering that source needs a full refresh on a new pin, which re-verifies every active page rather than adding a block. [verified]
+
+A clean linter run is a structure gate. [verified] It does not check whether a claim is true, whether an owner is the right one, or whether a contract is really enforced. [verified]

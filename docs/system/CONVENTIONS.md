@@ -2,14 +2,14 @@
 block: _root
 doc: CONVENTIONS
 verified_against: f04ee86
-verified_on: 2026-09-12
+verified_on: 2026-09-14
 ---
 
 # Documentation conventions
 
 ## Source pin
 
-The campaign uses code mode at `f04ee86`; it is a candidate, not an integrated system documentation release. [verified]
+The campaign uses code mode at `f04ee86`, and every active page in this tree carries that one pin. [verified] Source added after the pin is not covered; describing it needs a full refresh on a new pin, not a new block at this one. [verified]
 
 Read source with `git show f04ee86:<path>` or a read-only checkout at that pin. Keep the pin on incremental updates; refresh the whole active tree before adopting a newer pin.
 
@@ -39,7 +39,7 @@ Set `CLAUDE_PLUGIN_ROOT` to the installed block-docs plugin root supplied by the
 python3 "${CLAUDE_PLUGIN_ROOT:?Set the block-docs plugin root}/scripts/blockdocs_lint.py" docs/system --repo . --strict
 ```
 
-The linter checks citation paths and symbol presence at the pin, but not the truth of the surrounding claim. [verified] It can also return clean for a partial tree whose missing blocks have no directories, so compare the directory inventory with the [block map](README.md) separately. [verified]
+The linter checks citation paths and symbol presence at the pin, but not the truth of the surrounding claim. [verified] It can also return clean for a partial tree whose missing blocks have no directories, so compare the directory inventory with the [block map](README.md) separately. [verified] All six block directories are present, so the current clean run covers the full planned set at this pin. [verified]
 
 Before closing a campaign, verify ownership coverage against `git ls-tree -r --name-only <pin>`, check local links and dependencies, and review evidence tags against the cited source. A partial check must name the omitted scope.
 

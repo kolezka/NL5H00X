@@ -2,25 +2,25 @@
 block: _root
 doc: OWNERSHIP
 verified_against: f04ee86
-verified_on: 2026-09-12
+verified_on: 2026-09-14
 ---
 
 # Ownership map
 
-The coverage denominator is the tracked source tree returned by `git ls-tree -r --name-only f04ee86`. [verified] The tables separate planned block ownership from deliberately unassigned paths. [verified]
+The coverage denominator is the tracked source tree returned by `git ls-tree -r --name-only f04ee86`. [verified] The tables separate block ownership from deliberately unassigned paths. [verified]
 
-The authoritative `owns:` list belongs in each block README; test-harness is present here, while the other drafted blocks await correction and integration from the main checkout. [verified] `docs/system/` did not exist at the pin, so the new documentation does not own itself as source. [verified]
+The authoritative `owns:` list belongs in each block README, and all six are present in this tree. [verified] Their `owns:` values reproduce the boundaries below and the linter rejects an overlap between two of them. [verified] `docs/system/` did not exist at the pin, so the new documentation does not own itself as source. [verified]
 
 ## Block ownership
 
 | Block | Source boundary | Documentation |
 |---|---|---|
-| `device-access` | `scripts/lib/common.sh` | [`device-access`](device-access/README.md) (pending) |
-| `backup` | `scripts/MAKE_BACKUP.sh` | [`backup`](backup/README.md) (pending) |
-| `unlock` | `scripts/UNLOCK.sh`, `scripts/lib/unlock.sh` | [`unlock`](unlock/README.md) (pending) |
-| `app-install` | `scripts/INSTALL_APP.sh` | [`app-install`](app-install/README.md) (pending) |
-| `front-ends` | `scripts/PROJECTOR.sh`, `scripts/TOOLS.sh` | [`front-ends`](front-ends/README.md) (pending) |
-| `test-harness` | `tests/` | [Candidate block](test-harness/README.md) |
+| `device-access` | `scripts/lib/common.sh` | [`device-access`](device-access/README.md) |
+| `backup` | `scripts/MAKE_BACKUP.sh` | [`backup`](backup/README.md) |
+| `unlock` | `scripts/UNLOCK.sh`, `scripts/lib/unlock.sh` | [`unlock`](unlock/README.md) |
+| `app-install` | `scripts/INSTALL_APP.sh` | [`app-install`](app-install/README.md) |
+| `front-ends` | `scripts/PROJECTOR.sh`, `scripts/TOOLS.sh` | [`front-ends`](front-ends/README.md) |
+| `test-harness` | `tests/` | [`test-harness`](test-harness/README.md) |
 | `app-root` | `root/` reserved, BLOCKED and not documented | none |
 
 The six boundaries are disjoint at the pin: `scripts/lib/` is split file by file between `device-access` and `unlock`, and no entry contains another. [verified]
