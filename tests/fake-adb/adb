@@ -138,7 +138,11 @@ fs_op() {
 
     case "$op" in
         mkdir) mkdir -p "${STATE}${target}" ;;
-        chmod|chown) [[ -e "${STATE}${target}" ]] || { echo "$op: '$target': No such file or directory" >&2; return 1; } ;;
+        chmod)
+            [[ -e "${STATE}${target}" ]] || { echo "chmod: '$target': No such file or directory" >&2; return 1; }
+            chmod "$1" "${STATE}${target}" 2>/dev/null || true
+            ;;
+        chown) [[ -e "${STATE}${target}" ]] || { echo "chown: '$target': No such file or directory" >&2; return 1; } ;;
         rm) rm -rf "${STATE}${target}" ;;
         cp)
             local src="$1"
@@ -204,6 +208,24 @@ apk_meta() {
     case "$key" in
         pkg)  echo "$pkg" ;;
         home) echo "$home" ;;
+    esac
+}
+
+# Whether a device path currently holds something that would actually exec as
+# root when run as `su <uid> <cmd>` / `su_new <uid> <cmd>`. Models root/su.c:
+# the stock binary always works; the hybrid only works because it execs the
+# preserved stock su it was built to wrap, so it "works" here only when
+# su_orig is present and is itself stock. Anything else is neither.
+su_binary_ok() {
+    local path="$1" content orig_content
+    content=$(cat "${STATE}${path}" 2>/dev/null) || return 1
+    case "$content" in
+        *STOCK-SU*) return 0 ;;
+        *HYBRID-SU*)
+            [[ -f "$STATE/system/xbin/su_orig" ]] || return 1
+            orig_content=$(cat "$STATE/system/xbin/su_orig" 2>/dev/null)
+            [[ "$orig_content" == *STOCK-SU* ]] ;;
+        *) return 1 ;;
     esac
 }
 
@@ -427,6 +449,42 @@ run_remote() {
             local path="${cmd##* }"
             [[ -e "${STATE}${path}" ]] && return 0 || return 1 ;;
 
+        # --- root daemon / su ---------------------------------------------
+        "command -v su")
+            [[ -e "$STATE/system/xbin/su" ]] && { echo "/system/xbin/su"; return 0; }
+            return 1 ;;
+        "cat /data/adb/su-allow")
+            if [[ -f "$STATE/data/adb/su-allow" ]]; then
+                cat "$STATE/data/adb/su-allow"
+                return 0
+            fi
+            echo "cat: /data/adb/su-allow: No such file or directory" >&2
+            return 1 ;;
+        "su "*" id")
+            # File-state aware, so a hybrid artifact that cannot actually exec
+            # stock su through itself is caught here instead of only being
+            # asserted by file content in the test. See su_binary_ok.
+            local rest="${cmd#su }"
+            local uid="${rest%% *}"
+            if su_binary_ok "/system/xbin/su"; then
+                echo "uid=${uid}(root) gid=${uid}(root)"
+                return 0
+            fi
+            echo "su: not a valid binary" >&2
+            return 1 ;;
+        "/system/xbin/su_new "*" id")
+            # Same rule, for the staged-but-not-yet-promoted hybrid: this is
+            # the live-verify call su_hybrid_apply makes before ever touching
+            # the real /system/xbin/su.
+            local rest="${cmd#/system/xbin/su_new }"
+            local uid="${rest%% *}"
+            if su_binary_ok "/system/xbin/su_new"; then
+                echo "uid=${uid}(root) gid=${uid}(root)"
+                return 0
+            fi
+            echo "su_new: not a valid binary" >&2
+            return 1 ;;
+
         # --- filesystem under /system ------------------------------------
         "cp "*|"mkdir "*|"chmod "*|"chown "*|"rm -rf "*)
             fs_op "$cmd"; return $? ;;
@@ -501,6 +559,19 @@ run_remote() {
             digest=$(file_md5 "$local_path") || return 1
             printf '%s  %s\n' "$digest" "$path"
             printf '%s\t%s\n' "$path" "$digest" >> "$STATE/remote-md5.log"
+            return 0
+            ;;
+        # Unconditional, unlike md5sum above: ROOT.sh prefers sha256sum and
+        # only falls back to md5sum, so this has to always be there for it,
+        # not gated behind a characterization-only knob.
+        "sha256sum "*)
+            local path="${cmd#sha256sum }" local_path="${STATE}${cmd#sha256sum }" digest
+            if [[ ! -f "$local_path" ]]; then
+                echo "sha256sum: $path: No such file or directory" >&2
+                return 1
+            fi
+            digest=$(file_sha256 "$local_path") || return 1
+            printf '%s  %s\n' "$digest" "$path"
             return 0
             ;;
         "dd "*)
@@ -831,6 +902,25 @@ case "$subcmd" in
         if [[ -f "$STATE/home_activity" ]]; then
             home_pkg=$(cut -d/ -f1 "$STATE/home_activity")
             [[ -n "$home_pkg" ]] && echo "$home_pkg" >> "$STATE/running"
+        fi
+        # sud only comes up if its init service is installed AND its seclabel
+        # names a domain this "device" has. Real cause on hardware: AOSP init
+        # refuses to start a service whose seclabel has no policy-defined
+        # domain transition (see root/sud.rc) -- wrong label, service just
+        # never starts. Default accepted set is {u:r:su:s0}; a profile can
+        # widen it via $STATE/init_seclabels (one label per line).
+        # Also requires the sud binary itself: a service can be installed
+        # (sud.rc present, seclabel accepted) with the binary missing or
+        # since removed, and init has nothing to exec in that case.
+        if [[ -f "$STATE/system/etc/init/sud.rc" && -f "$STATE/system/xbin/sud" ]]; then
+            sud_seclabel=$(awk '/^[[:space:]]*seclabel[[:space:]]/{print $2}' "$STATE/system/etc/init/sud.rc" | head -1)
+            sud_accepted=0
+            if [[ -f "$STATE/init_seclabels" ]]; then
+                grep -qxF "$sud_seclabel" "$STATE/init_seclabels" && sud_accepted=1
+            elif [[ "$sud_seclabel" == "u:r:su:s0" ]]; then
+                sud_accepted=1
+            fi
+            [[ "$sud_accepted" == "1" ]] && echo sud >> "$STATE/running"
         fi
         echo ro > "$STATE/mount_system" 2>/dev/null || true
         exit 0

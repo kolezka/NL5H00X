@@ -2,7 +2,7 @@
 # Build the root-daemon PoC for the NL5H00X (armeabi-v7a).
 #
 # Needs an Android NDK. Point NDK at it, or let this find the newest one under
-# the default SDK location. Outputs sud, suc and privtest next to the sources.
+# the default SDK location. Outputs sud, suc, su and privtest next to the sources.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,9 +18,15 @@ HOST=$(uname | tr '[:upper:]' '[:lower:]')-x86_64
 CC="$NDK/toolchains/llvm/prebuilt/$HOST/bin/armv7a-linux-androideabi28-clang"
 [[ -x "$CC" ]] || { echo "No armeabi-v7a clang at $CC" >&2; exit 1; }
 
-for src in sud suc privtest; do
+for src in sud privtest; do
     "$CC" -O2 -Wall -Wextra -fPIE -pie -o "$HERE/$src" "$HERE/$src.c"
     echo "built $src"
 done
 
-file "$HERE"/sud "$HERE"/suc "$HERE"/privtest 2>/dev/null || true
+# suc and su both need the shared client wire protocol.
+for src in suc su; do
+    "$CC" -O2 -Wall -Wextra -fPIE -pie -o "$HERE/$src" "$HERE/$src.c" "$HERE/suclient.c"
+    echo "built $src"
+done
+
+file "$HERE"/sud "$HERE"/suc "$HERE"/su "$HERE"/privtest 2>/dev/null || true
