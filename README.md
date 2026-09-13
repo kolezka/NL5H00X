@@ -8,6 +8,7 @@ Tools for bypassing security restrictions on locked Android projectors and insta
 - [Quick Start](#quick-start)
 - [Unlocking the launcher](#unlocking-the-launcher)
 - [Installing apps](#installing-apps)
+- [Root for apps](#root-for-apps)
 - [Features](#features)
 - [Scripts](#scripts)
 - [Documentation](#documentation)
@@ -224,9 +225,91 @@ Two things worth knowing:
 `CATEGORY_HOME` or `SETUP_WIZARD`** unless you pass `--allow-home`. Getting the
 home intent wrong is what bricks this device.
 
+## Root for apps
+
+The shell is already root here: `su 0 id` returns uid 0 and everything above
+depends on it. An **app** is a different problem. Zygote sets
+`PR_SET_NO_NEW_PRIVS` on every app process, and with that flag the kernel
+ignores the setuid bit, so no `su` binary an app execs can ever elevate it.
+Magisk does not fill the gap either: both `boot` and `recovery` carry
+`ramdisk=0` in their Android headers, so `magiskboot unpack` finds nothing to
+inject into. [root/README.md](root/README.md) has the measurements.
+
+What works is a daemon that is already root. `sud` listens on an abstract Unix
+socket, reads the caller's uid from `SO_PEERCRED` (kernel-supplied, not
+spoofable), resolves it to a package, and checks it against an allow-list. An
+allowed caller gets a forked child running as root on its own stdin/stdout/stderr.
+An unlisted caller, or no list at all, is refused. It fails closed, because
+failing open roots every app on the device.
+
+`ROOT.sh` installs that daemon so it survives a reboot:
+
+```bash
+./scripts/ROOT.sh                              # interactive menu
+./scripts/ROOT.sh --status                     # what is applied; changes nothing
+./scripts/ROOT.sh --apply-all                  # daemon, init service, allow-list
+./scripts/ROOT.sh --allow com.spocky.projengmenu
+./scripts/ROOT.sh --deny  com.spocky.projengmenu
+./scripts/ROOT.sh --revert                     # remove all of it
+```
+
+It needs the binaries built first, and this device is 32-bit `armeabi-v7a` only:
+
+```bash
+NDK=/path/to/android-ndk ./root/build.sh
+```
+
+`ROOT.sh` reads them from `root/` by default; point `ROOT_ARTIFACT_DIR` elsewhere
+if you build somewhere else.
+
+| Step | Change |
+|------|--------|
+| `daemon_binary` | `sud` installed to `/system/xbin/sud`, verified by hash |
+| `daemon_service` | init service at `/system/etc/init/sud.rc` so `sud` starts at boot |
+| `allow_list` | `/data/adb/su-allow`, mode 0600, root-only so an app cannot list itself |
+| `su_hybrid` | **opt-in, `--with-su`**: replaces `/system/xbin/su`, keeping the stock one as `su_orig` |
+
+Same contract as `UNLOCK.sh`: it refuses anything that is not an NL5H00X,
+refuses to change anything without a verified backup (`--status` is exempt),
+reads every change back off the device instead of trusting an exit code, and
+re-running it is a no-op.
+
+**`sud` only comes up on the next boot.** Reboot, watch the screen, then
+`./scripts/ROOT.sh --status` confirms the daemon over adb.
+
+### The seclabel, and why this cannot brick the device
+
+On Android 9, init refuses to start a service whose executable has no
+policy-defined domain transition, and it refuses *before* fork. That is a policy
+computation, not an AVC decision, so SELinux Permissive does not bypass it: the
+service needs a `seclabel` naming a domain the device actually has. `sud.rc`
+asks for `u:r:su:s0`, which exists on this userdebug firmware. Override it with
+`--seclabel` and name a domain the policy does not define, and init refuses to
+start that one service while **boot still completes**. The failure mode is an
+absent daemon, not a dead projector. That is the whole reason the default path
+is safe to try:
+
+```bash
+./scripts/ROOT.sh --repair    # sud not running after a reboot? diagnose why
+```
+
+`--repair` also prints the serial-console equivalent of every step, for a device
+that is not answering adb.
+
+### The hybrid su is the risky part
+
+`--with-su` replaces `/system/xbin/su`, which is the channel the rest of this
+toolkit runs on. Getting it wrong costs you root over adb. It is off by default,
+and when you do ask for it the script stages the new binary to a separate path,
+runs a live `su 0 id` through that path before promoting it, hash-verifies the
+promotion, re-checks the root channel afterwards, and never deletes the
+preserved stock `su_orig`. `--revert` puts the stock `su` back and verifies the
+hashes match.
+
 ## Features
 
 - **App installation** - Install APKs on a device whose package manager refuses every normal install
+- **Root for apps** - A socket daemon that gives allow-listed apps root, started at boot by its own init service
 - **Hidden Settings Access** - Unlock manufacturer-restricted features without modifications
 - **Complete Backup** - 7GB+ forensic device image with chunked storage support
 - **Custom Launcher** - Replace the locked stock launcher with Projectivy, Nova, or another launcher (requires root)
@@ -240,6 +323,7 @@ home intent wrong is what bricks this device.
 | [`MAKE_BACKUP.sh`](scripts/MAKE_BACKUP.sh) | Create complete device backup | Yes |
 | [`UNLOCK.sh`](scripts/UNLOCK.sh) | Replace the locked stock launcher | Yes |
 | [`INSTALL_APP.sh`](scripts/INSTALL_APP.sh) | Install an APK the device otherwise refuses | Yes |
+| [`ROOT.sh`](scripts/ROOT.sh) | Install the `sud` root daemon so apps can get root, persistently | Yes |
 
 ## Documentation
 
@@ -250,7 +334,7 @@ home intent wrong is what bricks this device.
 | [Boot Deadlock](docs/BOOT_DEADLOCK.md) | The `wtprovision` brick — mechanism, diagnosis, recovery |
 | [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs fail, and the `/system/app` workaround |
 | [Developer Options](docs/DEV_OPTIONS_CRASH.md) | Why the Developer options screen crashes, and the AOSP platform key that makes patching it possible |
-| [Root PoC](root/README.md) | Why setuid `su` can't root an app here, and the socket-daemon that can |
+| [Root for apps](root/README.md) | Why setuid `su` cannot root an app here, the socket daemon that can, and how it is made persistent |
 | [Security Analysis](docs/SECURITY_ANALYSIS.md) | Detailed security restriction analysis |
 | [Docs README](docs/README.md) | Documentation overview |
 
@@ -269,12 +353,22 @@ scripts/
   MAKE_BACKUP.sh        # Complete device backup
   UNLOCK.sh             # Launcher unlock, interactive CLI
   INSTALL_APP.sh        # Install an APK via /system/app fallback
+  ROOT.sh               # Persistent root: sud daemon, init service, allow-list
   lib/
     common.sh           # Shared functions
     unlock.sh           # Unlock steps (state/apply/revert per step)
+    root.sh             # Root steps, same four-function contract
+root/
+  sud.c                 # The root daemon
+  su.c, suc.c           # Hybrid su and the PoC client
+  suclient.c/.h         # Wire protocol shared by both clients
+  privtest.c            # Diagnostic: sets NO_NEW_PRIVS, then execs
+  sud.rc                # init service that starts sud at boot
+  build.sh              # Builds everything for armeabi-v7a
 tests/
   run-tests.sh          # Backup regression suite
   unlock-tests.sh       # Unlock end-to-end suite
+  root-tests.sh         # Persistent-root end-to-end suite
   ui-tests.sh           # TOOLS.sh and PROJECTOR.sh front ends
   fake-adb/adb          # Emulated projector -- no hardware needed
   device-emu/seed.sh    # Seeds the emulator from measured firmware values
@@ -472,6 +566,7 @@ backup you would restore from" or "the launcher you need to boot".
 ```bash
 bash tests/run-tests.sh      # backup suite
 bash tests/unlock-tests.sh   # unlock suite
+bash tests/root-tests.sh     # persistent-root suite
 bash tests/ui-tests.sh       # TOOLS.sh and PROJECTOR.sh
 ```
 
@@ -484,6 +579,9 @@ The emulator is seeded from values measured on a real NL5H00X: its
 `build.prop`, its `/system/app` inventory, piped-`su` only (`su -c` is
 rejected, as on the device), `/system` mounted read-only, and the
 `SETUP_WIZARD` home dispatch that makes `wtprovision` the sole home candidate.
+For the root suite it also models init-service liveness, so a `sud.rc` with a
+seclabel the policy does not define produces an absent daemon after a reboot,
+exactly as on the device.
 It **refuses what the device refuses**, so an unlock that forgets to remount
 `/system`, or writes a home preference the firmware ignores, fails there too.
 
