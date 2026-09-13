@@ -1,0 +1,21 @@
+# init service for sud (the root daemon).
+#
+# seclabel is REQUIRED here even though this device runs SELinux Permissive.
+# AOSP pie init (system/core/init/service.cpp, ComputeContextFromExecutable)
+# rejects a service whose executable file type has no policy-defined domain
+# transition, and returns an error BEFORE fork -- this is a policy-computation
+# check, not an AVC decision, so Permissive does not bypass it. u:r:su:s0 is
+# chosen because this device is userdebug + Permissive, where the `su` domain
+# exists. Override via SUD_SECLABEL at install time if that domain is not
+# present on a given device.
+#
+# Not oneshot on purpose: init auto-restarts a non-oneshot service ~5s after
+# it dies, so sud comes back on its own if it ever crashes.
+#
+# A wrong or unknown seclabel just means init logs an error and the service
+# never starts; boot continues normally either way, never a brick.
+
+service sud /system/xbin/sud
+    class late_start
+    user root
+    seclabel u:r:su:s0

@@ -104,7 +104,10 @@ static int recv_request(int conn, uid_t *target, char *cmd, size_t cmdlen,
 
     fds[0] = fds[1] = fds[2] = -1;
     for (struct cmsghdr *c = CMSG_FIRSTHDR(&msg); c; c = CMSG_NXTHDR(&msg, c)) {
-        if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS) {
+        /* any app can connect here, so a short/forged control message must
+         * not make us read past it and dup2/close whatever garbage follows */
+        if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_RIGHTS &&
+            c->cmsg_len == CMSG_LEN(sizeof(int) * 3)) {
             memcpy(fds, CMSG_DATA(c), sizeof(int) * 3);
         }
     }
@@ -117,7 +120,8 @@ static void handle(int conn) {
     if (getsockopt(conn, SOL_SOCKET, SO_PEERCRED, &cr, &crlen) != 0) return;
 
     uid_t target = 0;
-    char cmd[MAXCMD];
+    char cmd[MAXCMD + 1];          /* +1 so a full MAXCMD-byte command from
+                                     * suclient.c is not truncated */
     int fds[3];
     if (recv_request(conn, &target, cmd, sizeof cmd, fds) != 0) return;
 

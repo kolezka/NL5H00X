@@ -14,16 +14,13 @@
  * prove root comes back.
  */
 
-#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
 
-#define SOCK_NAME "projector_su"
-#define MAXCMD    8192
+#include "suclient.h"
+
+#define MAXCMD 8192
 
 static int looks_like_uid(const char *s) {
     if (!*s) return 0;
@@ -57,47 +54,11 @@ int main(int argc, char **argv) {
         strcpy(cmd, "id");            /* PoC default */
     }
 
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) { perror("socket"); return 1; }
-
-    struct sockaddr_un a = {0};
-    a.sun_family = AF_UNIX;
-    a.sun_path[0] = '\0';
-    memcpy(a.sun_path + 1, SOCK_NAME, strlen(SOCK_NAME));
-    socklen_t alen = offsetof(struct sockaddr_un, sun_path) + 1 + strlen(SOCK_NAME);
-
-    if (connect(fd, (struct sockaddr *)&a, alen) != 0) {
+    int status = su_via_daemon(target, cmd);
+    if (status < 0) {
         fprintf(stderr, "suc: cannot reach the root daemon (@%s): is sud running?\n",
                 SOCK_NAME);
         return 1;
     }
-
-    /* payload: 4-byte target uid + command; ancillary: our 0/1/2 fds */
-    char buf[4 + MAXCMD];
-    memcpy(buf, &target, 4);
-    size_t clen = strlen(cmd);
-    memcpy(buf + 4, cmd, clen);
-
-    struct msghdr msg = {0};
-    struct iovec iov = { buf, 4 + clen };
-    char ctrl[CMSG_SPACE(sizeof(int) * 3)];
-    memset(ctrl, 0, sizeof ctrl);
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = ctrl;
-    msg.msg_controllen = sizeof ctrl;
-
-    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-    c->cmsg_level = SOL_SOCKET;
-    c->cmsg_type = SCM_RIGHTS;
-    c->cmsg_len = CMSG_LEN(sizeof(int) * 3);
-    int stdfds[3] = { 0, 1, 2 };
-    memcpy(CMSG_DATA(c), stdfds, sizeof stdfds);
-
-    if (sendmsg(fd, &msg, 0) < 0) { perror("sendmsg"); return 1; }
-
-    unsigned int status = 1;
-    ssize_t n = read(fd, &status, sizeof status);
-    if (n != sizeof status) return 1;
-    return (int)status;
+    return status;
 }

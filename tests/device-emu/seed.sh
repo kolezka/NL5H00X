@@ -15,7 +15,14 @@ STATE="${1:?usage: seed.sh <state-dir> [profile]}"
 PROFILE="${2:---locked}"
 
 rm -rf "$STATE"
-mkdir -p "$STATE"/{sdcard,system/app,system/priv-app,data,data/local/tmp}
+mkdir -p "$STATE"/{sdcard,system/app,system/priv-app,system/xbin,system/etc/init,data,data/local/tmp}
+
+# Stock su, as it exists on the device before ROOT.sh ever runs. su_hybrid
+# preserves this as su_orig before installing the hybrid su over it. The
+# STOCK-SU marker is what fake-adb's su_binary_ok reads to answer `su <uid>
+# id` -- distinct from the HYBRID-SU marker root-tests.sh's dummy artifact
+# carries, so live-verify can actually distinguish the two.
+printf 'STOCK-SU stock su placeholder\n' > "$STATE/system/xbin/su"
 
 # ---------------------------------------------------------------------------
 # Properties (verbatim from system/build.prop in the pulled image)
