@@ -79,7 +79,7 @@ The individual scripts still work on their own if you prefer them, or want to
 script against them:
 
 ```bash
-./scripts/TOOLS.sh               # opens hidden settings screens; no root needed
+./scripts/TOOLS.sh               # hidden settings screens, plus the root tools
 ./scripts/MAKE_BACKUP.sh         # full device image, resumable
 ./scripts/UNLOCK.sh --status     # what is applied; changes nothing
 ./scripts/UNLOCK.sh --apply-all
@@ -296,6 +296,32 @@ is safe to try:
 `--repair` also prints the serial-console equivalent of every step, for a device
 that is not answering adb.
 
+### What you can do once root works
+
+The ROOT section of `./scripts/TOOLS.sh` is the menu over all of this. It shows
+the current root state, grants or revokes an app's root, runs a single command as
+uid 0, copies a root-only file off the device with a hash check, turns ADB over
+Wi-Fi on and off, and freezes or unfreezes apps.
+
+```bash
+./scripts/TOOLS.sh            # ROOT -> Root status
+su 0 cat /data/system/packages.list          # /data is root-only
+su 0 pm disable-user --user 0 com.apkpure.aegon   # freeze a vendor app
+su 0 setprop service.adb.tcp.port 5555       # then: adb connect <ip>:5555
+su 0 mount -o remount,rw /                   # /system lives on / here
+```
+
+Note the form: this device takes `su <uid> <command>`. `su -c 'id'` answers
+`invalid option -- c`.
+
+Two things to know before using any of it. **Never freeze
+`com.newlink.wtprovision`** — it owns the boot intent on its own and freezing it
+stops the boot before adb comes up (`TOOLS.sh` refuses it). And root does **not**
+lift the install lock: `pm install` still fails, apps still go to `/system/app`.
+
+[root/README.md](root/README.md) has the worked examples, including reading an
+app's database, dumping a partition and what an allow-listed app can actually do.
+
 ### The hybrid su is the risky part
 
 `--with-su` replaces `/system/xbin/su`, which is the channel the rest of this
@@ -319,7 +345,7 @@ hashes match.
 | Script | Purpose | Root Required |
 |--------|---------|---------------|
 | [`PROJECTOR.sh`](scripts/PROJECTOR.sh) | **Start here** — guided interface over everything below | Depends |
-| [`TOOLS.sh`](scripts/TOOLS.sh) | Open hidden settings screens; can also reset the home screen | No |
+| [`TOOLS.sh`](scripts/TOOLS.sh) | Open hidden settings screens, reset the home screen, and the ROOT tools | Only the ROOT section |
 | [`MAKE_BACKUP.sh`](scripts/MAKE_BACKUP.sh) | Create complete device backup | Yes |
 | [`UNLOCK.sh`](scripts/UNLOCK.sh) | Replace the locked stock launcher | Yes |
 | [`INSTALL_APP.sh`](scripts/INSTALL_APP.sh) | Install an APK the device otherwise refuses | Yes |
@@ -349,7 +375,7 @@ hashes match.
 ```
 scripts/
   PROJECTOR.sh          # Guided interface -- start here
-  TOOLS.sh              # Access hidden features
+  TOOLS.sh              # Access hidden features, plus the root tools
   MAKE_BACKUP.sh        # Complete device backup
   UNLOCK.sh             # Launcher unlock, interactive CLI
   INSTALL_APP.sh        # Install an APK via /system/app fallback

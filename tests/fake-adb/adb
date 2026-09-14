@@ -67,6 +67,11 @@ hang_child=
 FAKE_CANCEL_STATUS=
 FAKE_CLEANING=0
 
+# Whether the command being run came in through su. Some commands succeed only
+# as root on this device -- setprop, start, stop, reading /data -- and a model
+# that answers them for the shell too cannot test that root is required.
+AS_ROOT=0
+
 hang_child_active() {
     local active
     for active in $(jobs -pr; jobs -ps); do
@@ -242,6 +247,25 @@ run_remote() {
         "getprop "*)
             local k="${cmd#getprop }"
             [[ -f "$STATE/props" ]] && awk -F= -v k="$k" '$1==k{print $2}' "$STATE/props"
+            return 0 ;;
+        # Root-only, like the device: as shell, setprop on a service property
+        # and start/stop both fail with "must be root" while everything around
+        # them still succeeds -- which is exactly how the failure gets missed.
+        "setprop "*)
+            local k v
+            set -- $cmd; k="${2:-}"; v="${3:-}"
+            if [[ "$AS_ROOT" != "1" ]]; then
+                echo "setprop: failed to set property '$k' to '$v'" >&2; return 1
+            fi
+            touch "$STATE/props"
+            grep -v "^$k=" "$STATE/props" > "$STATE/props.new" 2>/dev/null || true
+            echo "$k=$v" >> "$STATE/props.new"
+            mv "$STATE/props.new" "$STATE/props"
+            return 0 ;;
+        "start "*|"stop "*)
+            if [[ "$AS_ROOT" != "1" ]]; then
+                echo "${cmd%% *}: must be root" >&2; return 1
+            fi
             return 0 ;;
         getprop)
             if [[ -f "$STATE/props" ]]; then
@@ -500,6 +524,24 @@ run_remote() {
             sz=$(stat -f%z "$STATE/blockdev" 2>/dev/null || stat -c%s "$STATE/blockdev")
             echo "major minor  #blocks  name"
             echo " 179        0  $((sz / 1024)) mmcblk0"
+            return 0
+            ;;
+        # Anything else under the modelled tree. /data is root-only here, as on
+        # the device: a shell that reads packages.list gets a refusal, not a
+        # helpful answer, so "root is needed for this" stays testable.
+        "cat /"*)
+            # adb_root_stream appends its own stderr redirect to the far side.
+            local path="${cmd#cat }"
+            path="${path% 2>/dev/null}"
+            if [[ "$path" == /data/* && "$AS_ROOT" != "1" ]]; then
+                echo "cat: $path: Permission denied" >&2
+                return 1
+            fi
+            if [[ ! -f "${STATE}${path}" ]]; then
+                echo "cat: $path: No such file or directory" >&2
+                return 1
+            fi
+            cat "${STATE}${path}"
             return 0
             ;;
         getprop)
@@ -938,7 +980,7 @@ case "$subcmd" in
         shell_cmd="$*"
         inner=$(unwrap_su "$shell_cmd")
         case $? in
-            0) : ;;
+            0) AS_ROOT=1 ;;
             1) echo "su: invalid option -- c" >&2; finish 1 ;;
             *) inner="$shell_cmd" ;;
         esac
@@ -960,7 +1002,7 @@ case "$subcmd" in
 
         inner=$(unwrap_su "$shell_cmd")
         case $? in
-            0) : ;;                       # unwrapped an su form we support
+            0) AS_ROOT=1 ;;               # unwrapped an su form we support
             1)                            # su form the "device" does not support
                 echo "su: invalid option -- c" >&2
                 [[ "$sentinel" == "1" ]] && echo '__RC__=1'
