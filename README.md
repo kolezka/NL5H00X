@@ -204,6 +204,12 @@ The way in is `/system/app`. `INSTALL_APP.sh` does it properly:
 ./scripts/INSTALL_APP.sh --remove org.smarttube.stable
 ```
 
+Seven ready-to-install apps ship in [`apks/`](apks/): Aurora Store and F-Droid
+(app sources, no Google account needed), Kodi and Jellyfin, TV Bro, AFWall+ and
+Termux. Versions, sources and checksums are in
+[`apks/PROVENANCE.md`](apks/PROVENANCE.md). F-Droid needs `--allow-home`; the
+provenance file says why that is safe.
+
 It tries a normal install first, then falls back to `/system/app`. It picks the
 device's ABI off `ro.product.cpu.abilist` and refuses an APK built for the wrong
 one — this device is 32-bit `armeabi-v7a` only. It **unpacks the native
@@ -361,6 +367,7 @@ hashes match.
 | [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs fail, and the `/system/app` workaround |
 | [Developer Options](docs/DEV_OPTIONS_CRASH.md) | Why the Developer options screen crashes, and the AOSP platform key that makes patching it possible |
 | [Root for apps](root/README.md) | Why setuid `su` cannot root an app here, the socket daemon that can, and how it is made persistent |
+| [Vendor Telemetry](docs/VENDOR_TELEMETRY.md) | What phones home to the manufacturer, why the vendor OTA is dead, why Android cannot be updated, and how to block it safely |
 | [Security Analysis](docs/SECURITY_ANALYSIS.md) | Detailed security restriction analysis |
 | [Docs README](docs/README.md) | Documentation overview |
 

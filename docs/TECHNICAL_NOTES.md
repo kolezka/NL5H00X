@@ -81,7 +81,7 @@ These services must be preserved for hardware functionality:
 |---------|---------|
 | `com.zhiying.powerservice` | Power management |
 | `com.hisilicon.tv.service` | Display control |
-| `com.newlink.service` | Hardware interface |
+| `com.newlink.service` | Factory provisioning, activation gate and manufacturer telemetry, not a hardware interface. See [VENDOR_TELEMETRY.md](VENDOR_TELEMETRY.md). Kept only because it sits on the boot path. |
 
 ### Default Launcher
 
