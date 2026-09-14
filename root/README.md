@@ -166,6 +166,127 @@ returns uid 0 through that path, and only then promotes it.
 `bash ../tests/root-tests.sh` exercises all of this against the emulator,
 including a hybrid that fails live-verify and must leave the live `su` alone.
 
+## What root gets you
+
+Two different things are called "root" here, and they are worth keeping apart.
+
+**Shell root** is what `su 0 <command>` in an adb shell gives you. It exists on
+the stock firmware — the daemon does not create it, and everything in this
+section works before `ROOT.sh` has ever run. Note the form: this device takes
+`su <uid> <command>`, not `su -c`. `su -c 'id'` answers `invalid option -- c`.
+
+**App root** is what `sud` adds: an app you put on the allow-list can run one
+command as uid 0 through the socket. Nothing else changes for that app.
+
+The examples below are run by the **ROOT** section of
+[`scripts/TOOLS.sh`](../scripts/TOOLS.sh), which does the same work with the
+read-back checks already in place. The raw commands are here so you can see what
+the menu actually does.
+
+### Read what an app hides
+
+App data lives under `/data/data/<pkg>` with mode 700. As `shell` you get
+`Permission denied`; as root you can read it, and copy it off with `exec-out` so
+binary content survives.
+
+```bash
+su 0 ls /data/data/com.newlink.hisilauncher/shared_prefs
+su 0 cat /data/system/packages.list          # uid -> package, what sud reads
+adb exec-out "echo 'cat /data/data/<pkg>/databases/app.db 2>/dev/null' | su" > app.db
+```
+
+Hash the result against the device before you trust it — `adb pull` of a
+root-only path reports success and gives you nothing.
+
+### Freeze the vendor apps that keep waking up
+
+`pm disable-user` survives reboots, keeps the APK installed, and is undone with
+`pm enable`. It is the safe alternative to deleting anything from `/system`.
+
+```bash
+su 0 pm disable-user --user 0 com.apkpure.aegon
+su 0 pm list packages -d                     # what is frozen right now
+su 0 pm enable com.apkpure.aegon
+```
+
+**Do not freeze `com.newlink.wtprovision`.** It is the only package that owns
+MAIN + HOME + SETUP_WIZARD on this firmware, and freezing it stops the boot
+before adb and Wi-Fi come up. Recovery is a USB job. `TOOLS.sh` refuses that
+package outright, along with the launcher, TV settings, SystemUI and `android`.
+
+### Set properties, and get ADB over Wi-Fi
+
+`setprop` on a service property and `start` / `stop` both fail as `shell` with
+`must be root`, while every command around them still succeeds.
+
+```bash
+su 0 setprop service.adb.tcp.port 5555
+su 0 stop adbd && su 0 start adbd
+adb connect <projector-ip>:5555              # unplug the cable after this
+su 0 setprop service.adb.tcp.port -1         # off again
+```
+
+The property is not persistent: a reboot turns it back off. Restarting `adbd`
+drops the current connection for a second, so re-check that root still answers
+afterwards rather than reading the silence as "it did not work".
+
+### Write `/system`
+
+This is a system-as-root device: `/system` is a directory on `/`, so the remount
+targets `/` and `mount -o remount,rw /system` answers `not in /proc/mounts`.
+
+```bash
+su 0 mount -o remount,rw /
+su 0 cp /data/local/tmp/staged /system/app/Foo/Foo.apk
+su 0 mount -o remount,ro /
+```
+
+`adb push` straight into `/system` reports bytes written and changes nothing.
+Stage in `/data/local/tmp`, copy as root, then compare `sha256sum` on both ends.
+
+### Read a partition
+
+Whole-device and single-partition dumps are a root read of a block device. Use
+`bs=4096`; toybox `dd` rejects `bs=1M` and leaves a 0-byte file that looks like a
+success.
+
+```bash
+su 0 ls -l /dev/block/platform/soc/f9830000.emmc/by-name/
+adb exec-out "echo 'dd if=/dev/block/by-name/logo bs=4096 2>/dev/null' | su" > logo.img
+```
+
+[`scripts/MAKE_BACKUP.sh`](../scripts/MAKE_BACKUP.sh) already does the full-device
+version, with the size assertion and the hash.
+
+### What an app on the allow-list can do
+
+```bash
+./scripts/TOOLS.sh            # ROOT -> "Give an app root"
+# or, by hand:
+su 0 sh -c "echo com.example.app >> /data/adb/su-allow"
+```
+
+`sud` re-reads that file on every request, so the change is live with no reboot.
+From then on the app can run a command as root through `suc` (or the hybrid
+`su`): a shell script, a `pm` call, a write to `/system`. This is the whole point
+of the daemon — an app process has `NO_NEW_PRIVS` set and cannot elevate itself
+by any other route on this firmware.
+
+Treat the allow-list as a list of apps you are handing the device to. An allowed
+app can read every other app's data, write `/system` and stop the projector
+booting.
+
+### What root does not get you
+
+- **Normal installs still fail.** `pm install` and the package installer are
+  locked by the vendor and root does not lift it. Apps go to `/system/app`. See
+  [docs/INSTALL_LOCKED.md](../docs/INSTALL_LOCKED.md).
+- **No Magisk, no modules, no systemless anything.** Both boot and recovery carry
+  `ramdisk=0`; see above and [docs/BOOT_DEADLOCK.md](../docs/BOOT_DEADLOCK.md).
+- **The stock launcher still wins the boot intent** unless the home preference is
+  set the way [`scripts/UNLOCK.sh`](../scripts/UNLOCK.sh) sets it. That is an
+  intent-resolution problem, not a permission one.
+
 ## Files
 
 | File | What it is |

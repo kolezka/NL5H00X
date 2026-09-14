@@ -49,6 +49,20 @@ ui() {
 home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
 dev() { PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$1/state" adb shell "$2" 2>/dev/null | tr -d '\r'; }
 
+# A device where ROOT.sh has already run: daemon, init service, empty
+# allow-list, and sud up. Written straight into the emulated device rather than
+# through ROOT.sh, because what is under test here is TOOLS.sh reading it.
+install_fake_root() {
+    local sb="$1"
+    printf 'SUD-DAEMON placeholder\n' > "$sb/state/system/xbin/sud"
+    printf 'service sud /system/xbin/sud\n    class late_start\n    user root\n    seclabel u:r:su:s0\n' \
+        > "$sb/state/system/etc/init/sud.rc"
+    mkdir -p "$sb/state/data/adb"
+    : > "$sb/state/data/adb/su-allow"
+    echo sud >> "$sb/state/running"
+}
+allow_list_now() { cat "$1/state/data/adb/su-allow" 2>/dev/null; }
+
 # ---------------------------------------------------------------------------
 head_ "every entry script runs under the system bash"
 # TOOLS.sh used `local -n`, which needs bash 4.3. macOS ships 3.2, so
@@ -206,6 +220,129 @@ if [[ -n "$img" ]] && cmp -s "$img" "$sb/state/blockdev"; then
 else
     bad "image differs from the device"
 fi
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "TOOLS.sh reports the root state it is actually in"
+
+new_sandbox
+out=$(ui "$sb" TOOLS.sh $'20\n\nq\n')
+echo "$out" | grep -qE 'sud binary +missing' \
+    && ok "says the daemon is not installed yet" || bad "did not report the missing daemon"
+echo "$out" | grep -qiE 'allow-list +not created' \
+    && ok "says the allow-list does not exist yet" || bad "allow-list state not reported"
+echo "$out" | grep -q 'uid 0' \
+    && ok "names the su form this device takes" || bad "su form not shown"
+
+install_fake_root "$sb"
+out=$(ui "$sb" TOOLS.sh $'20\n\nq\n')
+echo "$out" | grep -qE 'sud daemon +running' \
+    && ok "sees the daemon once it runs" || bad "running daemon not detected"
+echo "$out" | grep -qi 'fails closed' \
+    && ok "explains that an empty allow-list grants nobody root" \
+    || bad "empty allow-list not explained"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "TOOLS.sh grants and revokes app root through the allow-list"
+
+new_sandbox; install_fake_root "$sb"
+out=$(ui "$sb" TOOLS.sh $'22\nnot a package name\n\nq\n')
+echo "$out" | grep -qi 'not a package name' \
+    && ok "rejects something that is not a package name" || bad "took a bad package name"
+
+out=$(ui "$sb" TOOLS.sh "22"$'\n'"$PROJECTIVY"$'\ny\n\nq\n')
+grep -qx "$PROJECTIVY" "$sb/state/data/adb/su-allow" \
+    && ok "writes the package into /data/adb/su-allow" || bad "allow-list not written"
+echo "$out" | grep -qi 'is on the allow-list' \
+    && ok "confirms the grant after reading the file back" || bad "grant not confirmed"
+
+out=$(ui "$sb" TOOLS.sh "23"$'\n'"$PROJECTIVY"$'\n\nq\n')
+grep -qx "$PROJECTIVY" "$sb/state/data/adb/su-allow" \
+    && bad "the package is still in the allow-list after a revoke" \
+    || ok "revoke removes the package"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "TOOLS.sh runs commands as root and refuses what it cannot quote"
+# adb_root_exec wraps the command in single quotes, so a command that contains
+# one would be cut in half and part of it would run unquoted. Refusing is the
+# only safe answer; silently mangling it is not.
+
+new_sandbox; install_fake_root "$sb"
+out=$(ui "$sb" TOOLS.sh $'24\necho \'hi\'\n\nq\n')
+echo "$out" | grep -qi 'single quote' \
+    && ok "refuses a command containing a single quote" || bad "accepted an unquotable command"
+
+out=$(ui "$sb" TOOLS.sh $'24\ngetprop ro.product.model\ny\n\nq\n')
+echo "$out" | grep -q 'NL5H00X_TP' \
+    && ok "runs a command and shows its output" || bad "command output missing"
+echo "$out" | grep -qi 'exit 0' \
+    && ok "reports the exit code from the device" || bad "exit code not reported"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "TOOLS.sh copies a root-only file off the device and verifies it"
+# /data/system/packages.list is unreadable as shell. That is the whole point of
+# the tool, so the test proves the emulated device refuses it first.
+
+new_sandbox; install_fake_root "$sb"
+[[ -z "$(dev "$sb" "cat /data/system/packages.list")" ]] \
+    && ok "the device refuses that file to a plain shell" \
+    || bad "the emulated device handed /data out without root"
+
+out=$(ui "$sb" TOOLS.sh $'25\n\n\nq\n')
+pulled=$(find "$sb/run" -name 'packages.list*' -print -quit)
+if [[ -n "$pulled" ]] && cmp -s "$pulled" "$sb/state/data/system/packages.list"; then
+    ok "the copy is byte-identical to the file on the device"
+else
+    bad "no matching copy was written"
+fi
+echo "$out" | grep -qi 'matches the device' \
+    && ok "verifies the copy by hash" || bad "copy not hash-verified"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "TOOLS.sh turns ADB over Wi-Fi on and off"
+# setprop on a service property fails as shell and succeeds as root, which is
+# why this tool exists. The emulated device enforces that difference.
+
+new_sandbox; install_fake_root "$sb"
+dev "$sb" "setprop service.adb.tcp.port 5555" >/dev/null 2>&1
+grep -q '^service.adb.tcp.port=' "$sb/state/props" \
+    && bad "the emulated device let shell set a service property" \
+    || ok "setprop needs root on the device"
+
+out=$(ui "$sb" TOOLS.sh $'26\ny\n\nq\n')
+grep -qx 'service.adb.tcp.port=5555' "$sb/state/props" \
+    && ok "turns the port on" || bad "port not set"
+echo "$out" | grep -q 'adb connect' \
+    && ok "prints the command to connect with" || bad "connect command missing"
+
+out=$(ui "$sb" TOOLS.sh $'26\ny\n\nq\n')
+grep -qx 'service.adb.tcp.port=-1' "$sb/state/props" \
+    && ok "turns it off again" || bad "port not cleared"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "TOOLS.sh freezes apps but refuses the ones that stop the boot"
+# com.newlink.wtprovision owns MAIN + HOME + SETUP_WIZARD on its own. Freezing
+# it stops the boot before adb and Wi-Fi come up, which needs a USB recovery.
+
+new_sandbox; install_fake_root "$sb"
+out=$(ui "$sb" TOOLS.sh $'27\ncom.newlink.wtprovision\n\nq\n')
+echo "$out" | grep -qi 'wtprovision' \
+    && ok "names the package it refuses" || bad "no refusal message"
+grep -qx 'com.newlink.wtprovision' "$sb/state/packages_disabled" \
+    && bad "froze the package that stops the boot" || ok "left the boot path alone"
+
+out=$(ui "$sb" TOOLS.sh $'27\ncom.apkpure.aegon\ny\n\nq\n')
+grep -qx 'com.apkpure.aegon' "$sb/state/packages_disabled" \
+    && ok "freezes an ordinary app" || bad "freeze did nothing"
+
+out=$(ui "$sb" TOOLS.sh $'27\ncom.apkpure.aegon\ny\n\nq\n')
+grep -qx 'com.apkpure.aegon' "$sb/state/packages_disabled" \
+    && bad "still frozen after an unfreeze" || ok "unfreezes it again"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

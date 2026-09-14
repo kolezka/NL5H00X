@@ -81,6 +81,16 @@ cat > "$STATE/packages" <<'EOF'
 EOF
 : > "$STATE/packages_disabled"
 
+# /data/system/packages.list -- root-only on the device, and the file sud reads
+# to turn a caller's uid into a package name (root/sud.c, package_for_uid).
+# Format: package uid debugFlag dataPath seinfo gids.
+mkdir -p "$STATE/data/system"
+cat > "$STATE/data/system/packages.list" <<'EOF'
+com.newlink.hisilauncher 10029 0 /data/user/0/com.newlink.hisilauncher default 3003
+com.apkpure.aegon 10030 0 /data/user/0/com.apkpure.aegon default 3003
+com.spocky.projengmenu 10031 0 /data/user/0/com.spocky.projengmenu default 3003
+EOF
+
 # ---------------------------------------------------------------------------
 # Mutable device state
 # ---------------------------------------------------------------------------

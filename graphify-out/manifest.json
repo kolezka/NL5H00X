@@ -1,0 +1,552 @@
+{
+  "root/build.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "3f4248fe5556850dc63348592d5e95dd",
+    "semantic_hash": ""
+  },
+  "root/privtest.c": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "dc11d44b968cffaa87cd3274360d7003",
+    "semantic_hash": ""
+  },
+  "root/su.c": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "e8d9872d6305dac8516f545978f26d05",
+    "semantic_hash": ""
+  },
+  "root/suc.c": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "af2ee6d470b9d82c41a2e10253390b33",
+    "semantic_hash": ""
+  },
+  "root/suclient.c": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "6300997d2e312914bcbaec6cb8599085",
+    "semantic_hash": ""
+  },
+  "root/suclient.h": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "20f61d6fd64ea386c8e38ac790fced96",
+    "semantic_hash": ""
+  },
+  "root/sud.c": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "b587df98262a727e49c3464204b2f982",
+    "semantic_hash": ""
+  },
+  "scripts/INSTALL_APP.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "feb3025ef302e22047928ca5177db83e",
+    "semantic_hash": ""
+  },
+  "scripts/MAKE_BACKUP.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "bce392f3223b9aef2eec04de01ef194a",
+    "semantic_hash": ""
+  },
+  "scripts/PROJECTOR.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "f3592814d62611e0b8d1f63b2be77c17",
+    "semantic_hash": ""
+  },
+  "scripts/ROOT.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "baed4f05680ef1351ce4ac98779ba6db",
+    "semantic_hash": ""
+  },
+  "scripts/TOOLS.sh": {
+    "mtime": 1789346688.3591971,
+    "ast_hash": "00adfa260f9811cabbf451306bcef466",
+    "semantic_hash": ""
+  },
+  "scripts/UNLOCK.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "fdff26513a2d5d9a33afe1f5f062a3ea",
+    "semantic_hash": ""
+  },
+  "scripts/lib/common.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "bafabf656f67ab4b22b2e0a62714534d",
+    "semantic_hash": ""
+  },
+  "scripts/lib/progress/lock.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "a331f1f3e7a3445e208e740e9eda7852",
+    "semantic_hash": ""
+  },
+  "scripts/lib/progress/status.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "e9f8d006252e28229134abbbe390f240",
+    "semantic_hash": ""
+  },
+  "scripts/lib/root.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "c5b1dbfcb538ac5914ec829d8db78d78",
+    "semantic_hash": ""
+  },
+  "scripts/lib/transport/adb.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "6956572daedacfa5451070e08c9741f7",
+    "semantic_hash": ""
+  },
+  "scripts/lib/transport/select.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "3780e12774f51a4152af836b3837ec7f",
+    "semantic_hash": ""
+  },
+  "scripts/lib/ui/colors.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "c8d555a3aebee00d1e11aaa5976dc363",
+    "semantic_hash": ""
+  },
+  "scripts/lib/ui/legacy.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "837bece9c2b3abefc23533ce7e9f76d9",
+    "semantic_hash": ""
+  },
+  "scripts/lib/ui/log.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "cbd773e55f2cfd514fb143b4a20854bf",
+    "semantic_hash": ""
+  },
+  "scripts/lib/ui/render.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "4f4146826c2fcbe4147803eabac7089e",
+    "semantic_hash": ""
+  },
+  "scripts/lib/unlock.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "4f46e6a7440414af1f923760051331dc",
+    "semantic_hash": ""
+  },
+  "tests/contracts/characterize-app-install.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "eb764ed22a58948d45cffb55b09522e1",
+    "semantic_hash": ""
+  },
+  "tests/contracts/characterize-backup-signal.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "638b73c7710956a6ec56c925bbd511f4",
+    "semantic_hash": ""
+  },
+  "tests/contracts/characterize-recovery.sh": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "03e0b2ac5d26aa9ba79d011e8b19b440",
+    "semantic_hash": ""
+  },
+  "tests/contracts/status-protocol.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "d0090e15b5c0cbb17e9f082e8f6c0b20",
+    "semantic_hash": ""
+  },
+  "tests/contracts/stream-discipline.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "30083048638c39f6251aac0ec3bfbad8",
+    "semantic_hash": ""
+  },
+  "tests/contracts/transport.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "257254db1ee6267e6e92b9ef8c092a3a",
+    "semantic_hash": ""
+  },
+  "tests/device-emu/seed.sh": {
+    "mtime": 1789345987.0620756,
+    "ast_hash": "2a28b2357cea98d2126d6c036b7757c5",
+    "semantic_hash": ""
+  },
+  "tests/fake-adb/adb": {
+    "mtime": 1789345977.618598,
+    "ast_hash": "df746f46185356c315653d55b73c86dd",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/block-fixture.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "b4e2a4870e095859b7295ea2b545c0d9",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/make-apk.py": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "88d3439710127afb694437df357cb5a0",
+    "semantic_hash": ""
+  },
+  "tests/local/bypass-audit-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "602e1b5ed03bff003bfa50491a8d3497",
+    "semantic_hash": ""
+  },
+  "tests/local/bypass-audit.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "696a6a7d28af05e321c184fe5f8c4edc",
+    "semantic_hash": ""
+  },
+  "tests/local/capture-tree.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "ed9ce2e366cd87bf125a9179b149ac86",
+    "semantic_hash": ""
+  },
+  "tests/local/controls.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "73fbd7b4c0c35206c3c60ffb428d82da",
+    "semantic_hash": ""
+  },
+  "tests/local/direct-suite-probe.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "2388ab22a81e49a61affc0b5e5b90dcb",
+    "semantic_hash": ""
+  },
+  "tests/local/fake-ownership-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "944a2ab6345c7c4e131557d69269775e",
+    "semantic_hash": ""
+  },
+  "tests/local/forwarding-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "7307b58b166ca8987564e9cfa883e705",
+    "semantic_hash": ""
+  },
+  "tests/local/heredoc-probe.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "8fd77f6a450090e16838432b22ead48f",
+    "semantic_hash": ""
+  },
+  "tests/local/lifecycle-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "17020a42dd16e2119b2feaaa296d5aec",
+    "semantic_hash": ""
+  },
+  "tests/local/lifecycle.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "ec9ae4ba998feaa139aac91df734856f",
+    "semantic_hash": ""
+  },
+  "tests/local/reaper-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "58b02842d2bb6c08ca772b5b4f0cefea",
+    "semantic_hash": ""
+  },
+  "tests/local/run.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "94d48677b1d543949f0effce261405ea",
+    "semantic_hash": ""
+  },
+  "tests/local/runner-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "49f31559119f0377c2929027c754c9cf",
+    "semantic_hash": ""
+  },
+  "tests/local/sandbox-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "5af2790173f39792bb4fbf66e851c78b",
+    "semantic_hash": ""
+  },
+  "tests/local/sandboxes.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "6a2f02fe6f9f417f3b443e4b1f0badc4",
+    "semantic_hash": ""
+  },
+  "tests/local/sentinel-adb": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "5f42492b4a092e4420ebad0fb7e57d91",
+    "semantic_hash": ""
+  },
+  "tests/local/supervise.py": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "dee9e75f19125558beccf352825ec7ad",
+    "semantic_hash": ""
+  },
+  "tests/local/supervisor-python-tests.py": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "ec2be4a330d5cc5a3e7db2b05a3b97e5",
+    "semantic_hash": ""
+  },
+  "tests/local/supervisor-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "c5b43bb6c14bcc7c1a2dfe6411b5ffd3",
+    "semantic_hash": ""
+  },
+  "tests/root-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "79b664c318d732605fa9a1603cca8a4b",
+    "semantic_hash": ""
+  },
+  "tests/run-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "65fdd84d52cee8c31e75cdc1ac6a480d",
+    "semantic_hash": ""
+  },
+  "tests/ui-tests.sh": {
+    "mtime": 1789346271.3796978,
+    "ast_hash": "4c858ee4dabd2141300ecd4d7f19755c",
+    "semantic_hash": ""
+  },
+  "tests/unlock-tests.sh": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "4a8966aea8c8e181679fc86153caab30",
+    "semantic_hash": ""
+  },
+  ".ai/lessons.md": {
+    "mtime": 1789346734.9465473,
+    "ast_hash": "313470d9c375c908d95beb25cd0558db",
+    "semantic_hash": ""
+  },
+  "CHANGELOG.md": {
+    "mtime": 1789346451.2357037,
+    "ast_hash": "ebe61b4419ad4602d0b03094768a88c1",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1789345488.8443048,
+    "ast_hash": "3a080eb2ff7734dc5ee1f1ee7905d96b",
+    "semantic_hash": ""
+  },
+  "CONTRIBUTING.md": {
+    "mtime": 1789345488.8443048,
+    "ast_hash": "ef02c3853f772cb34829b1e9068dfa0b",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1789346442.5955758,
+    "ast_hash": "d2b5191df22cd26e638b540da5267533",
+    "semantic_hash": ""
+  },
+  "apks/PROVENANCE.md": {
+    "mtime": 1789345488.8443048,
+    "ast_hash": "1394fd56b4f2e58e736c74e55df8ba86",
+    "semantic_hash": ""
+  },
+  "docs/BOOT_BRANDING.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "ecfd53c41b31090005bb8e603f1b14c3",
+    "semantic_hash": ""
+  },
+  "docs/BOOT_DEADLOCK.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "07ad1db4c6beb48513abc592fd5b09ec",
+    "semantic_hash": ""
+  },
+  "docs/DEV_OPTIONS_CRASH.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "9b22f798da5a1bdbba44d716e716d3bb",
+    "semantic_hash": ""
+  },
+  "docs/INSTALL_LOCKED.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "43d868b381e669e76b3b2a5a8be4d466",
+    "semantic_hash": ""
+  },
+  "docs/README.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "6871a9384562d9d5eb53458d7ce12db1",
+    "semantic_hash": ""
+  },
+  "docs/SECURITY_ANALYSIS.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "cf84fd14293a276286e140a3f2d480c7",
+    "semantic_hash": ""
+  },
+  "docs/TECHNICAL_NOTES.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "ee7d231c3861b8fac1436d3cfaf3a92d",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/plans/2026-09-12-system-flow-refactor.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "3edb6dcb5427e28d78ab3793919c0475",
+    "semantic_hash": ""
+  },
+  "docs/superpowers/specs/2026-09-12-system-flow-refactor-design.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "1ca681e193db3397b3f9833adf1499f6",
+    "semantic_hash": ""
+  },
+  "docs/system/CONVENTIONS.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "23f4d30dd482d548e9a15dabcdade405",
+    "semantic_hash": ""
+  },
+  "docs/system/DATA-FLOW.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "6d6f5a9e921534d8de7ebb3bd35cd40b",
+    "semantic_hash": ""
+  },
+  "docs/system/GLOSSARY.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "7992885504633cbb6d7a21fc830da9bb",
+    "semantic_hash": ""
+  },
+  "docs/system/OWNERSHIP.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "656a187c763fd360a973e011f13c9717",
+    "semantic_hash": ""
+  },
+  "docs/system/README.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "00d5f73eb3f4b79920cb83e7b57c5d9c",
+    "semantic_hash": ""
+  },
+  "docs/system/REVIEW.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "dcb801ffe420d84b7d9621bb07397d7c",
+    "semantic_hash": ""
+  },
+  "docs/system/test-harness/CONTRACTS.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "ff5a00979cac73d53028d4bf4753fc42",
+    "semantic_hash": ""
+  },
+  "docs/system/test-harness/GAPS.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "85a3e32c9bc7766e24a8fc5986fb4c66",
+    "semantic_hash": ""
+  },
+  "docs/system/test-harness/INVARIANTS.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "6515b1152a625866d1e4d4a026fbc489",
+    "semantic_hash": ""
+  },
+  "docs/system/test-harness/OPERATIONS.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "5f38021ba672f2bb00f75e9bc501711b",
+    "semantic_hash": ""
+  },
+  "docs/system/test-harness/README.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "1a2b16d8053ca586642e152df96421da",
+    "semantic_hash": ""
+  },
+  "prompt.md": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "f75eff8e4a70c20b31552d05e259e123",
+    "semantic_hash": ""
+  },
+  "root/README.md": {
+    "mtime": 1789346408.5117376,
+    "ast_hash": "62a50f6b31a961f5587e5f35936a18f0",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/app-install.txt": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "e53ae8d888da2e36b2199538acf1fd69",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/backup-signal.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "03b1759bc7df69c00e96ff5de90d370f",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/install-help.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "80ddeb7500f117d7777ded5f1c5ee9c6",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-hazards.md": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "3f9f6fd5b6ca60607e1e73f93725cdcc",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-menu.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "6bc7205963df1a1e45241327cae73660",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/1-failure.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "0271f030da2d5afc3371e6648920d454",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/1-success.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "a67df249be7251175138916d2c05807c",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/2-failure.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "7314ea22c7bb33f36a832c0ecb9f743f",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/2-missing.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "d4764c7429561543c7a84a48a281ba2b",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/2-success.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "f0195e12101f7c96eb4ca269a94ea09c",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/3-failure.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "ede84809146830441424faedead2144b",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/3-success.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "99d66cfcf6b09ab844afcb3ce879e548",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/4-failure.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "f6c851b28ed6851356ea50f03e7d7099",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/4-fallback.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "20c708a18613345c61740e0566b39d96",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/4-success.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "5e82241ee1cc9f9df6884efe78decdc2",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/q.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "1c05da3ddaf6b591114b00b7efad94e5",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/reset-failure.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "717883be28f448feb168fda5cef73890",
+    "semantic_hash": ""
+  },
+  "tests/contracts/observations/recovery-output/reset-success.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "850c03e2d093d8f65d1ae921e34c4215",
+    "semantic_hash": ""
+  },
+  "tests/fixtures/README.md": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "00819552fe77bcb52d0618a4b4165ded",
+    "semantic_hash": ""
+  },
+  "tests/local/bypass-baseline.txt": {
+    "mtime": 1789345488.8843052,
+    "ast_hash": "26ea29869c41284cf8d699044b062b47",
+    "semantic_hash": ""
+  },
+  "assets/hardware/board-overview.jpg": {
+    "mtime": 1789345488.8776386,
+    "ast_hash": "8737b94bb1a1a82cfd79835ce18dc3f1",
+    "semantic_hash": ""
+  },
+  "assets/hardware/board-usb-device-footprint.jpg": {
+    "mtime": 1789345488.8776386,
+    "ast_hash": "1b2fc591bd95217d80de21f73a06cffe",
+    "semantic_hash": ""
+  },
+  "assets/hardware/projectivy-running.jpg": {
+    "mtime": 1789345488.8776386,
+    "ast_hash": "05e2c37fa8f593939d7801c19ac9d9b6",
+    "semantic_hash": ""
+  },
+  "assets/hardware/uart-pads-txrx-closeup.jpg": {
+    "mtime": 1789345488.8776386,
+    "ast_hash": "3341e4737b96c9e2946c4183c589d07b",
+    "semantic_hash": ""
+  },
+  "assets/img1.png": {
+    "mtime": 1789345488.880972,
+    "ast_hash": "5a724b7165c8957dd9818518758897a3",
+    "semantic_hash": ""
+  }
+}

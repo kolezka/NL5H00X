@@ -39,3 +39,13 @@ to start even under SELinux Permissive — init's ComputeContextFromExecutable r
 it before fork (a policy computation, not an AVC decision). A wrong seclabel means
 the daemon silently never starts, but boot still completes: not a brick. Default
 `u:r:su:s0` (userdebug + Permissive), overridable.
+
+## `clear` needs TERM, and under `set -e` that ends the script
+
+TOOLS.sh drew its menu with `clear`. In any shell without TERM (CI, a pipe, an
+agent harness) `clear` prints "TERM environment variable not set." and returns
+non-zero, so `set -euo pipefail` ended the script on its first menu draw and every
+front-end test failed at once with no error text to point at. PROJECTOR.sh never
+had the bug because it writes the escape itself. Rule: in an entry script with
+`set -e`, never call a terminal helper for output you can write as an escape
+sequence -- `printf '\033[2J\033[H'`.
