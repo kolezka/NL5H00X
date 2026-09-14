@@ -204,6 +204,12 @@ The way in is `/system/app`. `INSTALL_APP.sh` does it properly:
 ./scripts/INSTALL_APP.sh --remove org.smarttube.stable
 ```
 
+Seven ready-to-install apps ship in [`apks/`](apks/): Aurora Store and F-Droid
+(app sources, no Google account needed), Kodi and Jellyfin, TV Bro, AFWall+ and
+Termux. Versions, sources and checksums are in
+[`apks/PROVENANCE.md`](apks/PROVENANCE.md). F-Droid needs `--allow-home`; the
+provenance file says why that is safe.
+
 It tries a normal install first, then falls back to `/system/app`. It picks the
 device's ABI off `ro.product.cpu.abilist` and refuses an APK built for the wrong
 one — this device is 32-bit `armeabi-v7a` only. It **unpacks the native

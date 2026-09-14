@@ -61,3 +61,53 @@ LAUNCHER_APK_GLOB='nova-launcher*.apk' \
 
 Nova is a phone launcher and expects touch; on a projector driven by a remote
 it is usable but awkward, which is why it is no longer the default.
+
+## Bundled apps (added 2026-09-14)
+
+Seven apps the owner asked for, staged into `/system/app` on the reference
+device with `scripts/INSTALL_APP.sh` the same day. All are open source, all
+carry an `armeabi-v7a` slice or no native code, all have minSdk 24 or lower
+(the device is API 28), and each verified with `apksigner` as a single-signer
+APK. Sizes stay under GitHub's 100 MB file limit, which is why TV Bro is the
+build without the bundled Gecko engine and Termux is the per-ABI build rather
+than the universal one.
+
+Button Mapper was requested too and is not here: it is closed source and Play
+Store only, so it cannot be redistributed. Install it through Aurora Store.
+
+| File | Package | Version (code) | minSdk / target | Source | SHA-256 (file) | Signer DN | Signer SHA-256 |
+|---|---|---|---|---|---|---|---|
+| `aurora-store-4.8.4.apk` | `com.aurora.store` | 4.8.4 (76) | 23 / 37 | `https://f-droid.org/repo/com.aurora.store_76.apk` | `fd9c75d90d0f4a7c132b9b4a5a2cf1992a45e03b8d8ff988b7dcfbc0db2c4d11` | `CN=FDroid, OU=FDroid, O=fdroid.org` | `5c83c7672b929955dc0a1db89a5e6ae4389e2eae7ec939956041694e5815f532` |
+| `fdroid-1.23.2.apk` | `org.fdroid.fdroid` | 1.23.2 (1023052) | 23 / 30 | `https://f-droid.org/F-Droid.apk` | `985f5181d48bb6bafd54083a048b391271e0ab28385881cc41294fb01a222762` | `CN=Ciaran Gultnieks, L=Wetherby, C=UK` | `43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab` |
+| `kodi-21.3-omega-armeabi-v7a.apk` | `org.xbmc.kodi` | 21.3 (2103000) | 21 / 34 | `https://mirrors.kodi.tv/releases/android/arm/kodi-21.3-Omega-armeabi-v7a.apk` | `12d75e895649f68f217e42c2d881a94fd3177d7b9a7937825852aed545520cc8` | `CN=XBMC Foundation, OU=Android platform` | `f517b44b5db5e62a6c1ec55ba47526db7de0d61f6ba26a7987520e293499b8d5` |
+| `jellyfin-androidtv-0.19.10.apk` | `org.jellyfin.androidtv` | 0.19.10 (191099) | 21 / 36 | `https://github.com/jellyfin/jellyfin-androidtv/releases/download/v0.19.10/jellyfin-androidtv-v0.19.10-release.apk` | `8510a517c99927076082917f41bf306dd7a2546c59d492dd11bde18d6e2e4628` | `CN=Joshua Boniface, OU=Jellyfin Team, O=Jellyfin` | `d881796ed2a67ff6ef9f676828723c6b1fa18e09388962cba4abc4a594a69131` |
+| `tvbro-2.1.6-geckoexcluded.apk` | `com.phlox.tvwebbrowser` | 2.1.6 (69) | 24 / 36 | `https://github.com/truefedex/tv-bro/releases/download/v2.1.6/tvbro-2.1.6-generic-geckoExcluded.apk` | `d8634edfe8d94b4fb9a52005d68a090a7f1e85b7f39c2cf01a25dc9dd60942b2` | `CN=Pheodor Tsapana, O=PhloX Development Team` | `1e5124be7e7fcb7a6462b47a42a8567863c6fccc6fe7708cd278be4f43047c75` |
+| `afwall-4.1.0-free.apk` | `dev.ukanth.ufirewall` | 4.1.0 (20260801) | 23 / 36 | `https://github.com/ukanth/afwall/releases/download/v4.1.0/AFWall_4.1.0_Free.apk` | `920f48c916a7eeddafe64403f03b7cce5c99682c03007cecde9bc7d60ef8d950` | `CN=Umakanthan Chandran` | `715e26c1254e70f44543453af8d6af9c22feee2cf1191de15e6a9f2df7e2a248` |
+| `termux-app-0.118.3-armeabi-v7a.apk` | `com.termux` | 0.118.3 (1002) | 24 / 28 | `https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_armeabi-v7a.apk` | `89416397b70f9ff67a0044e8abe6ef82487cd48fcf543e2d23e02688cc541cf0` | `CN=APK Signer, OU=Earth, O=Earth` | `b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1` |
+
+Checked with `apkanalyzer` and `apksigner` from Android build-tools 36.1.0.
+
+Notes per app:
+
+- **F-Droid** trips the installer's HOME check. The category sits on the
+  `StartupReceiver` `BOOT_COMPLETED` intent-filter, not on any activity, so it
+  cannot become a home candidate (activity resolution ignores receivers) and the
+  brick in `docs/BOOT_DEADLOCK.md` does not apply. Installed with
+  `--allow-home` on that basis.
+- **Termux** GitHub releases are signed with the project's debug key on purpose
+  (the `OU=Earth` certificate). Do not mix with the F-Droid build, which has a
+  different signer. The F-Droid build is a 115 MB universal APK, over the
+  GitHub limit.
+- **AFWall+** needs root. Allow it through the daemon:
+  `./scripts/ROOT.sh --allow dev.ukanth.ufirewall`. Same for Termux if root is
+  wanted there.
+- **TV Bro** uses the system WebView, which on this firmware is the 2022 stock
+  build. The Gecko-bundled arm32 APK is 150 MB and would give a current engine
+  at the cost of a file too big for the repo.
+- **Kodi** is the only single-ABI file here; it is the arm32 build the Kodi
+  mirror publishes, 46 native libraries.
+
+Signer certificates were compared against nothing external. What is proven is
+that each file came over HTTPS from the project's own release channel and is
+internally consistent under one certificate. Record the signer hashes above so a
+later "update" that arrives under a different key is noticed.
