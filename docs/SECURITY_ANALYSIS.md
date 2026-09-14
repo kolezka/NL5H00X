@@ -132,7 +132,7 @@ To install custom launchers, we must:
 ```
 com.zhiying.powerservice     → Power management
 com.hisilicon.tv.service     → Display/projector control  
-com.newlink.service          → Hardware interface
+com.newlink.service          → Factory tool + telemetry (see VENDOR_TELEMETRY.md)
 com.hisilicon.miracast       → Wireless display
 com.hisilicon.tvinput.external → HDMI input handling
 ```

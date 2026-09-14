@@ -361,6 +361,7 @@ hashes match.
 | [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs fail, and the `/system/app` workaround |
 | [Developer Options](docs/DEV_OPTIONS_CRASH.md) | Why the Developer options screen crashes, and the AOSP platform key that makes patching it possible |
 | [Root for apps](root/README.md) | Why setuid `su` cannot root an app here, the socket daemon that can, and how it is made persistent |
+| [Vendor Telemetry](docs/VENDOR_TELEMETRY.md) | What phones home to the manufacturer, why the vendor OTA is dead, why Android cannot be updated, and how to block it safely |
 | [Security Analysis](docs/SECURITY_ANALYSIS.md) | Detailed security restriction analysis |
 | [Docs README](docs/README.md) | Documentation overview |
 
