@@ -364,6 +364,7 @@ hashes match.
 | [Technical Notes](docs/TECHNICAL_NOTES.md) | Device analysis, ADB commands, partition layout |
 | [Boot Branding](docs/BOOT_BRANDING.md) | Replacing the U-Boot logo and the boot animation — formats, the ~7 fps ceiling, the silent `adb push` trap |
 | [Boot Deadlock](docs/BOOT_DEADLOCK.md) | The `wtprovision` brick — mechanism, diagnosis, recovery |
+| [Will Not Boot](docs/UNBOOTABLE.md) | Step by step for a projector that stopped booting after a flash or Magisk attempt: UART wiring, getting a boot log, reading it |
 | [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs fail, and the `/system/app` workaround |
 | [Developer Options](docs/DEV_OPTIONS_CRASH.md) | Why the Developer options screen crashes, and the AOSP platform key that makes patching it possible |
 | [Root for apps](root/README.md) | Why setuid `su` cannot root an app here, the socket daemon that can, and how it is made persistent |
@@ -408,6 +409,7 @@ tests/
 docs/
   TECHNICAL_NOTES.md    # Technical documentation
   BOOT_DEADLOCK.md      # The wtprovision brick and its recovery
+  UNBOOTABLE.md         # First steps when the projector will not boot
   INSTALL_LOCKED.md     # Why installs fail and the /system/app workaround
   SECURITY_ANALYSIS.md  # Security analysis
   README.md             # Docs overview
@@ -427,6 +429,9 @@ assets/
 - **Voids warranty** - Use at your own risk
 
 ## If the projector stops booting: the `wtprovision` brick
+
+Stopped booting for another reason, such as a flashed `boot.img` or a Magisk
+attempt? Start with [docs/UNBOOTABLE.md](docs/UNBOOTABLE.md).
 
 **Never disable `com.newlink.wtprovision/.MainActivity`.** It is not a launcher and
 it is not optional. Disabling it stops this projector from booting, and it takes
