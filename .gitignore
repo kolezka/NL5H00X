@@ -12,3 +12,7 @@ root/sud
 root/suc
 root/privtest
 root/su
+
+# Local code-index output (graphify, CodeGraph), rebuilt per machine
+graphify-out/
+.codegraph/
