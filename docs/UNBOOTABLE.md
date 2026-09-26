@@ -142,8 +142,15 @@ What an idle line looks like:
 
 ## Step 6: capture a boot log
 
-Order matters here. The first messages may come out the moment power is
-applied, before anyone touches a button.
+**The console does not need the power button.** It is the SoC's own serial
+port and works whenever the board has power. A red LED already means the board
+has power. On HiSilicon boards the bootloader usually prints its first messages
+the moment power is applied, before it decides to go to standby. So even if
+the button does nothing at all, plugging in the power with UART connected
+should still produce a log. That is typical for these chips, not yet confirmed
+on this board.
+
+Order matters here, so that the first messages are not missed.
 
 1. Unplug the projector's power.
 2. Connect the proven adapter to the board and start the terminal with logging.
@@ -151,19 +158,51 @@ applied, before anyone touches a button.
 4. Wait 30 seconds, then press the power button.
 5. Wait two minutes. Keep the whole log file.
 
-Use the projector's own power supply. If you power the board from a bench
-supply instead, measure the original supply's voltage and polarity first. This
-repo does not document the board's power input.
-
 Note in the issue whether output appeared at step 3, at step 4, or not at all.
 Output at either step means the board is alive and the button question from
 step 1 is answered.
 
-Then compare with this table.
+### Optional: watch the current with a bench supply
+
+The projector's own power supply is fine for everything above. A bench supply
+does not power the board "harder". What it adds is a current reading, which
+tells you whether the board reacts to the button even when the screen and the
+log show nothing.
+
+Before connecting it:
+
+- **Read the voltage from the label on the original supply.** This repo does not
+  document the board's power input. Do not assume 12 V.
+- **Measure the original supply's plug** with a multimeter: voltage and which
+  contact is positive. Wrong polarity or wrong voltage can destroy the board.
+- **Set a current limit.** Start low, around 1 A, and raise it only if the
+  supply hits the limit while the board is still starting.
+
+Then:
+
+1. Connect UART and start logging, as above.
+2. Power the board from the bench supply at the original voltage. Note the
+   current in standby.
+3. Press the power button. Watch the current for 30 seconds.
+
+How to read it (reasoning, not measured on this board):
+
+| Current after pressing power | Likely meaning |
+|---|---|
+| Jumps up, then falls back to the standby value | The button works. The board starts and fails, probably at the kernel. |
+| Jumps up and stays up | The board is running. Check the log; the screen may just stay dark. |
+| Does not change | The board is not waking up. The button or the wake-up path is the problem. |
+| Hits the current limit | Stop. Something draws far more than it should. |
+
+Write the standby current and the peak current in the issue.
+
+### Reading the log
+
+Compare what you captured with this table.
 
 | Log shows | What it means | Next |
 |---|---|---|
-| Nothing at all, adapter proven in step 5, wires swapped once | The board is not talking on these pads, or it dies before the first message. | Not documented. Open an issue with photos of your wiring. |
+| Nothing at all, adapter proven in step 5, wires swapped once, both at power-on and after the button | The board is not talking on these pads, or it dies before the first message. | Try the current check above to see if the board reacts at all. Then open an issue with photos of your wiring and the current readings. |
 | Bootloader output that stops or loops, with no Linux kernel messages after it | The bootloader cannot start the kernel. A bad `boot` partition fits this. | Open an issue with the log. Restoring `boot` from here is not documented yet. |
 | Linux kernel messages ending in a `Kernel panic` | The kernel starts but cannot continue. A patched or mismatched `boot.img` fits this. | Open an issue with the log. |
 | A `console:/ $` prompt | Android is up. You have a shell and root with `su 0`. | Go to [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md#diagnosing-it) and follow the diagnosis. Do not write anything yet. |
