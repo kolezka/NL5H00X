@@ -1,7 +1,7 @@
 Where the APKs in this directory came from, and what was checked before they
 were trusted enough to install as a system launcher.
 
-Last updated: 2026-07-29
+Last updated: 2026-09-20
 
 ## projectivy-launcher-4.71.apk
 
@@ -111,3 +111,86 @@ Signer certificates were compared against nothing external. What is proven is
 that each file came over HTTPS from the project's own release channel and is
 internally consistent under one certificate. Record the signer hashes above so a
 later "update" that arrives under a different key is noticed.
+
+## netflix-androidtv-11.0.1-armeabi-v7a.apk and netflix-androidtv-8.3.11-armeabi-v7a.apk (added 2026-09-20)
+
+Netflix for Android TV (`com.netflix.ninja`), the leanback build. Two plain,
+Netflix-signed APKs, nothing merged or re-signed. The device is an Android TV
+build (`ro.build.characteristics=tv`, `android.software.leanback_only`), so
+the phone/tablet app (`com.netflix.mediaclient`) is the wrong package here: a
+merged 9.59.0 copy was staged on 2026-09-20, ran on the projector, and killed
+itself right after the logo with a Bugsnag startup record `SPY-36283: Error CT`
+and device type `android-tv`. It was removed the same day.
+
+| | `netflix-androidtv-11.0.1-armeabi-v7a.apk` | `netflix-androidtv-8.3.11-armeabi-v7a.apk` |
+|---|---|---|
+| Package | `com.netflix.ninja` | `com.netflix.ninja` |
+| versionCode / name | `19770` / `11.0.1 build 19770` | `12041` / `8.3.11 build 12041` |
+| minSdk / targetSdk | `24` / `34` | `22` / `31` |
+| ABIs | `armeabi-v7a` (5 native libs, `Stored`, `extractNativeLibs=false`) | `armeabi-v7a` |
+| Size | 93,986,904 bytes | 44,746,837 bytes |
+| SHA-256 (file) | `0dd3b3766c313ad2917ffe60e982e42e6ac100564b90ee97705c5519d6b49a4e` | `eabca3239407ebbb105d51d377bd76b8748caf632eb105458ef32b194d6e8ca3` |
+| Signer DN | `CN=PPD Builder, OU=PPD, O="Netflix, Inc.", L=Los Gatos, ST=California, C=US` | same |
+| Signer SHA-256 | `363863596ea99241eb71b1a985553aa604de3ea3c5f0c546742390e682164e6b` | same |
+| Signature schemes | v3 (`apksigner verify --min-sdk-version 28` passes) | v1 + v2 |
+| Leanback activity | `com.netflix.ninja.MainActivity`, `uses-feature android.software.leanback` | same |
+
+**Source.** APKPure, pulled unattended with `apkeep` 1.0.0 on 2026-09-20:
+
+```bash
+apkeep -a com.netflix.ninja@19770 -d apk-pure .
+apkeep -a com.netflix.ninja@12041 -d apk-pure .
+```
+
+Both verify with `apksigner` under the same Netflix certificate as the
+phone app. That fingerprint (`3638...`) was matched against APKMirror's own
+listing by fetching its `netflix-9-58-0-release` variant page for the phone app
+on 2026-09-20 and finding the hash on it, so the APKPure copies are
+cross-checked against an independent mirror. APKMirror's newest leanback
+upload at the time was `13.1.2 build 26051` (94.79 MB, armeabi-v7a, Android
+7.0+); its download is gated by an in-browser nonce, which is why the
+APKPure builds are here instead. If you fetch 13.1.2 in a browser, check the
+signer is `3638...` and it can replace 11.0.1.
+
+**Why two files.** 11.0.1 is the newest build APKPure had. 8.3.11 is the
+"Android 5.1+" branch Netflix still publishes (APKMirror shows it updated May
+2026); it is the branch older set-top boxes run and the one to fall back to if
+11.0.1 refuses to start. Try 11.0.1 first.
+
+**The real risk: certification.** The firmware carries no Netflix
+provisioning (no `ro.nrdp.*` properties, no Netflix permission XML, no
+preinstalled Netflix package). Netflix for Android TV checks the device
+against its certified list on the server, so on this projector the app may
+install, sign in and then refuse with `-13`, `ui-800-3` or `tvq-pq-103` at
+playback. The XDA and GitHub "uncertified device" mods that once worked
+around this stopped working in late 2021 and their authors say so. Widevine
+is present at L3 only (`libwvdrmengine.so` in `/vendor/lib/mediadrm`,
+`liboemcrypto.so` missing, logged as "Falling back to L3"), so at best SD.
+Nothing here can be verified without an account and a reboot; it is the
+first thing to test after install.
+
+Install like the other bundled apps:
+
+```bash
+./scripts/INSTALL_APP.sh apks/netflix-androidtv-11.0.1-armeabi-v7a.apk
+```
+
+**Measured 2026-09-20, 11.0.1 on the reference device.** Installed to
+`/system/app/netflix`, registered after the reboot, starts, and shows "this
+version of the Netflix app is not compatible with your device" instead of the
+sign-in screen. Its own log during that launch: `com.netflix.ninja requires
+the Google Play Store, but it is missing`, `Failed to get HDCP levels` from
+`MediaDrm.getMaxHdcpLevel` (no HDCP path at all), Widevine falling back to
+L3, and `GoogleApiManager ... SERVICE_INVALID`. Together with the missing
+`ro.nrdp.*` provisioning that is the uncertified-device rejection this
+section warned about, and nothing in this repo can change it: the check is
+Netflix's, on their side. 8.3.11 was not tried; the same branch on other
+uncertified boxes reports the same `-13` screen. The practical way to watch
+Netflix on this projector is the Kodi add-on (CastagnaIT's `plugin.video.netflix`,
+which uses the device's Widevine L3 and does not need certification) on the
+Kodi build already bundled here, or an HDMI stick that is certified.
+
+
+The stale phone build still sits in `/system/app/netflix` on the reference
+device from the 2026-09-20 attempt; remove that directory when installing
+the leanback build so two Netflix icons do not confuse things.
