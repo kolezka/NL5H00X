@@ -4,7 +4,9 @@ How disabling one Android component stops an NL5H00X from booting, why it takes
 every remote channel down with it, how to diagnose it, and the one-command fix.
 
 Written after bricking a projector this exact way and recovering it over a
-soldered UART console.
+soldered UART console. Last updated: 2026-10-24. The incident history below is not
+a new recovery test; current root and recovery limits are in the
+[device audit](DEVICE_AUDIT_2026-10-24.md).
 
 ---
 
@@ -94,21 +96,34 @@ These look like separate hardware faults. They are one stall.
 | No Wi-Fi | Saved networks are brought up after boot completes. It never does. |
 | No adb over network | Follows from no Wi-Fi. |
 | No adb over USB | Chassis USB-A ports are **host** ports; two hosts cannot enumerate each other. The device-side USB footprint on the board is unpopulated — see below. |
-| Recovery unreachable | U-Boot accepts `reboot recovery` and logs `starting system with command 'recovery'`, then boots the normal Android image. No usable recovery partition on the units seen. |
-| Key combos do nothing | Same reason — nothing to boot into. |
+| Recovery unreachable in the recorded attempt | U-Boot accepted `reboot recovery` and then booted normal Android. A recovery image exists; its successful boot path has not been verified. |
+| Key combos show no visible recovery | This does not distinguish an unrecognized key from a failed recovery boot. Capture UART output rather than inferring an absent image. |
 
 Meanwhile the device is *fine*: kernel up, `system_server` alive, `zygote`
 running, Bluetooth keyboards pair and work, and the serial console offers a
 shell. It looks hard-bricked and is not.
 
-The unpopulated device-side USB footprint sits at the bottom-right board edge —
-5 SMD pads at roughly 0.65 mm pitch, pin 1 silkscreen-marked. Fitting a
-micro-USB socket here (or wiring `VBUS`/`D−`/`D+`/`GND` to pads 1/2/3/5, leaving
-`ID` free) is the only route to USB adb on this board. It was not needed for the
-recovery — UART was enough — and is recorded here because it is not obvious from
-the outside:
+The unpopulated USB footprint sits at the bottom-right board edge. Its presence
+is not evidence of working USB-device ADB. The inspected running system lacks
+`/sys/class/udc`, `/sys/class/android_usb` and `/config/usb_gadget`. Soldering a
+socket has not been validated as an ADB or rescue route. The documented incident
+was recovered through UART, not this footprint:
 
 ![Unpopulated device-side USB footprint](../assets/hardware/board-usb-device-footprint.jpg)
+
+## Choose a root command
+
+The prompt `console:/ $` is a shell, not proof of root. On the modified unit
+inspected on 2026-10-24, `su 0 id` failed while
+`/system/xbin/su_hybrid 0 id` returned UID 0. The examples below retain the
+historical `su 0` prefix. Before using them, select the prefix that actually
+passes `id` on your unit: replace `su 0` with `/system/xbin/su_hybrid 0` when that
+client is installed and verified, or omit the prefix in an already verified
+root shell. If neither path works, stop rather than assuming root.
+
+`adb root` can provide a root ADB shell on this userdebug build. It does not
+change the separate UART console service. Do not install or replace root clients
+as an unreviewed recovery step.
 
 ## Diagnosing it
 
@@ -246,13 +261,17 @@ speaker connector. Close-up:
   (`LED-G  LED-R  KEY0-IN2  KEY0-IN1  GND`).
 - **Line:** 115200 8N1, no flow control, 3.3 V logic. Do not connect the
   adapter's VCC.
-- **Result:** `console:/ $`, an unprivileged shell (uid 2000). Root with `su 0`.
+- **Result:** `console:/ $`, an unprivileged shell (uid 2000). Verify the root
+  path using [Choose a root command](#choose-a-root-command).
 
-```bash
-su 0 id      # works
-su -c id     # fails: "su: invalid uid/gid '-c'"
-echo id | su # also works
+```sh
+id
+/system/xbin/su_hybrid 0 id  # Verified on the modified unit, not a factory prerequisite
 ```
+
+Successful Android console access does not prove a pre-kernel rescue path. For
+the ESP bridge, power sourcing and signal isolation remain separate electrical
+checks; software level detection does not replace them.
 
 ## Red herrings
 

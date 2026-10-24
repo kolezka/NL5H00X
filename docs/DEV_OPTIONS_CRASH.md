@@ -55,6 +55,11 @@ device-mode API unconditionally, on a device that cannot support it.
 signature or the package stops being registered — which would cost you the entire
 Settings app.
 
+**2026-10-24 recheck:** the current APK was pulled and its SHA-256 matched the
+source. `apksigner verify --print-certs` exited 0 and returned the same certificate
+digest below. This revalidates signing identity, not patch behavior or deployment.
+See [the device audit](DEVICE_AUDIT_2026-10-24.md#framework-and-signing-evidence).
+
 The signing certificate's DN is `android@android.com`, which *suggests* AOSP test
 keys but does not prove them: a vendor can generate its own key and keep the
 default subject. The decisive check is the digest.
@@ -123,8 +128,9 @@ Confirm the signed result reports the same `c8a2e9bc…` digest before going nea
 `/system`, and keep a byte-verified copy of the original APK first.
 
 **Status: built and verified up to signing; not yet deployed or confirmed on the
-device.** Deployment additionally needs `/system` remounted read-write and a
-reboot so PackageManager rescans. The USB configuration item stays visible but
+device.** The October audit did not change or validate that patch. Deployment
+would require the root filesystem `/` remounted read-write on this system-as-root
+layout, and a reboot so PackageManager rescans. The USB configuration item stays visible but
 inert — removing it from the list means touching resources, which this approach
 deliberately avoids.
 
