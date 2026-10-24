@@ -9,8 +9,13 @@ process with `NO_NEW_PRIVS` set gets root through it, and an unlisted app is
 refused. It is now also wired into boot by an init service, and there is an
 opt-in hybrid `su` that keeps the shell/root fast path the rest of the toolkit
 depends on. Installing all of that is [`scripts/ROOT.sh`](../scripts/ROOT.sh),
-covered below. The install path is green against the emulator; **the boot itself
-has not been watched on hardware yet.**
+covered below. **2026-10-24 update:** the current owner's unit has an init-started
+`sud`; controlled allowed/refused app-UID probes passed after an approved
+Projectivy stop. A long-lived root shell had blocked a later request, consistent
+with this daemon's serialized handling. A concurrency fix remains follow-up work.
+See [the dated audit](../docs/DEVICE_AUDIT_2026-10-24.md) for the installed client
+inventory, test limits and the root command verified over UART. The audit did not
+rerun this installer or deploy a new daemon.
 
 ## Why a setuid `su` cannot work here
 
@@ -33,9 +38,10 @@ $ su 2000 privtest nnp   su 0 id   ->  su: setgid failed
 `PR_SET_NO_NEW_PRIVS`, then execs whatever you give it. It is why we know the
 setuid route is a dead end rather than a bug to chase — and it is the reason
 every real root solution (Magisk, SuperSU, KernelSU) uses a daemon rather than a
-setuid binary. Magisk itself cannot run here for an unrelated reason: both the
-boot and the recovery image carry `ramdisk=0` in their Android headers, so
-`magiskboot unpack` finds no cpio to inject into.
+setuid binary. Standard Magisk ramdisk patching is not a validated installation
+path here: both image headers report `ramdisk=0`, but recovery has an embedded
+initramfs as described below. That is a tooling and rescue-path constraint, not
+proof that every possible Magisk integration is impossible.
 
 That header field is not the whole story, and the difference matters if anyone
 picks this up again. `boot` genuinely has no ramdisk — its built-in initramfs is
@@ -170,10 +176,12 @@ including a hybrid that fails live-verify and must leave the live `su` alone.
 
 Two different things are called "root" here, and they are worth keeping apart.
 
-**Shell root** is what `su 0 <command>` in an adb shell gives you. It exists on
-the stock firmware — the daemon does not create it, and everything in this
-section works before `ROOT.sh` has ever run. Note the form: this device takes
-`su <uid> <command>`, not `su -c`. `su -c 'id'` answers `invalid option -- c`.
+**Shell root** must be checked against the installed client. The historical
+examples below use `su 0`, but on the October unit plain `su 0 id` from UART
+failed. `/system/xbin/su_hybrid 0 id` succeeded, as did `adb root` followed by an
+ADB identity check. Select and verify the appropriate prefix before using these
+examples; do not assume root from the prompt or assume one `su` syntax works for
+every installed version. The UART console service itself remains `user shell`.
 
 **App root** is what `sud` adds: an app you put on the allow-list can run one
 command as uid 0 through the socket. Nothing else changes for that app.
@@ -211,7 +219,8 @@ su 0 pm enable com.apkpure.aegon
 
 **Do not freeze `com.newlink.wtprovision`.** It is the only package that owns
 MAIN + HOME + SETUP_WIZARD on this firmware, and freezing it stops the boot
-before adb and Wi-Fi come up. Recovery is a USB job. `TOOLS.sh` refuses that
+before adb and Wi-Fi come up. The documented repair used UART after Android
+started; USB-device ADB is not a validated rescue path. `TOOLS.sh` refuses that
 package outright, along with the launcher, TV settings, SystemUI and `android`.
 
 ### Set properties, and get ADB over Wi-Fi
@@ -281,8 +290,10 @@ booting.
 - **Normal installs still fail.** `pm install` and the package installer are
   locked by the vendor and root does not lift it. Apps go to `/system/app`. See
   [docs/INSTALL_LOCKED.md](../docs/INSTALL_LOCKED.md).
-- **No Magisk, no modules, no systemless anything.** Both boot and recovery carry
-  `ramdisk=0`; see above and [docs/BOOT_DEADLOCK.md](../docs/BOOT_DEADLOCK.md).
+- **No validated standard Magisk installation path.** The unusual image layout
+  and unverified recovery path remain blockers. Header `ramdisk=0` alone does
+  not rule out an embedded initramfs or every possible systemless integration.
+  See [the audit](../docs/DEVICE_AUDIT_2026-10-24.md).
 - **The stock launcher still wins the boot intent** unless the home preference is
   set the way [`scripts/UNLOCK.sh`](../scripts/UNLOCK.sh) sets it. That is an
   intent-resolution problem, not a permission one.

@@ -23,12 +23,16 @@ question instead of a guess.
 
 ### If you tried Magisk
 
-Magisk cannot work on this device. Both `boot` and `recovery` carry
-`ramdisk=0` in their headers. The kernel has no real ramdisk and mounts
-`/system` directly from `root=/dev/mmcblk0p20`, so `magiskboot` has nothing to
-patch. An image it produced is probably not bootable. Details:
-[root/README.md](../root/README.md). For root on this device, use the `sud`
-daemon described there instead.
+There is no validated standard Magisk installation procedure for this device.
+Both Android headers report `ramdisk=0`, but the earlier analysis found a real
+initramfs embedded inside the recovery kernel. Normal boot mounts the system
+partition as `/` via `root=/dev/mmcblk0p20`; the ordinary ramdisk patching workflow
+does not describe this layout. Do not infer whether a particular patched image
+can boot without examining it and establishing a rescue path.
+
+The [2026-10-24 audit](DEVICE_AUDIT_2026-10-24.md) confirmed existing ADB/UART root
+and an init-started `sud` on the owner's modified unit. Root access itself does
+not require another boot-image experiment. See [root/README.md](../root/README.md).
 
 ## Step 1: note what the projector does
 
@@ -205,7 +209,7 @@ Compare what you captured with this table.
 | Nothing at all, adapter proven in step 5, wires swapped once, both at power-on and after the button | The board is not talking on these pads, or it dies before the first message. | Try the current check above to see if the board reacts at all. Then open an issue with photos of your wiring and the current readings. |
 | Bootloader output that stops or loops, with no Linux kernel messages after it | The bootloader cannot start the kernel. A bad `boot` partition fits this. | Open an issue with the log. Restoring `boot` from here is not documented yet. |
 | Linux kernel messages ending in a `Kernel panic` | The kernel starts but cannot continue. A patched or mismatched `boot.img` fits this. | Open an issue with the log. |
-| A `console:/ $` prompt | Android is up. You have a shell and root with `su 0`. | Go to [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md#diagnosing-it) and follow the diagnosis. Do not write anything yet. |
+| A `console:/ $` prompt | Android is up; this is a shell, not proof of root. On the inspected modified unit, `/system/xbin/su_hybrid 0 id` returns root while plain `su 0 id` fails. | Verify identity using [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md#choose-a-root-command), then diagnose. Do not write anything yet. |
 
 The middle rows describe where boot stops, not a confirmed cause. This repo has
 no log yet of a boot that fails before Android, so there are no known strings to
@@ -228,6 +232,8 @@ network name or the device serial number.
 
 - [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md): the one brick with a verified fix, and
   the full serial console reference
-- [root/README.md](../root/README.md): why Magisk cannot work here, and the root
-  method that does
+- [DEVICE_AUDIT_2026-10-24.md](DEVICE_AUDIT_2026-10-24.md): current root checks,
+  boot layout and the limits of the tested recovery path
+- [root/README.md](../root/README.md): the existing root daemon and why ordinary
+  ramdisk patching is not a validated Magisk installation path here
 - [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md): partition layout

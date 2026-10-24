@@ -233,13 +233,16 @@ home intent wrong is what bricks this device.
 
 ## Root for apps
 
-The shell is already root here: `su 0 id` returns uid 0 and everything above
-depends on it. An **app** is a different problem. Zygote sets
-`PR_SET_NO_NEW_PRIVS` on every app process, and with that flag the kernel
-ignores the setuid bit, so no `su` binary an app execs can ever elevate it.
-Magisk does not fill the gap either: both `boot` and `recovery` carry
-`ramdisk=0` in their Android headers, so `magiskboot unpack` finds nothing to
-inject into. [root/README.md](root/README.md) has the measurements.
+First verify shell root using `id`. On the modified unit inspected on 2026-10-24,
+`adb root` enabled a root ADB shell; UART needed the existing
+`/system/xbin/su_hybrid 0 id`, while plain `su 0 id` failed. See the
+[device audit](docs/DEVICE_AUDIT_2026-10-24.md) for installed clients and modes.
+
+An **app** is a different problem: `NO_NEW_PRIVS` prevents setuid elevation,
+so the tested app-UID route delegates to an already-root daemon. Standard Magisk
+ramdisk patching is not validated for this device's unusual boot/recovery layout;
+header `ramdisk=0` does not exclude a kernel-embedded initramfs.
+[root/README.md](root/README.md) explains the existing mechanism and its limits.
 
 What works is a daemon that is already root. `sud` listens on an abstract Unix
 socket, reads the caller's uid from `SO_PEERCRED` (kernel-supplied, not
@@ -482,10 +485,11 @@ All of these are consequences of the same stall, not separate faults:
 | No Wi-Fi | The network stack never brings up saved networks because boot never completes. |
 | No adb over network | Follows from the above. |
 | No adb over USB | The chassis USB-A ports are **host** ports. A host cannot enumerate to your PC. The device-side USB footprint on the board is unpopulated. |
-| Recovery unreachable | On the units seen so far, U-Boot accepts `reboot recovery` (`starting system with command 'recovery'`) and then boots the normal Android image anyway — there is no usable recovery partition. |
+| Recovery boot unverified | An earlier `reboot recovery` attempt fell through to normal Android. A recovery image exists; that observation does not prove its absence or a usable restore path. |
 
 A device in this state still runs: `system_server` is alive, Bluetooth works, and
-a serial console will give you a root shell. It looks dead and is not.
+a serial console can provide a shell. Root must be checked separately. It looks
+dead and is not.
 
 ### Recovering it
 
@@ -504,11 +508,14 @@ through-holes labelled `TX RX` on the silkscreen, immediately to the right of th
 them — take `GND` from the keypad connector (`LED-G LED-R KEY0-IN2 KEY0-IN1 GND`).
 **115200 8N1**, no flow control, 3.3 V logic. You get `console:/ $`.
 
-Root uses Android's `su`, not the GNU form:
+Before the recovery commands, [verify the root prefix](docs/BOOT_DEADLOCK.md#choose-a-root-command).
+The examples retain the historical `su 0` syntax. On the October modified unit,
+replace that prefix with `/system/xbin/su_hybrid 0`, which passed the identity
+check; plain `su 0 id` failed there. A factory unit may not have this client.
 
-```bash
-su 0 id          # works
-su -c id         # fails: "su: invalid uid/gid '-c'"
+```sh
+id
+/system/xbin/su_hybrid 0 id  # Must actually return uid=0 before proceeding
 ```
 
 **Permanent fix — one command:**

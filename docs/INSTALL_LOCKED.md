@@ -1,13 +1,20 @@
 # Why this device cannot install apps, and what to do about it
 
-**Summary:** every normal install on the NL5H00X fails with
-`INSTALL_FAILED_INVALID_INSTALL_LOCATION`, regardless of transfer method, flags
-or uid. The failure is inside the vendor's patched `PackageManagerService`. It
-is not fixable from userspace, and the supported route is copying the app into
-`/system/app` — which requires unpacking the APK's native libraries by hand.
+Last updated: 2026-10-24.
 
-Use `scripts/INSTALL_APP.sh`, which does all of this and refuses the one class of
-APK that can brick the device.
+**Summary:** the install attempts recorded on 2026-07-30 failed with
+`INSTALL_FAILED_INVALID_INSTALL_LOCATION`, including root and multiple transfer
+methods. Offline analysis on 2026-10-24 identified an additional vendor whitelist
+gate that returns this error under the currently read configuration: the control
+property is empty and the whitelist file has zero bytes. This is a code-and-input
+finding, not a new install trial or proof that bypassing the gate is sufficient.
+The historical workaround is placing a compatible APK under `/system/app`, with
+its native libraries when required. See the
+[October device audit](DEVICE_AUDIT_2026-10-24.md).
+
+`scripts/INSTALL_APP.sh` implements that workaround and rejects HOME or
+SETUP_WIZARD declarations by default. That guard reduces a known boot risk;
+it is not proof that every other APK is safe.
 
 ---
 
@@ -19,9 +26,10 @@ Performing Streamed Install
 adb: failed to install ...: Failure [INSTALL_FAILED_INVALID_INSTALL_LOCATION]
 ```
 
-`/data/app` is empty and `pm list packages -3` returns nothing. **Nothing has ever
-been installed normally on this device.** Everything present — APKPure, Magisk,
-Nova, Projectivy — sits in `/system/app`.
+The July inspection found `/data/app` empty and no third-party entries from
+`pm list packages -3`. APKPure, Magisk, Nova and Projectivy were under
+`/system/app`. This records that snapshot, not every installation in the device's
+history. The October package listing still placed these named apps in `/system`.
 
 ## What was ruled out
 
@@ -40,42 +48,86 @@ Each of these was checked on hardware, 2026-07-30, and is clean:
 | Transfer method | adb streamed, `pm install` from a local file, and `-f` (`INSTALL_INTERNAL`) all fail identically |
 | Install location preference | `pm get-install-location` = 0 (auto); sessions create fine at 1 KB, 25 MB and 3 GB |
 
-## Where it actually fails
+## What the historical log establishes
 
-The vendor added a log line AOSP does not have, and it is the last thing printed
-before the failure:
+The recorded log places the failure after the vendor's `handleStartCopy` message:
 
-```
+```text
 D/PackageManager( 1865): handleStartCopy: org.smarttube.stable
 I/ActivityManager( 1865): START ... com.android.packageinstaller/.InstallFailed
 D/InstallFailed(16053): Installation status code: 1
 ```
 
-So the install dies inside `handleStartCopy()`, at install-location resolution,
-before a single byte is copied.
+That does not identify the exact failing branch. The earlier claim that this
+error necessarily means a volume-resolution exception was an unverified inference
+from AOSP, not proof about this vendor build. It is withdrawn.
 
-One inference is solid. In `PackageHelper.resolveInstallLocation`, running out of
-room returns `RECOMMEND_FAILED_INSUFFICIENT_STORAGE`, which surfaces as
-`INSTALL_FAILED_INSUFFICIENT_STORAGE`. The only path to
-`RECOMMEND_FAILED_INVALID_LOCATION` — and therefore to the error this device
-actually returns — is an exception thrown while resolving the volume. **This is a
-thrown exception, not a capacity decision.** The two branches are mutually
-exclusive, which is why "free up space" advice does nothing here.
+### Current investigation inputs
 
-**Which call throws is not established.** Determining it means decompiling the
-vendor's `/system/framework/services.jar`, since the relevant code is modified
-from AOSP. That is a read-only investigation and safe to do; it just has not been
-done.
+The October audit found `/system/framework/services.jar` is only 183 bytes and
+contains `META-INF/MANIFEST.MF`, with no DEX. The matching code artifacts are
+`/system/framework/oat/arm/services.vdex` (VDEX019) and `services.odex` (ELF32).
+They were copied and checked against device SHA-256 hashes; see
+[the audit](DEVICE_AUDIT_2026-10-24.md#framework-and-signing-evidence).
 
-## Why it is not worth fixing at the source
+### Verified vendor whitelist branch
 
-Any real fix lives in `services.jar`, which is loaded by `system_server` at boot.
-Replacing it on a device with **no working recovery partition** — U-Boot logs
-`starting system with command 'recovery'` and then boots normal Android anyway —
-risks a device that cannot boot and cannot be rescued except over UART. Weighed
-against a workaround that already works, patching the framework is the wrong
-trade. See [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md) for what a non-booting NL5H00X
-costs to recover.
+The recovered `PackageManagerService$InstallParams.handleStartCopy()` reads
+`SystemProperties.get("zyzys.install.whitelist")` with one argument. If the value
+is not exactly `"0"`, it calls `PackageManagerService.enableInstallApk(packageName)`.
+That method reads `/system/etc/WhiteListPermissionFilter.cfg` and returns true
+when `packageName.contains(line)` matches a line. A missing, unreadable or
+zero-line file returns false. These are substring matches, not exact package
+identity checks. A blank line is not equivalent to a zero-byte file.
+
+The relevant flow, simplified from the recovered instructions, is:
+
+```text
+getMinimalPackageInfo(...)       # Runs before this gate; may compute location
+log("handleStartCopy: " + packageName)
+if property != "0" and not enableInstallApk(packageName):
+    result = -19
+else:
+    continue normal location/install checks
+if result != success:
+    skip copyApk
+mRet = result
+```
+
+Live reads through the verified root client found the property empty and the
+root-owned, readable configuration file exactly zero bytes. A read of the known
+SDK property through the same command path returned `28`, validating the empty
+property observation. Those inputs select the explicit whitelist denial. A
+volume-resolution exception is not needed to explain it.
+
+For the artifact hashes in the audit, method-relative code-unit offsets are:
+
+| Method | Evidence offsets |
+|---|---|
+| `InstallParams.handleStartCopy()` | `0x45`: initialize `-0x13`; `0xad` to `0xca`: property/whitelist gate; `0x130`: skip later policy on failure; `0x199`: carry result; `0x1a2`: skip copy; `0x340`: store `mRet` |
+| `PackageManagerService.enableInstallApk(String)` | `0x5`: configuration path; `0x24`: read lines; `0x59`: substring match; `0x62`: no match returns false |
+
+The code was recovered offline using Android SDK dexlib2/baksmali 3.0.9 with
+API 28 decoding. The original JAR has no code; the ODEX reader resolves its
+matching VDEX/CompactDex. This finding concerns that exact vendor build.
+
+**Limit:** no property was changed and no installation attempted. Setting the
+property to `"0"` would skip this gate according to the code; it is not a verified
+installation fix. The subsequent location checks can independently return `-19`.
+The historical log alone cannot establish which branch ran in every old attempt.
+
+## Framework modification and recovery limits
+
+Replacing PackageManager code can prevent `system_server` from booting. A recovery
+partition exists and its Android header was read, but a usable recovery boot or
+restore procedure has not been verified. Android UART access is not proof that a
+broken kernel or bootloader can be recovered.
+
+Keep investigation offline first. Do not replace the framework until the exact
+branch and a reversible change are understood and the relevant
+[recovery safety HOLD](../tests/contracts/observations/recovery-hazards.md) has been
+resolved. See [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md) for the narrower Android-level
+failure that was recovered over UART.
 
 ## The workaround, and its one sharp edge
 
@@ -225,4 +277,5 @@ account, and this device's Widevine level is still unestablished.
 - Same fallback, launcher-specific: `launcher_present_apply()` in
   `scripts/lib/unlock.sh`
 
-_Last updated: 2026-08-07_
+_Historical installation examples date from July and August 2026. Current policy
+analysis and evidence limits were updated on 2026-10-24._
