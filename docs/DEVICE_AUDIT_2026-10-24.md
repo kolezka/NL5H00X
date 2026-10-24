@@ -170,9 +170,9 @@ Bounded 4096-byte header reads, with exact-length checks, showed:
 | External ramdisk bytes | 0 | 0 |
 | Kernel wrapper magic | `0x27051956` (uImage) | `0x27051956` (uImage) |
 
-Historical analysis in [root/README.md](../root/README.md) describes a real
-initramfs embedded in the recovery kernel. Header `ramdisk=0` does not disprove
-that. This session did not decompress the kernel again or boot recovery.
+Header `ramdisk=0` does not exclude an archive embedded inside the kernel.
+The later offline check below decompressed both kernels from the owner's backup;
+it did not boot recovery or establish identity with every current live partition.
 
 The 65,536-byte environment passed CRC32 validation and contained:
 
@@ -200,6 +200,39 @@ or absence of SoC secure boot.
 `/proc/config.gz` was missing. The running system did not expose the inspected
 `/sys/class/udc`, `/sys/class/android_usb` or `/config/usb_gadget` paths. This is
 software-interface evidence, not a complete physical controller inventory.
+
+### Offline recovery image check
+
+A follow-up independently read bounded boot/recovery regions from the owner's
+2026-09-13 full user-area image. It verified the Android image ID, uImage header
+CRC and payload CRC, decompressed each kernel, then parsed CPIO headers and the
+archive trailer rather than trusting a byte count or string search.
+
+| Backup region | SHA-256 | Embedded archive |
+|---|---|---|
+| boot / p9 | `2d69bd1eeabaed74b7433b36a0420ea789b8692f4ed11f6bdb2e3df80f444989` | 3,153,408 bytes, 57 entries, including `init` and `init.rc` |
+| recovery / p5 | `88bf2536d6607a3575adce31711b41bb8aad97374eeab856a7f1ac2100e9fba4` | 20,690,944 bytes, 245 entries, including `init`, `sbin/recovery` and `vendor/bin/busybox` |
+
+Recovery's extracted `init.rc` includes:
+
+```text
+service console /vendor/bin/busybox sh
+    console
+    user root
+    group log
+    seclabel u:r:recovery:s0
+```
+
+This is verified configuration in the backup, not an observed recovery shell.
+The older description of boot's initramfs as only a 462-byte empty archive is
+incorrect for this image. Live `skip_initramfs` explains why the presence of an
+embedded archive is distinct from normal Android's root filesystem selection.
+
+The backup image checks do not prove current full-partition identity, verified
+boot signatures, a functioning recovery entry path, or restoration from a failed
+state. No BCB write, reset, autoboot interruption or recovery launch was performed
+for this follow-up. Detailed U-Boot control-flow conclusions from the delegated
+analysis remain outside this independently verified subset.
 
 ## Framework and signing evidence
 
