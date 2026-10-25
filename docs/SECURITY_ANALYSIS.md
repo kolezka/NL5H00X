@@ -29,9 +29,14 @@ new kernel, or establish a working rescue channel.
 ### Existing root policy needs review
 
 The audit found multiple installed root clients and two different `sud` binaries.
-The selected init service uses `/system/xbin/sud`. Its serialized request handling
-can keep later clients waiting behind a long-lived shell; the live observations
-and test limits are recorded in the audit.
+The selected init service uses `/system/xbin/sud`. The version installed during the
+audit handled requests serially, so one long-lived shell held every later client,
+and it ignored a failed `setuid`, which ran the command as root. Both are fixed in
+the daemon merged as PR #15 and covered by `tests/sud-tests.sh`: a failed uid switch
+now exits 1, and a caller with a full stderr pipe can no longer hold the session
+slots it does not own. A long-lived root command still occupies its own slot while
+it runs, which is a documented limit. The live observations and test limits are
+recorded in the audit.
 
 The allow-list is a grant of administrative access, not a list of harmless apps.
 Review package identities carefully: the inspected list's `org.fdroid.froid`
