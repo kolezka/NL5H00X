@@ -29,4 +29,18 @@ for src in suc su; do
     echo "built $src"
 done
 
+# sudcheck is the device-side probe tools/device/sud-check.sh pushes. It keeps
+# its source under tools/device/ so the tools sit together.
+if [[ -f "$HERE/../tools/device/sudcheck.c" ]]; then
+    "$CC" -O2 -Wall -Wextra -fPIE -pie -o "$HERE/sudcheck" "$HERE/../tools/device/sudcheck.c"
+    echo "built sudcheck"
+fi
+
+# sudprobe is the compiled fd lister the device check reads; the suite builds
+# it from the same source.
+if [[ -f "$HERE/../tests/sud/sudprobe.c" ]]; then
+    "$CC" -O2 -Wall -Wextra -D_GNU_SOURCE -fPIE -pie -o "$HERE/sudprobe" "$HERE/../tests/sud/sudprobe.c"
+    echo "built sudprobe"
+fi
+
 file "$HERE"/sud "$HERE"/suc "$HERE"/su "$HERE"/privtest 2>/dev/null || true
