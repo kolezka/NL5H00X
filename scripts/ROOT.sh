@@ -190,13 +190,13 @@ repair_manual_instructions() {
     mount -o remount,rw /
 
     cat <local sud>    > $SUD_BIN_PATH
+    chown root:root $SUD_BIN_PATH     # chown first: it would clear setuid/setgid
     chmod 755 $SUD_BIN_PATH
-    chown root:root $SUD_BIN_PATH
     sha256sum $SUD_BIN_PATH        # compare by hand against the local sud
 
     cat <local sud.rc> > $SUD_RC_PATH   # seclabel line must read: seclabel $SUD_SECLABEL
-    chmod 644 $SUD_RC_PATH
     chown root:root $SUD_RC_PATH
+    chmod 644 $SUD_RC_PATH
 
     mount -o remount,ro /
 
@@ -213,9 +213,10 @@ repair_manual_instructions() {
 
     mount -o remount,rw /
     cp $SU_ORIG_PATH $SU_HYBRID_PATH
-    chmod 755 $SU_HYBRID_PATH
-    chown root:root $SU_HYBRID_PATH
+    chown root:root $SU_HYBRID_PATH   # before chmod: chown clears setuid
+    chmod $(stat -c %a $SU_ORIG_PATH) $SU_HYBRID_PATH   # the stock mode, not a guess
     sha256sum $SU_ORIG_PATH $SU_HYBRID_PATH   # confirm both lines match
+    stat -c '%a %n' $SU_ORIG_PATH $SU_HYBRID_PATH   # and that the mode survived
     mount -o remount,ro /
 
   pm has nothing to do with any of this: these are file and mount operations,

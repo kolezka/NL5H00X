@@ -22,7 +22,12 @@ mkdir -p "$STATE"/{sdcard,system/app,system/priv-app,system/xbin,system/etc/init
 # STOCK-SU marker is what fake-adb's su_binary_ok reads to answer `su <uid>
 # id` -- distinct from the HYBRID-SU marker root-tests.sh's dummy artifact
 # carries, so live-verify can actually distinguish the two.
+#
+# 4750 root:shell, not 0755: that is what this firmware ships, and the mode is
+# load-bearing. Without the setuid bit a root shell cannot be reached at all,
+# which is the failure the device was actually in on 2026-10-25.
 printf 'STOCK-SU stock su placeholder\n' > "$STATE/system/xbin/su"
+chmod 4750 "$STATE/system/xbin/su" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Properties (verbatim from system/build.prop in the pulled image)

@@ -69,6 +69,15 @@ remote_hash() {
     return 1
 }
 
+# Octal mode of a device file, 3 or 4 digits. Empty when the device did not
+# answer. A checksum proves the bytes arrived and says nothing about setuid,
+# so anything that installs a setuid binary has to read the mode back.
+remote_mode() {
+    local out
+    out=$(adb_root_exec "stat -c %a $1" 2>/dev/null | tr -d ' \r\n')
+    [[ "$out" =~ ^[0-7]{3,4}$ ]] && echo "$out"
+}
+
 local_hash() {
     local path="$1" algo="$2"
     if [[ "$algo" == "sha256" ]]; then
@@ -154,12 +163,26 @@ stage_and_install() {
 
     adb_root_exec "mkdir -p $(dirname "$device_path")" >/dev/null || true
     adb_root_exec "cp $staged $device_path" >/dev/null || true
-    adb_root_exec "chmod $mode $device_path" >/dev/null || true
+    # chown BEFORE chmod, never after: chown clears the setuid and setgid bits.
+    # The other order installs a hybrid su as 0755 while reporting 4755, and
+    # the shell path then falls through to the daemon instead of elevating,
+    # which looks like success for as long as the daemon happens to be up.
     adb_root_exec "chown root:root $device_path" >/dev/null || true
+    adb_root_exec "chmod $mode $device_path" >/dev/null || true
     adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
 
     if ! device_matches_local "$device_path" "$local_path"; then
         print_error "$device_path does not match $local_path after install"
+        return 1
+    fi
+
+    # Read the mode back too. The hash above proves the bytes arrived; it says
+    # nothing about the setuid bit, and a dropped bit here is the difference
+    # between an app reaching the daemon and an app failing to exec su at all.
+    local got_mode
+    got_mode=$(remote_mode "$device_path") || got_mode=""
+    if [[ "$got_mode" != "$mode" ]]; then
+        print_error "$device_path mode is ${got_mode:-unknown}, not $mode after install"
         return 1
     fi
     return 0
@@ -408,9 +431,18 @@ su_hybrid_apply() {
             system_ro
             return 1
         fi
+        # Keep the stock su's own mode instead of forcing 0755. This firmware
+        # ships it 4750 root:shell, and a copy that loses the setuid bit is not
+        # a usable replacement for the binary it is supposed to stand in for.
+        local stock_mode; stock_mode=$(remote_mode "$SU_HYBRID_PATH") || stock_mode=""
+        if [[ -z "$stock_mode" ]]; then
+            print_error "Could not read the mode of $SU_HYBRID_PATH before preserving it"
+            system_ro
+            return 1
+        fi
         adb_root_exec "cp $SU_HYBRID_PATH $SU_ORIG_PATH" >/dev/null || true
-        adb_root_exec "chmod 755 $SU_ORIG_PATH" >/dev/null || true
         adb_root_exec "chown root:root $SU_ORIG_PATH" >/dev/null || true
+        adb_root_exec "chmod $stock_mode $SU_ORIG_PATH" >/dev/null || true
         local orig_hash; orig_hash=$(remote_hash "$SU_ORIG_PATH")
         if [[ -z "$orig_hash" || "$orig_hash" != "$stock_hash" ]]; then
             print_error "su_orig does not match the stock su it was copied from - removing it, not proceeding"
@@ -418,10 +450,22 @@ su_hybrid_apply() {
             system_ro
             return 1
         fi
+        if [[ "$(remote_mode "$SU_ORIG_PATH")" != "$stock_mode" ]]; then
+            print_error "su_orig does not carry the stock su's mode $stock_mode - removing it, not proceeding"
+            adb_root_exec "rm -rf $SU_ORIG_PATH" >/dev/null || true
+            system_ro
+            return 1
+        fi
     fi
 
     # Stage the hybrid at a NEW path. The live su is still untouched here.
-    if ! stage_and_install "$artifact" "$SU_NEW_PATH" 755; then
+    #
+    # 4755, not 0755. Under uid 0 or 2000 the client execs the stock su and the
+    # bit is irrelevant, but an app is not in group shell, so at 0755 it cannot
+    # even exec this binary to reach the daemon. The bit is dead for an app
+    # under NO_NEW_PRIVS, which is exactly why widening exec is safe here: the
+    # real gate is the daemon's allow-list, and that fails closed.
+    if ! stage_and_install "$artifact" "$SU_NEW_PATH" 4755; then
         adb_root_exec "rm -rf $SU_NEW_PATH" >/dev/null || true
         system_ro
         return 1
@@ -441,8 +485,8 @@ su_hybrid_apply() {
 
     system_rw || return 1
     adb_root_exec "cp $SU_NEW_PATH $SU_HYBRID_PATH" >/dev/null || true
-    adb_root_exec "chmod 755 $SU_HYBRID_PATH" >/dev/null || true
     adb_root_exec "chown root:root $SU_HYBRID_PATH" >/dev/null || true
+    adb_root_exec "chmod 4755 $SU_HYBRID_PATH" >/dev/null || true
     adb_root_exec "rm -rf $SU_NEW_PATH" >/dev/null || true
     system_ro
 
@@ -452,16 +496,27 @@ su_hybrid_apply() {
         print_error "$SU_HYBRID_PATH does not match $artifact after promoting the hybrid"
         return 1
     fi
-    print_success "$SU_HYBRID_PATH matches the hybrid artifact"
+    if [[ "$(remote_mode "$SU_HYBRID_PATH")" != "4755" ]]; then
+        print_error "$SU_HYBRID_PATH is not 4755 after promoting the hybrid - an app could not reach the daemon"
+        return 1
+    fi
+    print_success "$SU_HYBRID_PATH matches the hybrid artifact, mode 4755"
     return 0
 }
 
 su_hybrid_revert() {
     device_file_exists "$SU_ORIG_PATH" || return 0
+    # Put the stock su back with its own mode, not a made-up 0755. The saved
+    # copy is the one thing that knows what this firmware shipped.
+    local orig_mode; orig_mode=$(remote_mode "$SU_ORIG_PATH") || orig_mode=""
+    if [[ -z "$orig_mode" ]]; then
+        print_error "Could not read the mode of $SU_ORIG_PATH - not restoring su blind"
+        return 1
+    fi
     system_rw || return 1
     adb_root_exec "cp $SU_ORIG_PATH $SU_HYBRID_PATH" >/dev/null || true
-    adb_root_exec "chmod 755 $SU_HYBRID_PATH" >/dev/null || true
     adb_root_exec "chown root:root $SU_HYBRID_PATH" >/dev/null || true
+    adb_root_exec "chmod $orig_mode $SU_HYBRID_PATH" >/dev/null || true
     system_ro
 
     verify_root_after_su_touch    # exits outright if this cost us adb root

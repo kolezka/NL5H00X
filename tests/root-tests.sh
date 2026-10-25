@@ -34,8 +34,11 @@ new_sandbox() {
     printf 'dummy sud daemon binary\n' > "$sb/artifacts/sud"
     # HYBRID-SU marker, distinct from seed.sh's STOCK-SU: fake-adb's
     # su_binary_ok tells the two apart so a live `su 0 id` / `su_new 0 id`
-    # can actually simulate the hybrid execing the preserved stock su.
+    # can actually simulate the hybrid execing the preserved stock su. The
+    # mode is part of the model, not decoration: fake-adb refuses to elevate
+    # a su that is not setuid, the same way the kernel does.
     printf 'HYBRID-SU dummy hybrid su binary\n'  > "$sb/artifacts/su"
+    chmod 4755 "$sb/artifacts/su" 2>/dev/null || true
     cp "$REPO_ROOT/root/sud.rc" "$sb/artifacts/sud.rc"
 }
 
@@ -278,6 +281,59 @@ else
     bad "--status reported no missing sud, yet none is built at $expected"
     echo "$out" | grep -i 'sud' | sed 's/^/        /'
 fi
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+# The setuid bit is load-bearing, and a hash does not prove it. A hybrid su
+# installed 0755 leaves shell root unreachable, because the client cannot
+# elevate and every script in the toolkit runs through `su 0`.
+#
+# This is the regression: on 2026-10-25 the unit was found exactly here.
+# /system/xbin/su was 0755, `su 0 id` answered "setgid failed", and the
+# installer had chmod'd before chown (which clears setuid) and verified only
+# the checksum. The tests passed the whole time, because the emulator modelled
+# su by file content and ignored its mode.
+# ---------------------------------------------------------------------------
+head_ "--with-su installs the hybrid su with the setuid bit"
+
+new_sandbox
+out=$(root_sh "$sb" --apply-all --yes --with-su)
+[[ "$out" == *"RC=0"* ]] \
+    && ok "apply-all --with-su completes" \
+    || { bad "apply-all --with-su failed"; echo "$out" | tail -12 | sed 's/^/        /'; }
+
+# The invariant, stated as the device states it: shell root works.
+[[ "$(dev "$sb" 'su 0 id')" == *"uid=0"* ]] \
+    && ok "su 0 id returns uid=0 after the install" \
+    || bad "su 0 id does not return uid=0 after the install"
+
+# And the mechanism behind it, so a future change cannot satisfy the line above
+# some other way. Setuid is the only path for a shell caller here.
+hybrid_mode=$(mode_of "$sb/state/system/xbin/su")
+[[ "$hybrid_mode" == "4755" ]] \
+    && ok "the installed hybrid su is 4755" \
+    || bad "the installed hybrid su is $hybrid_mode, not 4755: shell root cannot elevate"
+
+orig_mode=$(mode_of "$sb/state/system/xbin/su_orig")
+[[ "$orig_mode" == "4750" ]] \
+    && ok "su_orig keeps the stock su's own mode 4750" \
+    || bad "su_orig is $orig_mode, not the stock 4750"
+
+# The deny path: an install that drops the bit has to fail loudly, never
+# report success. This is the discriminator. FAKE_SU_CAN_ELEVATE forces the
+# no-elevation answer the real device gave, so the only thing under test is
+# whether the suite notices.
+new_sandbox
+out=$(root_sh "$sb" --apply-all --yes --with-su FAKE_SU_CAN_ELEVATE=0)
+[[ "$out" != *"RC=0"* ]] \
+    && ok "a hybrid that cannot elevate fails the install" \
+    || bad "apply-all --with-su reported success with a su that cannot elevate"
+[[ "$out" != *"promoting"* ]] \
+    && ok "a failed live-verify leaves the live su untouched" \
+    || bad "the live su was promoted despite a failed live-verify"
+[[ "$(mode_of "$sb/state/system/xbin/su")" == "4750" ]] \
+    && ok "the stock su is still in place after the failure" \
+    || bad "the stock su was replaced despite a failed live-verify"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
