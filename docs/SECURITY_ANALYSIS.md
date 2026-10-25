@@ -6,6 +6,9 @@ This page separates observed access from untested recovery claims. The
 [device audit](DEVICE_AUDIT_2026-10-24.md) is the current evidence record for the
 owner's modified NL5H00X_TP. Earlier claims of maximum SELinux enforcement,
 manufacturer intent and guaranteed recovery were stronger than the evidence.
+Since the audit, booting stock recovery has been verified on that unit
+(2026-10-25, one boot): see [RECOVERY.md](RECOVERY.md). Restoring from recovery
+has not.
 
 ## Root is available, but it does not bypass every policy
 
@@ -80,7 +83,7 @@ A byte count or transfer-success message is not validation.
 |---|---|---|
 | Bootloader | `mmcblk0p1`, 8 MiB, named `fastboot` | Not the Android boot image |
 | Android boot | `mmcblk0p9`, 40 MiB | Kernel image |
-| Recovery | `mmcblk0p5`, 40 MiB | Exists; successful recovery boot not verified |
+| Recovery | `mmcblk0p5`, 40 MiB | Boots via a `boot-recovery` BCB in `misc` (`mmcblk0p15`); root busybox console on UART. Verified 2026-10-25, one unit. See [RECOVERY.md](RECOVERY.md) |
 | System | `mmcblk0p20`, 1843 MiB | ext4 root mounted at `/` |
 | Userdata | `mmcblk0p25` | Private data and settings; size from live partition inventory |
 | eMMC user area | 7,650,410,496 bytes | Not automatically a copy of separate eMMC boot areas or external device state |
@@ -113,12 +116,19 @@ a successful hardware restore. The
 [design's safety HOLD](superpowers/specs/2026-09-12-system-flow-refactor-design.md#recovery-safety-hold)
 requires separate verification before hardware use.
 
+What changed on 2026-10-25: recovery itself now boots on demand (one unit, one
+boot, [RECOVERY.md](RECOVERY.md)). Its menu was reached and left with
+`busybox reboot -f`, and nothing was written from it. The HOLD still covers
+the restore scripts: the false successes in recovery-hazards.md are unchanged
+and open, and a reachable recovery does not endorse them.
+
 A checksum-verified backup cannot guarantee recovery, zero downtime, or access to
 a nonbooting device. A UART Android shell helps with an Android-level boot stall;
 it does not establish bootloader access or the ability to restore damaged flash.
 
 No raw restore, recovery boot, environment write or bootloader interruption was
-performed in the October audit. In particular, knowing the environment's CRC and
+performed in the October 24 audit. A recovery boot was done the next day; the
+rest still has not been. In particular, knowing the environment's CRC and
 `bootdelay=0` does not make changing it safe.
 
 ## Electrical limits of the ESP bridge
