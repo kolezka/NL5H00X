@@ -485,7 +485,7 @@ All of these are consequences of the same stall, not separate faults:
 | No Wi-Fi | The network stack never brings up saved networks because boot never completes. |
 | No adb over network | Follows from the above. |
 | No adb over USB | The chassis USB-A ports are **host** ports. A host cannot enumerate to your PC. The device-side USB footprint on the board is unpopulated. |
-| Recovery boot unverified | An earlier `reboot recovery` attempt fell through to normal Android. A recovery image exists; that observation does not prove its absence or a usable restore path. |
+| Recovery not reached by `reboot recovery` | An earlier `reboot recovery` attempt fell through to normal Android: this build writes no BCB for it. A `boot-recovery` BCB in `misc` does boot recovery (verified 2026-10-25, one unit, [docs/RECOVERY.md](docs/RECOVERY.md)), but it needs Android root. No restore path from recovery is verified. |
 
 A device in this state still runs: `system_server` is alive, Bluetooth works, and
 a serial console can provide a shell. Root must be checked separately. It looks

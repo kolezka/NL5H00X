@@ -215,6 +215,25 @@ The middle rows describe where boot stops, not a confirmed cause. This repo has
 no log yet of a boot that fails before Android, so there are no known strings to
 match against. Yours would be the first.
 
+## Rescue option: stock recovery
+
+If Android still reaches a root shell (adb or the UART `console:/ $` prompt),
+the stock recovery can be booted on demand. Verified on one unit on 2026-10-25.
+
+- Write a `boot-recovery` bootloader message to `misc` and reboot. `adb reboot
+  recovery` does **not** work here: it writes no message, so Android boots again.
+  [tools/recovery/enter-recovery.sh](../tools/recovery/README.md) does the write
+  with every check, and refuses if one fails.
+- Recovery's serial console is a **root** shell (`/vendor/bin/busybox sh`,
+  `uid=0`). No applets are in `PATH`: call each tool as
+  `/vendor/bin/busybox <applet>`.
+- Leave it with `/vendor/bin/busybox reboot -f`. Plain `reboot` does nothing.
+- Recovery clears the message itself, so the next boot is Android again.
+
+This needs a working Android root shell to write `misc`, so it does not reach a
+unit whose kernel no longer starts. No restore from recovery has been tested.
+Details: [RECOVERY.md](RECOVERY.md).
+
 ## Step 7: ask for help
 
 Open an issue on this repository with:
@@ -237,3 +256,4 @@ network name or the device serial number.
 - [root/README.md](../root/README.md): the existing root daemon and why ordinary
   ramdisk patching is not a validated Magisk installation path here
 - [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md): partition layout
+- [RECOVERY.md](RECOVERY.md): booting stock recovery and its root console

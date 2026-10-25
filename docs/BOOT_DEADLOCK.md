@@ -96,7 +96,7 @@ These look like separate hardware faults. They are one stall.
 | No Wi-Fi | Saved networks are brought up after boot completes. It never does. |
 | No adb over network | Follows from no Wi-Fi. |
 | No adb over USB | Chassis USB-A ports are **host** ports; two hosts cannot enumerate each other. The device-side USB footprint on the board is unpopulated — see below. |
-| Recovery unreachable in the recorded attempt | U-Boot accepted `reboot recovery` and then booted normal Android. A recovery image exists; its successful boot path has not been verified. |
+| Recovery unreachable in the recorded attempt | U-Boot accepted `reboot recovery` and then booted normal Android. On this build `adb reboot recovery` writes no bootloader message to `misc`, so U-Boot has no reason to pick recovery. Writing a `boot-recovery` BCB to `misc` did boot recovery (verified 2026-10-25, one unit): see [RECOVERY.md](RECOVERY.md). That needs Android root, so it does not help a unit that cannot reach a shell. |
 | Key combos show no visible recovery | This does not distinguish an unrecognized key from a failed recovery boot. Capture UART output rather than inferring an absent image. |
 
 Meanwhile the device is *fine*: kernel up, `system_server` alive, `zygote`
