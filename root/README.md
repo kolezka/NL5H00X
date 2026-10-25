@@ -43,15 +43,19 @@ path here: both image headers report `ramdisk=0`, but recovery has an embedded
 initramfs as described below. That is a tooling and rescue-path constraint, not
 proof that every possible Magisk integration is impossible.
 
-That header field is not the whole story, and the difference matters if anyone
-picks this up again. `boot` genuinely has no ramdisk — its built-in initramfs is
-the stock 462-byte empty cpio, and the kernel mounts `system` directly via
-`root=/dev/mmcblk0p20`. `recovery` is the opposite: its ramdisk is real and
-complete (20,690,944 B, 245 entries, with `init`, `sepolicy` and the UI images),
-compiled into the kernel as a gzip blob rather than appended to the image. So
-the recovery ramdisk exists — it is simply somewhere `magiskboot` does not look,
-and replacing it means editing inside the zImage while preserving the region's
-byte length.
+That header field is not the whole story. Offline re-analysis on 2026-10-24 of
+the owner's 2026-09-13 user-area image found embedded gzip/CPIO archives in both
+kernels: boot has 3,153,408 bytes and 57 entries, including `init` and `init.rc`;
+recovery has 20,690,944 bytes and 245 entries. The older statement that boot
+contains only a 462-byte empty archive was wrong for this inspected image.
+
+The live boot environment includes `skip_initramfs` and `root=/dev/mmcblk0p20`,
+so the presence of the embedded archive does not mean normal boot uses it.
+Recovery's archive defines a root BusyBox console, but successful recovery boot
+and access to that console remain untested. Both archives are inside the kernel,
+not an external ramdisk understood by ordinary Android-image patching. Modifying
+them would require a validated repacking method and rescue path. See the
+[offline image checks](../docs/DEVICE_AUDIT_2026-10-24.md#offline-recovery-image-check).
 
 ## How the daemon works
 
