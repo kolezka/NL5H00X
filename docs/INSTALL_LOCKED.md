@@ -195,7 +195,10 @@ alternatives:
   through `packageName.contains(line)` and needs no reboot, but it is an opaque
   trick nobody will understand in six months.
 - Patching `services.vdex` was refused outright. A wrong byte there stops
-  `system_server`, and recovery on this unit is unverified (next section).
+  `system_server`. Recovery was verified reachable later the same day (see
+  below), but that changes the rescue story, not the risk of the edit itself:
+  a broken `services.vdex` still has to be repaired from recovery's root
+  console by hand, with no tested restore script.
 
 The write followed the staging rules in [BOOT_BRANDING.md](BOOT_BRANDING.md): the
 stock file (3052 bytes, `830e340f…`) was pulled and hashed, the new file was
@@ -240,16 +243,19 @@ was the rejection.
 
 ## Framework modification and recovery limits
 
-Replacing PackageManager code can prevent `system_server` from booting. A recovery
-partition exists and its Android header was read, but a usable recovery boot or
-restore procedure has not been verified. Android UART access is not proof that a
-broken kernel or bootloader can be recovered.
+Replacing PackageManager code can prevent `system_server` from booting. On
+2026-10-25 stock recovery was entered on purpose through a bootloader control
+block in `misc`, driven from its root busybox console over the UART bridge, and
+left cleanly; see [RECOVERY.md](RECOVERY.md). So a bad `/system` is no longer a
+dead end: there is a root shell that boots without `/system`. What has NOT been
+verified is any restore procedure run from that shell, and Android UART access is
+still not proof that a broken kernel or bootloader can be recovered.
 
 Keep investigation offline first. Do not replace the framework until the exact
-branch and a reversible change are understood and the relevant
-[recovery safety HOLD](../tests/contracts/observations/recovery-hazards.md) has been
-resolved. See [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md) for the narrower Android-level
-failure that was recovered over UART.
+branch and a reversible change are understood and the
+[recovery safety HOLD](../tests/contracts/observations/recovery-hazards.md) on the
+restore scripts has been resolved. See [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md) for the
+narrower Android-level failure that was recovered over UART.
 
 ## The older workaround: `/system/app`
 
