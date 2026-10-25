@@ -37,6 +37,15 @@ STATE="${FAKE_ADB_STATE:?FAKE_ADB_STATE not set}"
 SU_MODE="${FAKE_ADB_SU_MODE:-piped}"
 PROPAGATE_RC="${FAKE_ADB_PROPAGATE_RC:-0}"
 FREE_KB="${FAKE_ADB_FREE_KB:-1024}"
+# Whether root escalation works at all, as the kernel decides it. `su 0 ...`
+# into a root shell needs the client binary to be setuid-root AND the caller to
+# be exempt from NO_NEW_PRIVS. A shell caller is; a probe that sets the flag is
+# not. Modelled because the real device has been in exactly the failure the
+# second rule describes: /system/xbin/su at 0755 answers `setgid failed`.
+# unset: derive from the mode, which is what the old model always assumed.
+FAKE_SU_CAN_ELEVATE="${FAKE_SU_CAN_ELEVATE:-}"
+# Set when the caller has run privtest with NO_NEW_PRIVS, like an app process.
+FAKE_SU_NO_NEW_PRIVS="${FAKE_SU_NO_NEW_PRIVS:-0}"
 
 file_md5() {
     if [[ -x /sbin/md5 ]]; then
@@ -232,6 +241,25 @@ su_binary_ok() {
             [[ "$orig_content" == *STOCK-SU* ]] ;;
         *) return 1 ;;
     esac
+}
+
+# Can this caller actually reach root by running `su <uid> <cmd>`? Two gates,
+# and the emulator used to model neither: the binary has to be setuid-root, and
+# the caller has to be exempt from NO_NEW_PRIVS. Without the first, the client
+# prints "setgid failed"; without the second, it cannot elevate an app.
+su_can_elevate() {
+    local path="$1" mode
+    if [[ -n "$FAKE_SU_CAN_ELEVATE" ]]; then
+        [[ "$FAKE_SU_CAN_ELEVATE" == "1" ]] || return 1
+    else
+        mode=$(stat -f%Lp "${STATE}${path}" 2>/dev/null || stat -c%a "${STATE}${path}" 2>/dev/null)
+        [[ -n "$mode" && "${#mode}" -eq 4 && "${mode:0:1}" == "4" ]] || return 1
+    fi
+    su_binary_ok "$path" || return 1
+    # setuid is dead for a caller that carries the flag: the kernel runs the
+    # binary as the caller, so stock su fails to setgid, exactly as measured.
+    [[ "$FAKE_SU_NO_NEW_PRIVS" == "1" ]] && return 1
+    return 0
 }
 
 run_remote() {
@@ -488,13 +516,16 @@ run_remote() {
             # File-state aware, so a hybrid artifact that cannot actually exec
             # stock su through itself is caught here instead of only being
             # asserted by file content in the test. See su_binary_ok.
+            # Also mode-aware: a 0755 client answers "setgid failed" the way the
+            # real device does, so an install that drops the setuid bit cannot
+            # pass this.
             local rest="${cmd#su }"
             local uid="${rest%% *}"
-            if su_binary_ok "/system/xbin/su"; then
+            if su_can_elevate "/system/xbin/su"; then
                 echo "uid=${uid}(root) gid=${uid}(root)"
                 return 0
             fi
-            echo "su: not a valid binary" >&2
+            echo "su: setgid failed: Operation not permitted" >&2
             return 1 ;;
         "/system/xbin/su_new "*" id")
             # Same rule, for the staged-but-not-yet-promoted hybrid: this is
@@ -502,16 +533,23 @@ run_remote() {
             # the real /system/xbin/su.
             local rest="${cmd#/system/xbin/su_new }"
             local uid="${rest%% *}"
-            if su_binary_ok "/system/xbin/su_new"; then
+            if su_can_elevate "/system/xbin/su_new"; then
                 echo "uid=${uid}(root) gid=${uid}(root)"
                 return 0
             fi
-            echo "su_new: not a valid binary" >&2
+            echo "su_new: setgid failed: Operation not permitted" >&2
             return 1 ;;
 
         # --- filesystem under /system ------------------------------------
         "cp "*|"mkdir "*|"chmod "*|"chown "*|"rm -rf "*)
             fs_op "$cmd"; return $? ;;
+
+        # --- mode and ownership, which a checksum cannot prove -----------
+        "stat -c %a "*)
+            local sp="${cmd#stat -c %a }"
+            [[ -e "${STATE}${sp}" ]] || { echo "stat: '$sp': No such file or directory" >&2; return 1; }
+            stat -f%Lp "${STATE}${sp}" 2>/dev/null || stat -c%a "${STATE}${sp}"
+            return 0 ;;
         esac
 
     case "$cmd" in
