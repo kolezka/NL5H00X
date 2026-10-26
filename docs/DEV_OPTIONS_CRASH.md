@@ -127,10 +127,17 @@ apksigner sign --key platform.pk8 --cert platform.x509.pem \
 Confirm the signed result reports the same `c8a2e9bc…` digest before going near
 `/system`, and keep a byte-verified copy of the original APK first.
 
-**Status: built and verified up to signing; not yet deployed or confirmed on the
-device.** The October audit did not change or validate that patch. Deployment
-would require the root filesystem `/` remounted read-write on this system-as-root
-layout, and a reboot so PackageManager rescans. The USB configuration item stays visible but
+**Status: deployed 2026-10-26 and confirmed on the device.** The patched APK
+(sha256 `3d099528…`, built from the pulled original `7229037b…` with the two
+edits above, signed v1+v2+v3 with the published key, cert digest `c8a2e9bc…`)
+was written over `/system/priv-app/TvSettings/TvSettings.apk` by root redirect
+with `/` remounted read-write, the stale `oat/arm/TvSettings.{odex,vdex}` removed,
+`/` remounted read-only, then a reboot. After the reboot `dumpsys package` shows
+the same signature record as before, Developer options opens and stays open
+(`DevelopmentActivity` focused, no entry in the crash buffer, process alive
+through D-pad navigation), and HOME still lands on Projectivy. Originals are
+kept with hashes at `/data/local/tmp/tvs-backup/` on the device; revert is the
+same redirect write of the original APK and a reboot. The USB configuration item stays visible but
 inert — removing it from the list means touching resources, which this approach
 deliberately avoids.
 
