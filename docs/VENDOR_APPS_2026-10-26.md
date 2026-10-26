@@ -85,8 +85,59 @@ permission allow-list entry; the rest get their privileged permissions through
 | `videoplayer` | tvsetting, tvui, explorer (not installed) |
 | `nlsource` | tvinput.external |
 
+## Decoded 2026-10-26: hisetting and newlink.service
+
+Both APKs decompiled with `apktool d -r` and the smali read. Read-only.
+
+**`com.newlink.hisetting`.** The two exported services are harmless.
+`MyService` (action `android.hisi.zoom`) toggles the 4:3 / 16:9 aspect through
+HiSilicon's `AdvancedPictureSetting`, mirrors the state into the property
+`zyzys.newlink.fourThree`, and shows an overlay for two seconds. `ProjectionService`
+(action `android.service.projection`) cycles the panel flip/mirror mode through
+`Factory.setPanelFlipMirror` and shows an overlay. Neither reads intent extras,
+runs a shell, writes files or touches packages. An untrusted caller can flip the
+picture; that is all. `INSTALL_PACKAGES` is declared but never used by the app's
+own code: `InstallActivity` fetches a JSON app list from
+`http://www.newlinksz.com/app/OurAppUpdateANDIMG` (plain HTTP, fields
+`packageName`, `versionCode`, `appDownload`, `IMG`), downloads the APK to
+external storage with no checksum, and hands it to the system installer with an
+`ACTION_VIEW` intent. That path is the vendor's app store; it is subject to the
+install gate like any other install and does not run today unless the user
+opens the activity. The missing `com.newlink.install` package is launched by
+explicit component from `MainActivity` and simply fails to resolve.
+
+**`com.newlink.service`.** `UsbReceiver` (exported, `MEDIA_MOUNTED`) starts the
+non-exported `UsbIntentService`, which scans the mounted volume's root for fixed
+file names. What each does:
+
+| File on the USB stick | Effect | Gate |
+|---|---|---|
+| `activate.txt`, `activate_nowindow.txt` | sets `persist.sys.authenticate` and clears `persist.sys.date` | none |
+| `autokeystone.txt` | starts `com.zhiying.AUTO_FOCUS_CORRECTION` | `ro.product.manufacturer` must be `MediaTek` (this unit: Hisilicon), so dead |
+| `autotestmotor.txt`, `autotestvideo.txt` | starts a factory test activity | `ro.zhiying.model` must be `3S` (this unit: `CQ_5H000_T011`), so dead |
+| `new_bootanimation.zip`, `new_bootvideo.mp4` | copied to `/atv/bootvideo/` (or `/data/local/` on MediaTek) | none |
+| `EthHWaddr.txt` | reads a MAC into a property | none |
+| `screenReplace.txt`, `ZMEnvFile.txt` | reads values into properties (`VIRTUAL_RAM`, `VIRTUAL_ROM`, `reload_vmm`) | model `3S`, dead |
+| `zhiying_custom_update.json` | for each item of `type` `file`, copies `<usb>/<vendorRootDir>/<sourcePath>` to `<targetPath>` as uid system | model `3S`, dead on this unit |
+
+The only `Runtime.exec` in the package runs `chmod 666 <path>` on a file it just
+copied, and `cat /sys/class/net/*/address`. There is no package install, no
+recovery call, no reboot. The JSON copier would be an arbitrary-file-write as
+uid system (`targetPath` is not validated), but it is gated on `ro.zhiying.model`
+being `3S`, which this unit is not. The live exposure on this hardware is: a
+USB stick can replace the boot animation and boot video, and can set
+`persist.sys.authenticate`. The update URL `http://www.newlinksz.com/product/update`
+lives in `MyServices` alongside `usetime` and `verification` endpoints; the
+earlier analysis in [SECURITY_ANALYSIS.md](SECURITY_ANALYSIS.md) covers what is
+sent there.
+
+**Decision taken 2026-10-26:** leave both packages enabled. Nothing reachable on
+this unit installs, executes or wipes anything. If the boot-animation override
+bothers you, the only clean fix is disabling `UsbReceiver` with
+`pm disable-user` on that one component, which has no other consumer.
+
 ## Not done
 
 Decoding the vdex-only packages (needs `oatdump` on the device, as was done for
-wtprovision). Decoding what hisetting's exported services do. Any disable test.
-Artifacts: `/tmp/vendor-audit/` on the host (APKs, manifests, dumpsys output).
+wtprovision). Any disable test. Artifacts: `/tmp/vendor-audit/` on the host
+(APKs, manifests, dumpsys output, smali trees for hisetting and newlink.service).
