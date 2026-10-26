@@ -14,6 +14,7 @@ their historical assumptions; this update does not re-pin that tree.
 | [DEVICE_AUDIT_2026-10-24.md](DEVICE_AUDIT_2026-10-24.md) | Live ADB/UART root checks, daemon queue finding, boot headers, verified environment and modification limits |
 | [TECHNICAL_NOTES.md](TECHNICAL_NOTES.md) | Device specifications, ADB commands, partition layout, compatibility notes |
 | [SECURITY_ANALYSIS.md](SECURITY_ANALYSIS.md) | Analysis of security restrictions and bypass methods |
+| [VENDOR_APPS_2026-10-26.md](VENDOR_APPS_2026-10-26.md) | Read-only audit of the 22 Newlink, Zhiying and HiSilicon system apps: what runs, what each may do, what depends on what, and which are safe to leave alone |
 | [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md) | The `wtprovision` brick: why disabling one component stops the device booting, how to diagnose it over UART, and the one-command fix |
 | [RECOVERY.md](RECOVERY.md) | Booting stock recovery with a `boot-recovery` BCB in `misc`, why `adb reboot recovery` fails here, and the root busybox console |
 | [UNBOOTABLE.md](UNBOOTABLE.md) | Step by step for a projector that stopped booting after a flash or Magisk attempt: UART wiring, proving the adapter, capturing and reading a boot log |
