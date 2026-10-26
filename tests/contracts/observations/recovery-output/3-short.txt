@@ -1,0 +1,12 @@
+exit=1
+=== EMERGENCY RESTORE ===
+
+Options:
+  1. Reset launcher only (safe)
+  2. Restore app data (safe)
+  3. Restore system partition (moderate risk)
+  4. Full device restore (high risk)
+  q. Quit
+
+Restoring system partition...
+system.img is 4096 bytes, partition is 4194304 - refusing to write a short or oversized image

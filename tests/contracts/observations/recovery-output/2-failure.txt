@@ -1,4 +1,4 @@
-exit=0
+exit=1
 === EMERGENCY RESTORE ===
 
 Options:
@@ -9,4 +9,4 @@ Options:
   q. Quit
 
 adb: restore failed with configured rc 7
-No app backup found
+adb restore failed (exit 7)

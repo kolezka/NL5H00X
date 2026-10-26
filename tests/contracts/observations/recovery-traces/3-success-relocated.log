@@ -1,3 +1,4 @@
+adb	shell	su\ -c\ \'blockdev\ --getsize64\ /dev/block/mmcblk0p20\'\ 2\>\&1\;\ echo\ __RC__=\$\?
 adb	push	system.img	/sdcard/
-adb	shell	su\ -c\ \'dd\ if=/sdcard/system.img\ of=/dev/block/mmcblk0p20\ bs=1048576\'
+adb	shell	su\ -c\ \'dd\ if=/sdcard/system.img\ of=/dev/block/mmcblk0p20\ bs=1048576\'\ 2\>\&1\;\ echo\ __RC__=\$\?
 adb	shell	rm	-f	/sdcard/system.img

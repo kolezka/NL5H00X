@@ -1,4 +1,4 @@
-exit=0
+exit=1
 === EMERGENCY RESTORE ===
 
 Options:
@@ -9,5 +9,4 @@ Options:
   q. Quit
 
 Resetting launcher...
-Error: component get-home-activity not found
-Launcher reset
+Launcher reset failed: Error: package com.newlink.hisilauncher is disabled

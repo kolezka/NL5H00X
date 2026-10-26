@@ -1,4 +1,4 @@
-exit=0
+exit=1
 === EMERGENCY RESTORE ===
 
 Options:
@@ -9,5 +9,4 @@ Options:
   q. Quit
 
 Restoring system partition...
-fake-adb: intercepted block dd failed with configured rc 23
-System partition restored
+dd to the system partition FAILED - the partition may be partially written. Do not reboot; retry or restore the full image.

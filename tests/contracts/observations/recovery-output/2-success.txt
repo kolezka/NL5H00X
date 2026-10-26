@@ -9,3 +9,4 @@ Options:
   q. Quit
 
 restore completed
+App data restored

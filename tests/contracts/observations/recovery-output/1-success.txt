@@ -9,5 +9,4 @@ Options:
   q. Quit
 
 Resetting launcher...
-Success
 Launcher reset

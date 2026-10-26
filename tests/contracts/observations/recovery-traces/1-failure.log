@@ -1,1 +1,1 @@
-adb	shell	cmd	package	set-home-activity	Unknown\ command:\ get-home-activity
+adb	shell	cmd	package	set-home-activity	com.newlink.hisilauncher/.WizardAciticity
