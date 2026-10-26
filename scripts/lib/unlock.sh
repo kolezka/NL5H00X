@@ -132,8 +132,17 @@ launcher_component() { home_component_of "$LAUNCHER_PKG"; }
 # device_provisioned=1 and user_setup_complete=1, so it is a vendor patch.
 # Whatever declares that category therefore wins HOME every time and
 # set-home-activity is never consulted. Measured 2026-07-29: HOME goes to
-# com.newlink.wtprovision/.MainActivity, which then starts the stock launcher
-# by explicit component name.
+# com.newlink.wtprovision/.MainActivity.
+#
+# What wtprovision starts next is its own decision. Decoded from its bytecode
+# 2026-10-26: it starts the component cached in its own SharedPreferences
+# (/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml,
+# keys home_pkg and home_activity), filled once from the first plain MAIN+HOME
+# candidate that is not itself or tv.settings, so the stock launcher on a fresh
+# unit. It never reads the preferred-activities table or the chooser's answer.
+# Rewriting those two keys as root and killing the process (kill -9; it is
+# persistent, so `am force-stop` returns 0 and changes nothing) is what moves
+# HOME to another launcher. Verified across a reboot 2026-10-26.
 #
 # Empty on a device that resolves HOME normally.
 home_interceptor() {
@@ -387,6 +396,11 @@ launcher_default_describe() {
 #
 # Empty interceptor means a device that resolves HOME normally; there the
 # recorded preference is the answer.
+#
+# On this firmware the interceptor is always wtprovision, and what the user
+# actually sees afterwards is decided by wtprovision's own cache (see
+# home_interceptor), which neither query here can show. The owner reported by
+# this function is therefore the dispatcher, not the launcher.
 home_owner() {
     local icept; icept=$(home_interceptor)
     [[ -n "$icept" ]] && { echo "$icept"; return; }
@@ -404,10 +418,16 @@ launcher_default_state() {
 
     # An interceptor owning the vendor intent is no longer a hazard -- nothing
     # is disabled now, so it is the fallback that keeps the device booting. It
-    # is still a blocker for the *automated* step, for a different and honest
-    # reason: no command on API 28 writes a preference covering
-    # CATEGORY_SETUP_WIZARD, so the CLI cannot win that intent. A human can, from
-    # the device's own chooser.
+    # is still a blocker for the *automated* step: no command on API 28 writes
+    # a preference covering CATEGORY_SETUP_WIZARD, so the CLI cannot win that
+    # intent.
+    #
+    # The chooser route in the message below only ever worked with a launcher
+    # patched to declare SETUP_WIZARD itself (the locally re-signed Projectivy
+    # of 2026-07). An unpatched launcher never shows the chooser, and no
+    # preference reaches wtprovision, which starts whatever its own prefs cache
+    # names. The working route is to rewrite that cache; see home_interceptor
+    # and README "Unlocking the launcher". Not automated here yet.
     local icept; icept=$(home_interceptor)
     if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
         echo "blocked:$icept owns the home intent on this firmware (it declares CATEGORY_SETUP_WIZARD); no command on API 28 writes a preference covering that, so no CLI can override it -- press HOME on the device, pick $LAUNCHER_NAME, confirm 'Always'"
@@ -426,7 +446,9 @@ launcher_default_apply() {
     # Refuse before writing anything. Setting a preference the vendor intent
     # will ignore does not hand the home screen over -- it just leaves a stale
     # record, and a stale record is what started the incident this whole file
-    # now carries scars from.
+    # now carries scars from. wtprovision reads only its own prefs cache, so
+    # the chooser advice printed below holds only for a launcher that declares
+    # SETUP_WIZARD itself; see launcher_default_state.
     local icept; icept=$(home_interceptor)
     if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
         print_error "'$icept' owns the home intent on this firmware"
@@ -459,9 +481,16 @@ launcher_default_apply() {
     # the premise that it would otherwise win the home race on the next boot.
     # It never competes. The firmware dispatches home as MAIN + HOME +
     # CATEGORY_SETUP_WIZARD; whatever declares SETUP_WIZARD wins and then starts
-    # the stock launcher by explicit component name. Disabling that interceptor
+    # the component cached in its own prefs by explicit name (the stock
+    # launcher until that cache is rewritten). Disabling that interceptor
     # leaves the intent with zero candidates and the device stops booting --
     # three days and a soldered UART console to undo. See docs/BOOT_DEADLOCK.md.
+    #
+    # Known cost of the cache route: a launcher in /data/app is unresolvable
+    # until user 0 unlocks at boot, and wtprovision retries its dispatch
+    # recursively until then (1531 retries in 9.5 s on this unit, no crash).
+    # A much slower boot could overflow that stack; the system restarts the
+    # persistent process and home arrives late. Not a brick.
     #
     # Leaving both enabled is what makes this safe to get wrong: a preference
     # that goes stale degrades to "boots to the stock launcher" rather than

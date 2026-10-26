@@ -98,36 +98,74 @@ change the home screen from Settings. `UNLOCK.sh` fixes that.
 ```
 
 Getting a launcher onto the device is two problems, not one: the APK has to be
-installed, and it has to win the home intent. **Change the launcher with a
-preference, never by disabling the stock one.**
+installed, and `wtprovision` has to start it. **Never disable the stock launcher
+or `wtprovision`.**
 
 This firmware does not dispatch the ordinary home intent. It adds a second
-category — `MAIN` + `HOME` + **`SETUP_WIZARD`** — and the only component that
+category, `MAIN` + `HOME` + **`SETUP_WIZARD`**, and the only component that
 declares `SETUP_WIZARD` is `com.newlink.wtprovision/.MainActivity`. That
-component wins the home intent uniquely and then starts `com.newlink.hisilauncher`
-by explicit component name. The stock launcher never wins HOME on its own; it is
-*started by* wtprovision. Disable wtprovision and the home intent has zero
-candidates, and the device stops booting — see
+component wins the home intent every time. Disable `wtprovision` and the home
+intent has zero candidates, and the device stops booting; see
 [docs/BOOT_DEADLOCK.md](docs/BOOT_DEADLOCK.md).
 
-So leave `wtprovision` enabled. It stays as the fallback, so a preference that
-ever goes stale degrades to "boots to the stock launcher" instead of "does not
-boot".
+What `wtprovision` starts next is decided by its own cache, not by Android. On
+first run it queries the plain `MAIN` + `HOME` candidates, skips itself and
+`com.android.tv.settings`, takes the first remaining entry (the stock
+`com.newlink.hisilauncher`) and writes that package and activity into its own
+SharedPreferences:
 
-The reliable route is the system's own chooser: with a second launcher installed,
-press HOME and pick it, choosing **Always**. Android writes a preference recorded
-against the *real* intent — the one carrying `SETUP_WIZARD` — with the correct
-candidate set. `pm set-home-activity` is weaker: it reports `Success` without
-recording a preference that covers that intent, so HOME keeps showing the chooser.
+```
+/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml
+keys: home_pkg, home_activity
+```
 
-Verify before rebooting. This must name your chosen launcher, not `No activity found`:
+From then on every HOME press starts that component by explicit name. The
+preferred-activities table, `pm set-home-activity` and the system chooser are
+never consulted. This was decoded from the `WTProvision` bytecode on the device
+on 2026-10-26.
+
+So the fix is to point that cache at your launcher. Write the two keys as root:
+stage the new file in `/data/local/tmp`, write it with
+`su 0 sh -c "cat staged > target"`, and confirm with `sha256sum`. A plain
+`adb push` into `/data/user_de` reports success and writes nothing. The running
+`wtprovision` process keeps the old values in memory, and `am force-stop`
+returns 0 without restarting a persistent app, so kill it instead:
 
 ```bash
-adb shell 'su 0 pm resolve-activity --brief \
-  -a android.intent.action.MAIN \
-  -c android.intent.category.HOME \
-  -c android.intent.category.SETUP_WIZARD'
+adb shell 'su 0 kill -9 $(pidof com.newlink.wtprovision)'
 ```
+
+The system relaunches it, it reads the new cache, and HOME opens your launcher.
+Verified across a reboot on 2026-10-26 with Projectivy 4.71 as published by its
+author. To revert, write the stock pair back (`com.newlink.hisilauncher` and
+`com.newlink.hisilauncher.WizardAciticity`, vendor spelling) and kill the
+process again. `UNLOCK.sh` does not automate this write yet.
+
+Verify from logcat, not from the resolver. The resolver always names
+`wtprovision` on this firmware. After a HOME press this must name your launcher:
+
+```bash
+adb logcat -d -s wtprovision_Main | grep 'Preferences home ='
+```
+
+Earlier versions of this README described the system chooser as the route:
+install a second launcher, press HOME, pick it, choose **Always**. That only
+worked because the Projectivy build in use then had been patched to declare
+`SETUP_WIZARD` and re-signed locally. With two declarants the chooser appeared,
+and Always wrote a preference that let Projectivy win the firmware's home intent
+outright. `wtprovision` was bypassed, not steered. An unpatched launcher declares
+no `SETUP_WIZARD`, so the chooser never appears and no preference can help. The
+patched build had also lost the author's signature and with it the update path,
+and a second `SETUP_WIZARD` declarant is one of the hazards listed in
+[docs/BOOT_DEADLOCK.md](docs/BOOT_DEADLOCK.md).
+
+One known cost of the cache route: a launcher in `/data/app` is not resolvable
+until user 0 unlocks at boot, and `wtprovision` retries its home dispatch
+recursively until it is. On this unit that is about ten seconds of busy main
+thread at every boot (1531 retries in 9.5 s, no crash). A much slower boot
+could overflow that stack; the system would then restart `wtprovision` and home
+would arrive late, but the device still boots. Keep the launcher installed while
+the cache names it, or revert the cache first.
 
 Projectivy running as the home screen after a clean boot, with `wtprovision`
 left enabled:
