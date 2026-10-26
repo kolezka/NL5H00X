@@ -11,3 +11,4 @@ Options:
 WARNING: This will overwrite EVERYTHING
 Image verified: 4194304 bytes
 Starting full restore...
+Full image written

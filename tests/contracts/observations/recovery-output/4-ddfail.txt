@@ -1,0 +1,16 @@
+exit=1
+=== EMERGENCY RESTORE ===
+
+Options:
+  1. Reset launcher only (safe)
+  2. Restore app data (safe)
+  3. Restore system partition (moderate risk)
+  4. Full device restore (high risk)
+  q. Quit
+
+WARNING: This will overwrite EVERYTHING
+Image verified: 4194304 bytes
+Starting full restore...
+adb: configured push failure for /sdcard/ (rc 19)
+Streaming restore...
+Full restore dd FAILED (status 5). Do not reboot; the device may be partially written. Retry before power-cycling.

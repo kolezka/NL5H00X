@@ -93,8 +93,9 @@ image works on this unit; they are not something to repeat.
 - One unit, one recovery boot. Other firmware builds may behave differently.
 - Nothing was written from recovery: no wipe, no sideload, no restore.
 - adb inside recovery was not tested.
-- This does not change the restore safety HOLD. The false successes recorded in
-  [recovery-hazards.md](../tests/contracts/observations/recovery-hazards.md)
-  belong to the restore scripts and are still open.
+- This does not change the restore safety HOLD. The generated restore scripts
+  fail loudly since 2026-10-26 (see
+  [recovery-hazards.md](../tests/contracts/observations/recovery-hazards.md)),
+  but no restore has been exercised on the unit.
 - Writing `misc` needs Android root. A unit that cannot boot Android cannot use
   this path unless something else writes the BCB.

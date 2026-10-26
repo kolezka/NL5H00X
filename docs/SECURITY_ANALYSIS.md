@@ -109,18 +109,21 @@ promises for the next backup. Use current measurements and the toolkit's checks.
 ## Recovery safety HOLD
 
 [Recorded fake-device traces](../tests/contracts/observations/recovery-hazards.md)
-show restore hazards, including a partition path accepting a tiny image,
-misleading success reporting, and whole-device branches with different behavior
-on successful and failed push. These are isolated characterization results, not
-a successful hardware restore. The
+used to show restore hazards: a partition path accepting a tiny image,
+misleading success reporting, and a whole-device path that rebooted without
+writing. Fixed 2026-10-26 in the generated `RESTORE.sh` and `reset-launcher.sh`
+(`tests/restore-tests.sh` locks the contract; the characterization baselines
+record the new behaviour). These are fake-device results, not a successful
+hardware restore. The
 [design's safety HOLD](superpowers/specs/2026-09-12-system-flow-refactor-design.md#recovery-safety-hold)
 requires separate verification before hardware use.
 
 What changed on 2026-10-25: recovery itself now boots on demand (one unit, one
 boot, [RECOVERY.md](RECOVERY.md)). Its menu was reached and left with
 `busybox reboot -f`, and nothing was written from it. The HOLD still covers
-the restore scripts: the false successes in recovery-hazards.md are unchanged
-and open, and a reachable recovery does not endorse them.
+hardware restore: the scripts now refuse and report failures, but none of
+their write paths has run against the unit, and a reachable recovery does not
+endorse them.
 
 A checksum-verified backup cannot guarantee recovery, zero downtime, or access to
 a nonbooting device. A UART Android shell helps with an Android-level boot stall;

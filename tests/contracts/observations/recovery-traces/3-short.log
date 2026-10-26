@@ -1,0 +1,1 @@
+adb	shell	su\ -c\ \'blockdev\ --getsize64\ /dev/block/mmcblk0p20\'\ 2\>\&1\;\ echo\ __RC__=\$\?
