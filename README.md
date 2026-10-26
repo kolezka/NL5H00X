@@ -187,16 +187,18 @@ renames its activity between releases does not break anything.
 
 ## Installing apps
 
-This projector refuses every normal install. `adb install`, a session install,
-a local `pm install`, `-f`, and the same commands as root all fail with
-`INSTALL_FAILED_INVALID_INSTALL_LOCATION`, with sideloading enabled, no
-restrictions and gigabytes free. `/data/app` is empty — nothing has ever been
-installed the normal way. The failure is an exception inside the vendor's patched
-`PackageManagerService`, not a capacity decision, and it is not something a flag
-works around. [docs/INSTALL_LOCKED.md](docs/INSTALL_LOCKED.md) records everything
-that was ruled out.
+Out of the box this projector refuses every normal install with
+`INSTALL_FAILED_INVALID_INSTALL_LOCATION`. The cause is a vendor gate in
+`PackageManagerService`, switched by the system property
+`zyzys.install.whitelist`. Set it to `0` and installs work; put
+`zyzys.install.whitelist=0` in `/system/build.prop` and they keep working across
+reboots. Verified on hardware 2026-10-25, including a real SmartTube update.
+[docs/INSTALL_LOCKED.md](docs/INSTALL_LOCKED.md) has the recovered code, the
+test, the exact write procedure and the revert.
 
-The way in is `/system/app`. `INSTALL_APP.sh` does it properly:
+With the gate off, plain `adb install` is the normal route. `INSTALL_APP.sh`
+remains for the `/system/app` path, which you still need for an APK that must be
+a system app (a launcher that has to win the home intent, for instance):
 
 ```bash
 ./scripts/INSTALL_APP.sh SmartTube_stable_31.94_armeabi-v7a.apk
@@ -325,8 +327,9 @@ Note the form: this device takes `su <uid> <command>`. `su -c 'id'` answers
 
 Two things to know before using any of it. **Never freeze
 `com.newlink.wtprovision`** — it owns the boot intent on its own and freezing it
-stops the boot before adb comes up (`TOOLS.sh` refuses it). And root does **not**
-lift the install lock: `pm install` still fails, apps still go to `/system/app`.
+stops the boot before adb comes up (`TOOLS.sh` refuses it). And root alone does
+**not** lift the install lock; the vendor gate is a property, not a permission.
+See [docs/INSTALL_LOCKED.md](docs/INSTALL_LOCKED.md) for the one-line fix.
 
 [root/README.md](root/README.md) has the worked examples, including reading an
 app's database, dumping a partition and what an allow-listed app can actually do.
@@ -368,7 +371,7 @@ hashes match.
 | [Boot Branding](docs/BOOT_BRANDING.md) | Replacing the U-Boot logo and the boot animation — formats, the ~7 fps ceiling, the silent `adb push` trap |
 | [Boot Deadlock](docs/BOOT_DEADLOCK.md) | The `wtprovision` brick — mechanism, diagnosis, recovery |
 | [Will Not Boot](docs/UNBOOTABLE.md) | Step by step for a projector that stopped booting after a flash or Magisk attempt: UART wiring, getting a boot log, reading it |
-| [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs fail, and the `/system/app` workaround |
+| [Install Lock](docs/INSTALL_LOCKED.md) | Why normal installs failed, the vendor gate that caused it, and the one-line `build.prop` fix that turns it off for good |
 | [Developer Options](docs/DEV_OPTIONS_CRASH.md) | Why the Developer options screen crashes, and the AOSP platform key that makes patching it possible |
 | [Root for apps](root/README.md) | Why setuid `su` cannot root an app here, the socket daemon that can, and how it is made persistent |
 | [Vendor Telemetry](docs/VENDOR_TELEMETRY.md) | What phones home to the manufacturer, why the vendor OTA is dead, why Android cannot be updated, and how to block it safely |

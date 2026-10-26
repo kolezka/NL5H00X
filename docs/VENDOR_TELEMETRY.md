@@ -39,10 +39,27 @@ sends it to three endpoints with OkHttp:
 | `http://www.newlinksz.com/product/verification` | Sent when activated. |
 | `http://www.newlinksz.com/product/usetime` | Sent when activated. |
 
-Fields in the JSON: `macaddr`, `city`, `project_id`, `cusname`, `batch`,
-`systemVersion`, `usetime`, `authenticate`. `city` comes from a separate GET to
-`http://whois.pconline.com.cn/ip.jsp`, a Chinese geo-IP service on China
-Telecom's network. `https://www.baidu.com` is used only as a connectivity probe.
+Fields in the JSON (`com.newlink.service.Entity`, full list from the dex on
+2026-10-25): `macaddr`, `city`, `project_id`, `cusname`, `batch`,
+`systemVersion`, `usetime`, `authenticate`, `createtime`, `args`, `hint`. `city`
+comes from a separate GET to `http://whois.pconline.com.cn/ip.jsp`, a Chinese
+geo-IP service on China Telecom's network. `https://www.baidu.com` is used only
+as a connectivity probe. The MAC is read with `Runtime.exec("cat
+/sys/class/net/wlan0/address")`.
+
+**It does not send GPS coordinates.** `Util.getLngAndLatWithNetwork()` exists in
+the dex, checks `ACCESS_FINE_LOCATION`, calls `getLastKnownLocation` and
+reverse-geocodes the result, but it has zero call sites anywhere in the APK
+(positive control: `getMac` has three). It is dead code. The location permission
+the package holds is real; the use of it is not.
+
+**It does not download or run code.** The response bodies go into a
+`ByteArrayOutputStream` and are parsed; nothing writes them to disk. There is no
+`DexClassLoader`, `ProcessBuilder`, `RecoverySystem`, `installPackage` or
+`setExecutable` anywhere in the dex. The four `Runtime.exec` calls are two
+`cat` of a MAC address, one `chmod 666` on a file copied from a USB stick, and
+one `ping -c 3`. The only persistent writes driven by the network path are
+`persist.sys.authenticate=1` and `persist.sys.date`.
 
 Confirmed live, not only in code: at audit time `netstat` on the device showed
 the `com.newlink.service` process with a connection to `171.105.61.4:80`, one of
@@ -81,8 +98,19 @@ above it contains:
   `UsbIntentService`, which looks for `macReplace.txt`, `nl_sn.txt`,
   `EthHWaddr.txt`, `panel_index.txt`, `screenReplace.txt`,
   `wifiConfiguration.txt`, `ZMEnvFile.txt`, `new_logo.jpg`, `bootvideo.mp4`,
-  `bootanimation.zip`, `activate.txt` and `activate_nowindow.txt` in the root
-  of the stick and applies them (MAC, serial, panel index, boot branding, WiFi).
+  `bootanimation.zip`, `activate.txt`, `activate_nowindow.txt`,
+  `autokeystone.txt`, `autotestmotor.txt`, `autotestvideo.txt` and
+  `factorytest.txt` in the root of the stick and applies them (MAC, serial,
+  panel index, boot branding, WiFi, and `VIRTUAL_RAM` in the U-Boot environment
+  via `ZMEnvFile.txt`).
+
+  **This is the real exposure in this package, not the telemetry.** The receiver
+  is `exported=true`, fires on any mounted volume, and the service runs as uid
+  `system` with `INSTALL_PACKAGES`, `MASTER_CLEAR`, `REBOOT`, `RECOVERY`,
+  `WRITE_SECURE_SETTINGS` and 75 other grants. Anyone with physical access and a
+  USB stick can rewrite this unit's MAC, serial number and boot branding, with
+  no root, no adb and no prompt. Treat the USB port as a provisioning interface,
+  because that is what the vendor shipped it as.
 - **Factory test screens.** `MacActivity`, `SNActivity`, `FactoryActivity`,
   `MotorRotation`, `VideoActivity` (exported, intent
   `android.newlink.factory_video`), `ToastActivity`, `ZMEnvFileActivity`.
