@@ -278,6 +278,9 @@ home=$(home_now "$sb")
 bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
 [[ -f "$bk" ]] && grep -q hisilauncher "$bk" \
     && ok "the stock cache was backed up first" || bad "no backup of the stock cache at $bk"
+bksha="$sb/state/data/local/tmp/wtprov_prefs.before.sha256"
+[[ -f "$bksha" && "$(tr -d '\r\n ' < "$bksha")" == "$(shasum -a 256 "$bk" | cut -d' ' -f1)" ]] \
+    && ok "the backup's sha256 was recorded next to it" || bad "no matching sha256 sidecar at $bksha"
 
 disabled=$(dev "$sb" 'pm list packages -d')
 [[ "$disabled" != *"$STOCK"* ]] \
@@ -388,6 +391,95 @@ EOF
 out=$(unlock "$sb" --status)
 echo "$out" | grep -qE '\[todo\][[:space:]]+launcher_default' \
     && ok "launcher_default shows [todo]" || bad "half-written cache: $(echo "$out" | grep launcher_default)"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "revert never creates a missing cache file"
+# A file created by a root redirect is owned by root, not by wtprovision, so
+# the revert must refuse rather than recreate it.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+unlock "$sb" --apply-all --yes >/dev/null
+[[ -f "$sb/state/data/local/tmp/wtprov_prefs.before.xml" ]] \
+    && ok "control: the unlock left a backup" || bad "control: no backup after the unlock"
+rm "$f"
+out=$(unlock "$sb" --revert --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the revert fails" || bad "revert claimed success with no cache file"
+[[ "$out" == *"cache is not on the device"* ]] \
+    && ok "names the missing cache" || bad "did not name the missing cache: $(echo "$out" | grep -i cache | head -3)"
+[[ ! -e "$f" ]] && ok "the cache file is still absent" || bad "the revert created the cache file"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "revert does not trust a backup whose recorded hash does not match"
+# The backup is only the original if its sha256 matches the one recorded when
+# it was taken. Anything else falls back to writing the stock pair.
+
+for case_ in corrupt nosidecar; do
+    new_sandbox
+    f="$sb/state$WTPROV_XML"
+    bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+    unlock "$sb" --apply-all --yes >/dev/null
+    if [[ "$case_" == corrupt ]]; then
+        echo '<map>invalid cache</map>' > "$bk"
+    else
+        rm -f "$sb/state/data/local/tmp/wtprov_prefs.before.sha256"
+    fi
+    out=$(unlock "$sb" --revert --yes)
+    [[ "$out" == *"RC=0"* ]] && ok "$case_: revert completes" \
+        || { bad "$case_: revert failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+    grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" \
+        && grep -q 'name="home_activity">com.newlink.hisilauncher.WizardAciticity<' "$f" \
+        && ok "$case_: cache holds the stock pair" || bad "$case_: cache is: $(tr -d '\n' < "$f")"
+    [[ "$out" == *"not trusted"* ]] \
+        && ok "$case_: says the backup was not trusted" || bad "$case_: did not say the backup was not trusted"
+    sandbox_finish "$sb"
+done
+
+# ---------------------------------------------------------------------------
+head_ "an interceptor that is not wtprovision blocks the step, even the launcher"
+# Only wtprovision's cache is understood. Any other owner of the home intent,
+# the launcher included, is reported and left alone.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+before=$(cat "$f")
+out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$PROJECTIVY/.Main" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock succeeded with the launcher as interceptor"
+[[ "$(cat "$f")" == "$before" ]] && ok "the cache is unchanged" || bad "the cache was written"
+out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$PROJECTIVY/.Main" --status)
+echo "$out" | grep -qE "\[blocked\][[:space:]]+launcher_default.*$PROJECTIVY/\.Main" \
+    && ok "--status shows [blocked] naming the component" || bad "status: $(echo "$out" | grep launcher_default)"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "the new cache is built from the trusted backup"
+# The backup is the original; keys only it carries must survive the write.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+awk '/<\/map>/ { print "    <string name=\"other\">keep</string>" } { print }' "$f" > "$bk"
+shasum -a 256 "$bk" | cut -d' ' -f1 > "$sb/state/data/local/tmp/wtprov_prefs.before.sha256"
+grep -q 'name="other"' "$f" && bad "control: the live cache already has the extra key" \
+    || ok "control: only the backup carries the extra key"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" == *"RC=0"* ]] && ok "unlock completes" || { bad "unlock failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+grep -q 'name="other">keep<' "$f" && ok "the extra key from the backup survived" || bad "cache lost the backup's extra key"
+grep -q 'name="home_pkg">com.spocky.projengmenu<' "$f" && ok "and the cache names Projectivy" || bad "cache home_pkg is not Projectivy"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a HOME press that fails is not read as success"
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_INPUT_FAILS=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock claimed success though HOME could not be pressed"
+[[ "$out" == *"input keyevent HOME failed"* ]] \
+    && ok "says pressing HOME failed" || bad "did not report the failed HOME press"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

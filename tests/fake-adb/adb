@@ -27,6 +27,7 @@
 #                         component that owns HOME; overrides $STATE/home_interceptor
 #   FAKE_ADB_WTPROV_IGNORES_CACHE
 #                         1 = wtprovision ignores its launcher cache and starts stock
+#   FAKE_ADB_INPUT_FAILS  1 = `input keyevent HOME` fails with an error and status 1
 #
 # The contract-only knobs above are disabled by default. Unhandled commands keep
 # their legacy failures unless a scoped characterization explicitly enables one.
@@ -481,6 +482,10 @@ run_remote() {
             echo "kill: $kp: No such process" >&2
             return 1 ;;
         "input keyevent HOME")
+            if [[ "${FAKE_ADB_INPUT_FAILS:-0}" == "1" ]]; then
+                echo "Error: Injecting to another application requires INJECT_EVENTS permission"
+                return 1
+            fi
             [[ -n "$(home_interceptor_comp)" ]] && wtprov_apply_cache
             return 0 ;;
         "dumpsys window")

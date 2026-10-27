@@ -154,7 +154,11 @@ home_interceptor() {
 # wtprovision's launcher cache
 # ---------------------------------------------------------------------------
 WTPROV_BACKUP="/data/local/tmp/wtprov_prefs.before.xml"
+# The backup's sha256, recorded when it is taken. Only a backup that still
+# matches it is restored.
+WTPROV_BACKUP_SHA="/data/local/tmp/wtprov_prefs.before.sha256"
 WTPROV_STAGED="/data/local/tmp/wtprov_prefs.new.xml"
+WTPROV_STAGED_SHA="/data/local/tmp/wtprov_prefs.before.sha256.new"
 
 wtprov_cache_path() {
     echo "/data/user_de/0/$HOME_DISPATCHER_PKG/shared_prefs/$HOME_DISPATCHER_PKG.xml"
@@ -192,51 +196,115 @@ wtprov_cache_read() {
     return 0
 }
 
-# Copy the cache to WTPROV_BACKUP once. An existing backup that differs from
-# the cache is the older "before", so it is kept.
-wtprov_cache_backup() {
-    local cache before bk
+# Print the cache's sha256, or fail when the file is not there. Nothing may
+# create it: a file made by a root redirect is owned by root, not wtprovision.
+wtprov_cache_require() {
+    local cache sha
     cache=$(wtprov_cache_path)
-    before=$(remote_sha256 "$cache")
-    if [[ -z "$before" ]]; then
+    sha=$(remote_sha256 "$cache")
+    if [[ -z "$sha" ]]; then
         print_error "wtprovision's cache is not on the device ($cache); nothing was written"
         return 1
     fi
+    echo "$sha"
+}
+
+# Why the backup cannot be trusted, or nothing when it can: it must match the
+# sha256 recorded when it was taken and hold both keys.
+wtprov_backup_problem() {
+    local bk rec xml
+    bk=$(remote_sha256 "$WTPROV_BACKUP")
+    if [[ -z "$bk" ]]; then
+        echo "there is no backup at $WTPROV_BACKUP"; return
+    fi
+    if ! rec=$(adb_root_exec "cat $WTPROV_BACKUP_SHA" 2>/dev/null); then
+        echo "no sha256 was recorded for it at $WTPROV_BACKUP_SHA"; return
+    fi
+    rec=$(printf '%s' "$rec" | tr -d '\r\n ')
+    if [[ "$rec" != "$bk" ]]; then
+        echo "its sha256 $bk does not match the recorded ${rec:-empty} value"; return
+    fi
+    if ! xml=$(adb_root_exec "cat $WTPROV_BACKUP" 2>/dev/null) \
+        || [[ -z "$(printf '%s\n' "$xml" | prefs_value home_pkg)" ]] \
+        || [[ -z "$(printf '%s\n' "$xml" | prefs_value home_activity)" ]]; then
+        echo "it has no home_pkg/home_activity pair"; return
+    fi
+}
+
+# Record the backup's sha256 in WTPROV_BACKUP_SHA: staged, written as root by
+# redirect, then read back.
+wtprov_backup_record() {
+    local sha="$1" tmp
+    tmp=$(mktemp) || return 1
+    echo "$sha" > "$tmp"
+    if ! adb push "$tmp" "$WTPROV_STAGED_SHA" >/dev/null 2>&1 \
+        || [[ "$(remote_sha256 "$WTPROV_STAGED_SHA")" != "$(local_sha256 "$tmp")" ]]; then
+        rm -f "$tmp"
+        print_error "Could not stage the backup's sha256 at $WTPROV_STAGED_SHA; nothing was written"
+        return 1
+    fi
+    rm -f "$tmp"
+    adb_root_exec "sh -c \"cat $WTPROV_STAGED_SHA > $WTPROV_BACKUP_SHA\"" >/dev/null 2>&1
+    if [[ "$(adb_root_exec "cat $WTPROV_BACKUP_SHA" 2>/dev/null | tr -d '\r\n ')" != "$sha" ]]; then
+        print_error "Could not record the backup's sha256 at $WTPROV_BACKUP_SHA; nothing was written"
+        return 1
+    fi
+    return 0
+}
+
+# Copy the cache to WTPROV_BACKUP once and record its sha256.
+# Returns 0 with a trusted backup, 2 when a file is already at the backup path
+# but is not a trusted backup (left in place), 1 on failure.
+wtprov_cache_backup() {
+    local before bk problem
+    before=$(wtprov_cache_require) || return 1
     bk=$(remote_sha256 "$WTPROV_BACKUP")
     if [[ "$bk" == "$before" ]]; then
+        # Same bytes as the live cache, so recording its hash is truthful.
+        if [[ -n "$(wtprov_backup_problem)" ]]; then
+            wtprov_backup_record "$bk" || return 1
+        fi
         print_status "Backup of wtprovision's cache already at $WTPROV_BACKUP"
     elif [[ -n "$bk" ]]; then
+        problem=$(wtprov_backup_problem)
+        if [[ -n "$problem" ]]; then
+            print_warning "The file at $WTPROV_BACKUP differs from the cache and is not a trusted backup: $problem"
+            print_warning "Leaving it in place; --revert will not use it and writes the stock pair instead"
+            return 2
+        fi
         print_warning "Keeping the existing backup at $WTPROV_BACKUP: it differs from the current cache, so it is the older original"
     else
-        adb_root_exec "sh -c \"cat $cache > $WTPROV_BACKUP\"" >/dev/null 2>&1
+        adb_root_exec "sh -c \"cat $(wtprov_cache_path) > $WTPROV_BACKUP\"" >/dev/null 2>&1
         if [[ "$(remote_sha256 "$WTPROV_BACKUP")" != "$before" ]]; then
             print_error "Could not back up wtprovision's cache to $WTPROV_BACKUP; nothing was written"
             return 1
         fi
+        wtprov_backup_record "$before" || return 1
         print_status "Backed up wtprovision's cache to $WTPROV_BACKUP"
     fi
     return 0
 }
 
-# Replace the two keys in the device cache, keeping every other line. Built on
-# the host from the current file, staged in /data/local/tmp and written as root
-# by redirect, which keeps the inode, mode and SELinux label.
+# Write the pair into the device cache. The new file is SRC (a device path)
+# with the two values replaced and every other line kept, built on the host,
+# staged in /data/local/tmp and written as root by redirect, which keeps the
+# inode, mode and SELinux label. The cache itself must already exist.
 wtprov_cache_put() {
-    local pkg="$1" act="$2" cache tmp before after staged
+    local pkg="$1" act="$2" src="$3" cache tmp before after staged
     cache=$(wtprov_cache_path)
+    before=$(wtprov_cache_require) || return 1
     tmp=$(mktemp -d) || return 1
 
-    if ! adb_root_exec "cat $cache" > "$tmp/current.xml" 2>/dev/null \
-        || [[ -z "$(prefs_value home_pkg < "$tmp/current.xml")" ]] \
-        || [[ -z "$(prefs_value home_activity < "$tmp/current.xml")" ]]; then
-        print_error "wtprovision's cache is missing or has no home_pkg/home_activity pair ($cache); nothing was written"
+    if ! adb_root_exec "cat $src" > "$tmp/source.xml" 2>/dev/null \
+        || [[ -z "$(prefs_value home_pkg < "$tmp/source.xml")" ]] \
+        || [[ -z "$(prefs_value home_activity < "$tmp/source.xml")" ]]; then
+        print_error "$src is missing or has no home_pkg/home_activity pair; nothing was written"
         rm -rf "$tmp"; return 1
     fi
-    before=$(remote_sha256 "$cache")
 
     sed -e "s|\(<string name=\"home_pkg\">\)[^<]*\(</string>\)|\1$pkg\2|" \
         -e "s|\(<string name=\"home_activity\">\)[^<]*\(</string>\)|\1$act\2|" \
-        "$tmp/current.xml" > "$tmp/new.xml"
+        "$tmp/source.xml" > "$tmp/new.xml"
     if [[ "$(prefs_value home_pkg < "$tmp/new.xml")" != "$pkg" \
         || "$(prefs_value home_activity < "$tmp/new.xml")" != "$act" ]]; then
         print_error "Could not build the new cache file; nothing was written"
@@ -263,10 +331,17 @@ wtprov_cache_put() {
     return 0
 }
 
-# Back up once, then write the pair.
+# Back up once, then write the pair built from the trusted backup. When the
+# backup path holds a file that is not trusted, the live cache is the only
+# source left.
 wtprov_cache_write() {
-    wtprov_cache_backup || return 1
-    wtprov_cache_put "$1" "$2"
+    local rc=0
+    wtprov_cache_backup || rc=$?
+    case "$rc" in
+        0) wtprov_cache_put "$1" "$2" "$WTPROV_BACKUP" ;;
+        2) wtprov_cache_put "$1" "$2" "$(wtprov_cache_path)" ;;
+        *) return 1 ;;
+    esac
 }
 
 # wtprovision's pid(s), space separated, empty when it is not running.
@@ -297,9 +372,13 @@ wtprov_restart() {
     return 1
 }
 
-# Press HOME and print the package that has window focus afterwards.
+# Press HOME and print the package that has window focus afterwards. A failed
+# press prints nothing and returns 1: the old focus would prove nothing.
 home_focus() {
-    adb_root_exec "input keyevent HOME" >/dev/null 2>&1
+    if ! adb_root_exec "input keyevent HOME" >/dev/null 2>&1; then
+        print_error "Could not press HOME: input keyevent HOME failed"
+        return 1
+    fi
     sleep "${HOME_SETTLE_SECS:-2}"
     adb_root_exec "dumpsys window" 2>/dev/null | tr -d '\r' \
         | sed -n 's|.*mCurrentFocus=Window{[^ ]* [^ ]* \([^/ ]*\)/.*|\1|p' | head -1
@@ -571,9 +650,7 @@ launcher_default_state() {
         return
     fi
 
-    # A launcher that declares SETUP_WIZARD itself already owns HOME.
-    [[ "$icept" == "$LAUNCHER_PKG"/* ]] && { echo applied; return; }
-
+    # Only wtprovision's cache is understood; any other owner blocks the step.
     if ! is_wtprov "$icept"; then
         echo "blocked:$icept owns the home intent and is not wtprovision"
         return
@@ -597,7 +674,7 @@ launcher_default_apply() {
     fi
 
     local icept; icept=$(home_interceptor)
-    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]] && ! is_wtprov "$icept"; then
+    if [[ -n "$icept" ]] && ! is_wtprov "$icept"; then
         print_error "'$icept' owns the home intent and is not wtprovision; nothing was changed"
         return 1
     fi
@@ -665,7 +742,10 @@ launcher_default_apply_wtprov() {
     fi
 
     # The file saying Projectivy proves nothing; the focused window does.
-    focus=$(home_focus)
+    if ! focus=$(home_focus); then
+        print_warning "The cache was written; revert with: bash scripts/UNLOCK.sh --revert"
+        return 1
+    fi
     if [[ "$focus" != "$LAUNCHER_PKG" ]]; then
         print_error "the cache was written but HOME did not take effect; revert with: bash scripts/UNLOCK.sh --revert"
         print_warning "HOME landed on '${focus:-nothing}'"
@@ -704,35 +784,42 @@ launcher_default_revert() {
     return 0
 }
 
-# Put the cache back from the backup, or write the stock pair when there is
-# none, then restart wtprovision so it rereads it.
+# Put the cache back from a trusted backup, or write the stock pair when there
+# is none, then restart wtprovision so it rereads it.
 launcher_default_revert_wtprov() {
-    local cache bk focus
+    local cache bk problem focus
     cache=$(wtprov_cache_path)
 
     if [[ -z "$(wtprov_pids)" ]]; then
         print_error "wtprovision is not running; nothing was changed"
         return 1
     fi
+    wtprov_cache_require >/dev/null || return 1
 
-    bk=$(remote_sha256 "$WTPROV_BACKUP")
-    if [[ -n "$bk" ]]; then
+    problem=$(wtprov_backup_problem)
+    if [[ -z "$problem" ]]; then
+        bk=$(remote_sha256 "$WTPROV_BACKUP")
         adb_root_exec "sh -c \"cat $WTPROV_BACKUP > $cache\"" >/dev/null 2>&1
-        if [[ "$(remote_sha256 "$cache")" != "$bk" ]]; then
+        if [[ -z "$bk" || "$(remote_sha256 "$cache")" != "$bk" ]]; then
             print_error "Could not restore wtprovision's cache from $WTPROV_BACKUP"
             return 1
         fi
         print_status "Restored wtprovision's cache from $WTPROV_BACKUP (sha256 $bk)"
     else
-        # Vendor spelling, not a typo. No backup is taken here: the current
-        # cache is the launcher, not the original.
-        print_status "No backup at $WTPROV_BACKUP; writing the stock pair"
-        wtprov_cache_put "$STOCK_LAUNCHER" "$STOCK_LAUNCHER.WizardAciticity" || return 1
+        if [[ -n "$(remote_sha256 "$WTPROV_BACKUP")" ]]; then
+            print_warning "The backup at $WTPROV_BACKUP is not trusted: $problem"
+        fi
+        # No trusted backup, so the current cache is the only source to edit.
+        # Vendor spelling, not a typo.
+        print_status "Not restoring a backup ($problem); writing the stock pair"
+        wtprov_cache_put "$STOCK_LAUNCHER" "$STOCK_LAUNCHER.WizardAciticity" "$cache" || return 1
     fi
 
     wtprov_restart || return 1
 
-    focus=$(home_focus)
+    if ! focus=$(home_focus); then
+        return 1
+    fi
     if [[ "$focus" != "$STOCK_LAUNCHER" ]]; then
         print_error "The cache was restored but HOME landed on '${focus:-nothing}', not $STOCK_LAUNCHER"
         return 1
