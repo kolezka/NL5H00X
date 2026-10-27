@@ -25,6 +25,16 @@ different firmware build would do.
 
 ## The fix, for people who only want the fix
 
+From the repository root, `./nl5h00x install-gate status` reads the current
+`build.prop` state without changing it. `./nl5h00x install-gate off` checks the
+device and verified backup, saves a hash-checked copy of `/system/build.prop`,
+and sets the gate to allow every app on the projector to install other apps.
+This is a device-wide policy change, not part of `./nl5h00x unlock`. Run
+`adb reboot` after `off` or `on` so the new policy takes effect. Use
+`./nl5h00x install-gate on` to restore the verified original file, or remove
+the whitelist line when no verified copy exists. Check the live property with
+`adb shell getprop zyzys.install.whitelist` after reboot.
+
 ```sh
 D=192.168.50.229:5555
 adb -s $D shell su 0 getprop zyzys.install.whitelist      # [] means the gate is on
