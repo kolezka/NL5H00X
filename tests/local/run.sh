@@ -38,7 +38,9 @@ PT_TEST_PYTHON=${PT_TEST_PYTHON:-/usr/bin/python3}
 [[ "$PT_TEST_PYTHON" == /* && -x "$PT_TEST_PYTHON" ]] || { echo 'Python 3 is required for bounded supervision' >&2; exit 2; }
 PT_TEST_SUPERVISOR="$LOCAL_DIR/supervise.py"
 [[ -f "$PT_TEST_SUPERVISOR" ]] || { echo 'bounded supervisor is missing' >&2; exit 2; }
-PT_TEST_TIMEOUT_SECS=${PT_TEST_TIMEOUT_SECS:-120}
+# The cap catches hangs. unlock-tests runs about 135 s of real work under
+# /bin/bash 3.2, so 120 s failed a correct suite.
+PT_TEST_TIMEOUT_SECS=${PT_TEST_TIMEOUT_SECS:-300}
 case "$PT_TEST_TIMEOUT_SECS" in
     ''|*[!0-9]*|0) echo 'PT_TEST_TIMEOUT_SECS must be a positive integer' >&2; exit 2 ;;
 esac
