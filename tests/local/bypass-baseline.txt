@@ -90,28 +90,28 @@ scripts/TOOLS.sh:538:        echo "  Find the projector's IP in Settings, then: 
 scripts/TOOLS.sh:590:    if adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
 scripts/TOOLS.sh:94:    echo -e "${YELLOW}> adb shell $cmd${NC}"
 scripts/TOOLS.sh:97:    out=$(adb shell "$cmd" 2>&1); rc=$?
-scripts/UNLOCK.sh:138:    if ! adb reboot >/dev/null 2>&1; then
-scripts/UNLOCK.sh:139:        print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
-scripts/UNLOCK.sh:258:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
-scripts/UNLOCK.sh:277:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
-scripts/UNLOCK.sh:280:leaves the device with no adb at all. Without a device it prints the commands
-scripts/UNLOCK.sh:302:    # in this failure has no adb by definition, and that is exactly when someone
+scripts/UNLOCK.sh:181:    if ! adb reboot >/dev/null 2>&1; then
+scripts/UNLOCK.sh:182:        print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
+scripts/UNLOCK.sh:307:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
+scripts/UNLOCK.sh:326:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+scripts/UNLOCK.sh:329:leaves the device with no adb at all. Without a device it prints the commands
 scripts/UNLOCK.sh:34:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
+scripts/UNLOCK.sh:351:    # in this failure has no adb by definition, and that is exactly when someone
 scripts/UNLOCK.sh:35:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
 scripts/lib/common.sh:122:    adb shell "cat /proc/uptime" 2>/dev/null \
 scripts/lib/common.sh:126:# Wait for the device to come back after a reboot: adb sees it, boot has
-scripts/lib/common.sh:138:        [[ "$(adb get-state 2>/dev/null | tr -d '\r\n')" == "device" ]] || continue
-scripts/lib/common.sh:139:        [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')" == "1" ]] || continue
-scripts/lib/common.sh:160:# Usage: adb_exec "description" "adb shell command"
-scripts/lib/common.sh:179:# `adb shell` cannot be trusted to propagate the far-side status: on older shell
-scripts/lib/common.sh:198:        direct) raw=$(adb shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
-scripts/lib/common.sh:199:        piped)  raw=$(adb shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
-scripts/lib/common.sh:227:#   exec-out, not shell -- `adb shell` runs the far side on a pty on some
-scripts/lib/common.sh:244:        direct) adb exec-out "su -c '$cmd 2>/dev/null'" ;;
-scripts/lib/common.sh:245:        piped)  adb exec-out "echo '$cmd 2>/dev/null' | su" ;;
-scripts/lib/common.sh:310:    out=$(adb shell "ls -l $path" 2>/dev/null | tr -d '\r' | awk 'NR==1 {print $5}')
-scripts/lib/common.sh:333:    if adb shell am start -n "$activity" 2>/dev/null | grep -q "Error"; then
-scripts/lib/common.sh:348:    adb shell am start -a "$action" 2>/dev/null
+scripts/lib/common.sh:141:        [[ "$(adb get-state 2>/dev/null | tr -d '\r\n')" == "device" ]] || continue
+scripts/lib/common.sh:142:        [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')" == "1" ]] || continue
+scripts/lib/common.sh:162:# Usage: adb_exec "description" "adb shell command"
+scripts/lib/common.sh:181:# `adb shell` cannot be trusted to propagate the far-side status: on older shell
+scripts/lib/common.sh:200:        direct) raw=$(adb shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/common.sh:201:        piped)  raw=$(adb shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/common.sh:229:#   exec-out, not shell -- `adb shell` runs the far side on a pty on some
+scripts/lib/common.sh:246:        direct) adb exec-out "su -c '$cmd 2>/dev/null'" ;;
+scripts/lib/common.sh:247:        piped)  adb exec-out "echo '$cmd 2>/dev/null' | su" ;;
+scripts/lib/common.sh:312:    out=$(adb shell "ls -l $path" 2>/dev/null | tr -d '\r' | awk 'NR==1 {print $5}')
+scripts/lib/common.sh:335:    if adb shell am start -n "$activity" 2>/dev/null | grep -q "Error"; then
+scripts/lib/common.sh:350:    adb shell am start -a "$action" 2>/dev/null
 scripts/lib/common.sh:60:    if ! command -v adb &>/dev/null; then
 scripts/lib/common.sh:69:    if ! adb devices 2>/dev/null | grep -q "device$"; then
 scripts/lib/common.sh:86:    result=$(adb shell "su -c 'whoami'" 2>/dev/null | tr -d '\r\n')
@@ -125,19 +125,21 @@ scripts/lib/root.sh:493:    verify_root_after_su_touch    # exits outright if th
 scripts/lib/root.sh:522:    verify_root_after_su_touch    # exits outright if this cost us adb root
 scripts/lib/transport/select.sh:32:                PT_ADB_BIN=$(command -v adb 2>/dev/null) || {
 scripts/lib/transport/select.sh:33:                    printf 'transport: adb not on PATH\n' >&2
+scripts/lib/unlock.sh:1009:# The commands that fix it from a serial console, printed when adb is gone.
+scripts/lib/unlock.sh:1044:    if ! adb devices 2>/dev/null | grep -q "device$"; then
 scripts/lib/unlock.sh:14:#   value back off the device. `adb shell ... || true` is how you end up telling
-scripts/lib/unlock.sh:249:    if ! adb push "$tmp" "$WTPROV_STAGED_SHA" >/dev/null 2>&1 \
-scripts/lib/unlock.sh:291:            # Outer single quotes: adb shell joins its arguments, so host-side
-scripts/lib/unlock.sh:293:            print_error "  adb shell 'su 0 sh -c \"$aside\"'"
-scripts/lib/unlock.sh:336:    if ! adb push "$tmp/new.xml" "$WTPROV_STAGED" >/dev/null 2>&1 \
-scripts/lib/unlock.sh:544:# On this projector it does not work. Every install path -- adb install,
-scripts/lib/unlock.sh:565:    out=$(adb install -r "$apk" 2>&1)
-scripts/lib/unlock.sh:571:    # Staged through /data/local/tmp on purpose. `adb push` runs as the shell
-scripts/lib/unlock.sh:574:    # `adb root` is unavailable, which is every Magisk-rooted one.
-scripts/lib/unlock.sh:578:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
-scripts/lib/unlock.sh:881:# The commands that fix it from a serial console, printed when adb is gone.
-scripts/lib/unlock.sh:916:    if ! adb devices 2>/dev/null | grep -q "device$"; then
-MATCHED_LINES 134
+scripts/lib/unlock.sh:277:    if ! adb push "$tmp" "$WTPROV_STAGED_SHA" >/dev/null 2>&1 \
+scripts/lib/unlock.sh:325:            # Outer single quotes: adb shell joins its arguments, so host-side
+scripts/lib/unlock.sh:327:            print_error "  adb shell 'su 0 sh -c \"$aside\"'"
+scripts/lib/unlock.sh:380:    if ! adb push "$tmp/new.xml" "$WTPROV_STAGED" >/dev/null 2>&1 \
+scripts/lib/unlock.sh:599:# On this projector it does not work. Every install path -- adb install,
+scripts/lib/unlock.sh:620:    out=$(adb install -r "$apk" 2>&1)
+scripts/lib/unlock.sh:626:    # Staged through /data/local/tmp on purpose. `adb push` runs as the shell
+scripts/lib/unlock.sh:629:    # `adb root` is unavailable, which is every Magisk-rooted one.
+scripts/lib/unlock.sh:635:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
+scripts/lib/unlock.sh:686:        print_error "  adb shell 'su 0 sh -c \"mount -o remount,rw $mp && $undo; mount -o remount,ro $mp\"'"
+scripts/lib/unlock.sh:917:    adb push "$tmp" "$sidecar" >/dev/null 2>&1
+MATCHED_LINES 136
 
 COMMAND rg -n '/adb|\$\{?ADB|command -v adb|which adb' scripts/
 scripts/PROJECTOR.sh:269:    if ! command -v adb >/dev/null; then
@@ -151,7 +153,7 @@ MATCHED_LINES 6
 COMMAND rg -n '\beval\b' scripts/
 scripts/TOOLS.sh:140:# every Mac user. eval-based indirection is uglier and works everywhere.
 scripts/TOOLS.sh:142:section_items() { eval "printf '%s\n' \"\${$1[@]}\""; }
-scripts/lib/common.sh:168:    if eval "$cmd" 2>/dev/null; then
+scripts/lib/common.sh:170:    if eval "$cmd" 2>/dev/null; then
 MATCHED_LINES 3
 
 COMMAND rg -n '\$\{?PT_ADB_BIN|(^|[[:space:];|&()])/[[:alnum:]_.~+/@:-]*/adb([[:space:];|&()]|$)' scripts/
