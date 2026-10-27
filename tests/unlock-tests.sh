@@ -292,30 +292,6 @@ out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --status)
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
-head_ "the launcher the user picked from the chooser survives a restart"
-# The one path that does work on this firmware. The system's own chooser records
-# a preference against the real intent -- including SETUP_WIZARD -- so it wins
-# where set-home-activity cannot. home_pref_strong is how the emulator models a
-# preference written that way; there is no CLI that produces one.
-
-new_sandbox
-ICEPT=com.newlink.wtprovision/.MainActivity
-unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes >/dev/null 2>&1
-
-# the user presses HOME on the device and picks Projectivy
-echo "$PROJECTIVY/com.spocky.projengmenu.ui.home.MainActivity" > "$sb/state/home_activity"
-touch "$sb/state/home_pref_strong"
-
-reboot_dev "$sb"
-home=$(home_now "$sb")
-[[ "$home" == "$PROJECTIVY"* ]] \
-    && ok "the chooser's preference survives a restart" || bad "reverted to '$home'"
-
-dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
-    && bad "the stock launcher ended up disabled" || ok "with nothing disabled to achieve it"
-sandbox_finish "$sb"
-
-# ---------------------------------------------------------------------------
 head_ "a device that refuses installs still gets the launcher"
 # The real projector rejects every pm install with
 # INSTALL_FAILED_INVALID_INSTALL_LOCATION -- nothing has ever been installed
@@ -409,6 +385,16 @@ new_sandbox
 out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR=com.newlink.wtprovision/.MainActivity --repair)
 [[ "$out" == *"Nothing to repair"* ]] && ok "reports a healthy device" || bad "did not report a healthy device"
 [[ "$out" == *"RC=0"* ]] && ok "and succeeds" || bad "failed on a healthy device"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "the emulated device carries wtprovision's launcher cache"
+new_sandbox
+f="$sb/state/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml"
+[[ -f "$f" ]] && ok "cache file seeded" || bad "no cache file in the seed"
+grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" && ok "stock pkg" || bad "stock pkg missing"
+out=$(dev "$sb" 'pidof com.newlink.wtprovision'); [[ "$out" =~ ^[0-9]+$ ]] && ok "pidof answers" || bad "pidof: '$out'"
+PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" adb shell "su -c 'sh -c \"cat /data/local/tmp/x.xml > $(echo /data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml)\"'" >/dev/null 2>&1
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

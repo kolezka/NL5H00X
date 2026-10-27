@@ -23,6 +23,10 @@
 #   FAKE_ADB_RESTORE_RC   enable intercept-only adb restore with this status
 #   FAKE_ADB_INTERCEPT_BLOCK_DD
 #                         1 = record block-target dd without writing its target
+#   FAKE_ADB_HOME_INTERCEPTOR
+#                         component that owns HOME; overrides $STATE/home_interceptor
+#   FAKE_ADB_WTPROV_IGNORES_CACHE
+#                         1 = wtprovision ignores its launcher cache and starts stock
 #
 # The contract-only knobs above are disabled by default. Unhandled commands keep
 # their legacy failures unless a scoped characterization explicitly enables one.
@@ -172,6 +176,30 @@ fs_op() {
 # Files under $STATE; absent files mean "this profile does not model it", so
 # the backup-only seeds keep working without carrying unlock state around.
 sget() { [[ -f "$STATE/$1" ]] && cat "$STATE/$1" || echo "$2"; }
+
+# The component that intercepts the firmware's home intent, or empty. The env
+# knob wins so a test can force one; otherwise the seeded state file decides.
+home_interceptor_comp() {
+    if [[ -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" ]]; then
+        printf '%s\n' "$FAKE_ADB_HOME_INTERCEPTOR"
+    elif [[ -f "$STATE/home_interceptor" ]]; then
+        tr -d '\r\n' < "$STATE/home_interceptor"; echo
+    fi
+}
+
+WTPROV_CACHE="/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml"
+
+# wtprovision starts whatever its own cache names, as it does on the device.
+# FAKE_ADB_WTPROV_IGNORES_CACHE=1 models a firmware that ignores the cache.
+wtprov_apply_cache() {
+    [[ "${FAKE_ADB_WTPROV_IGNORES_CACHE:-0}" == "1" ]] && return 0
+    local f="${STATE}${WTPROV_CACHE}" pkg act
+    [[ -f "$f" ]] || return 0
+    pkg=$(sed -n 's|.*<string name="home_pkg">\(.*\)</string>.*|\1|p' "$f" | head -1)
+    act=$(sed -n 's|.*<string name="home_activity">\(.*\)</string>.*|\1|p' "$f" | head -1)
+    [[ -n "$pkg" && -n "$act" ]] || return 0
+    echo "$pkg/$act" > "$STATE/home_activity"
+}
 setting_get() {
     [[ -f "$STATE/settings" ]] || { echo null; return; }
     local v
@@ -272,6 +300,8 @@ run_remote() {
             ;;
 
         # --- properties -------------------------------------------------
+        "getprop sys.boot_completed")
+            echo 1; return 0 ;;
         "getprop "*)
             local k="${cmd#getprop }"
             [[ -f "$STATE/props" ]] && awk -F= -v k="$k" '$1==k{print $2}' "$STATE/props"
@@ -423,23 +453,68 @@ run_remote() {
                 return 0
             fi
             proc_start "$p"; return 0 ;;
+        "pidof com.newlink.wtprovision")
+            # No pid file means wtprovision is not running.
+            [[ -s "$STATE/wtprov_pid" ]] || return 1
+            tr -d '\r\n' < "$STATE/wtprov_pid"; echo
+            return 0 ;;
         "pidof "*)
             local p="${cmd##* }"
             proc_running "$p" || return 1
             echo 4242; return 0 ;;
+        "kill -9 "*)
+            local kp="${cmd#kill -9 }" cur=""
+            [[ -f "$STATE/wtprov_pid" ]] && cur=$(tr -d '\r\n' < "$STATE/wtprov_pid")
+            if [[ -n "$cur" && "$kp" == "$cur" ]]; then
+                # The system restarts wtprovision under a new pid, and it
+                # re-reads its cache on the way up.
+                echo $(( cur + 1 )) > "$STATE/wtprov_pid"
+                wtprov_apply_cache
+                return 0
+            fi
+            echo "kill: $kp: No such process" >&2
+            return 1 ;;
+        "input keyevent HOME")
+            [[ -n "$(home_interceptor_comp)" ]] && wtprov_apply_cache
+            return 0 ;;
+        "dumpsys window")
+            local fc; fc=$(sget home_activity "com.newlink.hisilauncher/.WizardAciticity")
+            echo "  mCurrentFocus=Window{1a2b3c u0 $fc}"
+            return 0 ;;
+        # Write through a redirect, the way a root-owned file has to be
+        # replaced here: keeps inode, mode and SELinux context.
+        "sh -c \"cat "*" > "*"\""|"sh -c 'cat "*" > "*"'")
+            local body="${cmd#sh -c }" src dst
+            body="${body:1:${#body}-2}"
+            body="${body#cat }"
+            src="${body%% > *}"; dst="${body#* > }"
+            if [[ "$AS_ROOT" != "1" ]]; then
+                echo "sh: can't create $dst: Permission denied" >&2; return 1
+            fi
+            mkdir -p "$(dirname "${STATE}${dst}")"
+            # The shell truncates the target before cat runs, so a missing
+            # source still empties it, as on the device.
+            : > "${STATE}${dst}"
+            if [[ ! -f "${STATE}${src}" ]]; then
+                echo "cat: $src: No such file or directory" >&2; return 1
+            fi
+            cat "${STATE}${src}" > "${STATE}${dst}"
+            return 0 ;;
 
         # --- home activity ----------------------------------------------
         "cmd package query-activities"*SETUP_WIZARD*)
             # The firmware's home intent carries CATEGORY_SETUP_WIZARD, so
             # whatever declares it owns HOME regardless of the preferred
-            # launcher. Off by default; a profile opts in to model the lock.
+            # launcher. The seed sets wtprovision as the interceptor; a test
+            # clears $STATE/home_interceptor to model a firmware without one.
             #
             # A disabled component registers nothing, so an interceptor that has
             # been disabled answers this query with silence -- which is the whole
             # brick: the intent ends up with no candidate at all.
-            if [[ -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" ]] \
-               && ! grep -qx "$FAKE_ADB_HOME_INTERCEPTOR" "$STATE/components_disabled" 2>/dev/null; then
-                echo "    $FAKE_ADB_HOME_INTERCEPTOR"
+            local icept; icept=$(home_interceptor_comp)
+            if [[ -n "$icept" ]] \
+               && ! grep -qx "$icept" "$STATE/components_disabled" 2>/dev/null; then
+                echo "    $icept"
             fi
             return 0 ;;
         "cmd package query-activities"*)
@@ -465,11 +540,6 @@ run_remote() {
             # and it does not refresh the recorded candidate set. On hardware the
             # stale record was byte-identical before and after the call. So the
             # write "succeeds" and still loses the vendor intent at boot.
-            #
-            # A preference that does win is written by the system's own chooser
-            # (press HOME, pick a launcher). Tests simulate that by touching
-            # home_pref_strong; there is no CLI on API 28 that produces one.
-            rm -f "$STATE/home_pref_strong" 2>/dev/null || true
             echo Success; return 0 ;;
         # API 28 HAS NO get-home-activity. Measured on the device 2026-07-29:
         # it answers exactly this, and set-home-activity works fine. The
@@ -525,6 +595,10 @@ run_remote() {
                 echo "uid=${uid}(root) gid=${uid}(root)"
                 return 0
             fi
+            echo "su: setgid failed: Operation not permitted" >&2
+            return 1 ;;
+        "su 0 sh -c "*)
+            # Reached only when unwrap_su found that su cannot elevate.
             echo "su: setgid failed: Operation not permitted" >&2
             return 1 ;;
         "/system/xbin/su_new "*" id")
@@ -829,6 +903,13 @@ unwrap_su() {
         return 0
     fi
 
+    # su 0 sh -c "CMD": the form used to write a root-owned file in place.
+    # Only unwrapped when su can elevate, like `su 0 id`.
+    if [[ "$shell_cmd" == "su 0 sh -c "* ]] && su_can_elevate "/system/xbin/su"; then
+        printf '%s' "${shell_cmd#su 0 }"
+        return 0
+    fi
+
     # echo 'CMD' | su   (also: { echo 'CMD'; } | su)
     if [[ "$shell_cmd" == *"| su"* && "$shell_cmd" == "echo '"* ]]; then
         [[ "$SU_MODE" == "piped" ]] || return 1
@@ -967,12 +1048,15 @@ case "$subcmd" in
         # interceptor -- stale, so it never applied. Not because anything
         # re-claimed anything.
         #
-        # So: a preference survives a reboot. It only fails to take effect when
-        # an interceptor owns the vendor intent and the preference does not
-        # cover it (see set-home-activity above).
-        if [[ -f "$STATE/home_activity" && -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" \
-              && ! -f "$STATE/home_pref_strong" ]]; then
-            echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
+        # So: a preference survives a reboot only when no interceptor owns the
+        # vendor intent. With one, the screen is whatever wtprovision's own
+        # cache names, and a firmware that ignores the cache starts stock.
+        if [[ -f "$STATE/home_activity" && -n "$(home_interceptor_comp)" ]]; then
+            if [[ "${FAKE_ADB_WTPROV_IGNORES_CACHE:-0}" == "1" ]]; then
+                echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
+            else
+                wtprov_apply_cache
+            fi
         fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
         # Nothing survives a restart except what the system brings back up: the
