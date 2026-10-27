@@ -179,8 +179,7 @@ off the device, not by trusting the command's exit code:
 |------|--------|
 | `dev_options` | Developer options on, install from unknown sources allowed |
 | `launcher_present` | Projectivy installed (skipped if you already have it) |
-| `launcher_default` | Projectivy set as home via the system home preference; nothing is disabled |
-| `cleanup_leftovers` | Removes empty/duplicated folders from earlier attempts |
+| `launcher_default` | Projectivy written into wtprovision's launcher cache and the process restarted; nothing is disabled |
 
 Safety behaviour worth knowing:
 
@@ -188,14 +187,12 @@ Safety behaviour worth knowing:
 - Refuses to change anything without a verified backup (`--status` is exempt).
 - Re-running it is a no-op; it reports what was already done.
 - **Nothing is ever disabled.** The stock launcher and `wtprovision` are both
-  left enabled, so the worst a stale preference can do is fall back to the stock
-  home — never no home at all.
-- It refuses to write a launcher preference while an interceptor still owns the
-  home intent, rather than leaving you with a preference the firmware ignores.
-- `--revert` clears the preference and puts the stock home back, and that too is
-  verified by reading the resolved home activity off the device.
-
-Restart the projector afterwards for the new home screen to appear.
+  left enabled, so the worst a wrong cache entry can do is fall back to the stock
+  home after wtprovision's retry, never no home at all.
+- It writes nothing without a verified backup of the cache and its hash, and
+  refuses when a file it does not trust sits at the backup path.
+- `--revert` restores the backed-up cache (or writes the stock pair) and restarts
+  wtprovision, verified from window focus.
 
 ### Why Projectivy
 
