@@ -277,8 +277,8 @@ wtprov_cache_backup() {
     elif [[ -n "$bk" ]]; then
         problem=$(wtprov_backup_problem)
         if [[ -n "$problem" ]]; then
-            # Keep a later set-aside from replacing this copy.
-            stamp=$(date +%Y%m%d_%H%M%S)
+            # The pid keeps two runs apart even within one second.
+            stamp="$(date +%Y%m%d_%H%M%S).$$"
             aside="mv $WTPROV_BACKUP $WTPROV_BACKUP.old.$stamp"
             if adb_root_exec "cat $WTPROV_BACKUP_SHA" >/dev/null 2>&1; then
                 aside="$aside; mv $WTPROV_BACKUP_SHA $WTPROV_BACKUP_SHA.old.$stamp"

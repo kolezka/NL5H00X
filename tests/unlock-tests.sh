@@ -481,7 +481,18 @@ bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
 seed=$(cat "$f")
 echo '<map>foreign</map>' > "$bk"
 out=$(unlock "$sb" --apply-all --yes)
-[[ "$out" =~ wtprov_prefs\.before\.xml\.old\.[0-9]{8}_[0-9]{6} ]] && ok "set-aside name carries a timestamp" || bad "set-aside name is a fixed .old"
+[[ "$out" =~ wtprov_prefs\.before\.xml\.old\.[0-9]{8}_[0-9]{6}\.[0-9]+ ]] && ok "set-aside name carries a timestamp and pid" || bad "set-aside name lacks the timestamp or pid"
+# Freeze the clock so both runs land in the same second; the names must still differ.
+frozen="$sb/frozen-date"; mkdir -p "$frozen"
+printf '#!/bin/bash\n[[ "$1" == +%%Y%%m%%d_%%H%%M%%S ]] && { echo 20261027_120000; exit 0; }\nexec /bin/date "$@"\n' > "$frozen/date"
+chmod +x "$frozen/date"
+aside_name() { echo "$1" | grep -o 'wtprov_prefs\.before\.xml\.old\.[0-9_.]*' | head -1; }
+name1=$(aside_name "$(PATH="$frozen:$PATH" unlock "$sb" --apply-all --yes)")
+name2=$(aside_name "$(PATH="$frozen:$PATH" unlock "$sb" --apply-all --yes)")
+[[ "$name1" == *.old.20261027_120000* && "$name2" == *.old.20261027_120000* ]] \
+    && ok "control: both runs used the frozen clock" || bad "control: frozen clock not used: '$name1' '$name2'"
+[[ -n "$name1" && "$name1" != "$name2" ]] && ok "two runs in one second print different set-aside names" \
+    || bad "two runs printed the same set-aside name: '$name1'"
 [[ "$out" != *"RC=0"* ]] && ok "the unlock refuses" || bad "unlock went ahead with a foreign file at the backup path"
 [[ "$out" == *"/data/local/tmp/wtprov_prefs.before.xml"* && "$out" == *"mv "* ]] \
     && ok "names the file and the mv that sets it aside" || bad "no path or mv command: $(echo "$out" | grep -i backup | head -3)"
