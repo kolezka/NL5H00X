@@ -158,24 +158,6 @@ wait_for_device_boot() {
 # ADB HELPER FUNCTIONS
 # ============================================================================
 
-# Execute a command via ADB with error handling
-# Usage: adb_exec "description" "adb shell command"
-adb_exec() {
-    local desc="$1"
-    local cmd="$2"
-    local show_cmd="${3:-false}"
-
-    [[ "$show_cmd" == "true" ]] && echo -e "${YELLOW}> $cmd${NC}"
-
-    if eval "$cmd" 2>/dev/null; then
-        print_success "$desc"
-        return 0
-    else
-        print_error "$desc failed"
-        return 1
-    fi
-}
-
 # Execute a command as root via ADB, returning its TRUE remote exit status.
 #
 # `adb shell` cannot be trusted to propagate the far-side status: on older shell
@@ -325,32 +307,6 @@ local_md5() {
     md5 -q "$1" 2>/dev/null || md5sum "$1" 2>/dev/null | awk '{print $1}'
 }
 
-# Start an Android activity
-# Usage: adb_start_activity "com.package/.Activity" "description"
-adb_start_activity() {
-    local activity="$1"
-    local desc="${2:-$activity}"
-
-    print_status "Opening $desc..."
-    if adb shell am start -n "$activity" 2>/dev/null | grep -q "Error"; then
-        print_warning "$desc may not be available"
-        return 1
-    fi
-    print_success "$desc opened"
-    return 0
-}
-
-# Start an Android intent action
-# Usage: adb_start_action "android.settings.WIFI_SETTINGS" "WiFi Settings"
-adb_start_action() {
-    local action="$1"
-    local desc="${2:-$action}"
-
-    print_status "Opening $desc..."
-    adb shell am start -a "$action" 2>/dev/null
-    print_success "$desc opened"
-}
-
 # ============================================================================
 # BACKUP HELPER FUNCTIONS
 # ============================================================================
@@ -414,17 +370,15 @@ find_incomplete_backup_dir() {
     [[ -n "$newest" ]] && echo "$newest"
 }
 
-# Check if a backup directory exists with a verified-complete backup
+# Prefer the newest verified backup; timestamped names sort in glob order.
 find_backup_dir() {
-    local backup_dir
+    local backup_dir newest=""
     for backup_dir in projector-backup-*; do
         [[ -d "$backup_dir" ]] || continue
-        if verify_backup_dir "$backup_dir"; then
-            echo "$backup_dir"
-            return 0
-        fi
+        if verify_backup_dir "$backup_dir"; then newest="$backup_dir"; fi
     done
-    return 1
+    [[ -n "$newest" ]] || return 1
+    echo "$newest"
 }
 
 # Require a verified backup before proceeding
@@ -489,18 +443,6 @@ pause() {
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-
-# Get script directory (handles symlinks)
-get_script_dir() {
-    local source="${BASH_SOURCE[0]}"
-    while [[ -L "$source" ]]; do
-        local dir
-        dir=$(cd -P "$(dirname "$source")" && pwd)
-        source=$(readlink "$source")
-        [[ $source != /* ]] && source="$dir/$source"
-    done
-    cd -P "$(dirname "$source")" && pwd
-}
 
 # Human readable file size, in decimal units.
 #

@@ -52,13 +52,13 @@ Earlier device tests recorded `INSTALL_FAILED_INVALID_INSTALL_LOCATION` across
 normal install attempts, including root. The dated matrix and system-app
 workaround are in [INSTALL_LOCKED.md](INSTALL_LOCKED.md).
 
-Follow-up VDEX/ODEX analysis identified a vendor whitelist gate. The live
-`zyzys.install.whitelist` property is empty and its configuration file is zero
-bytes, selecting a branch that returns `-19` before copying. See the
-[recovered code evidence](INSTALL_LOCKED.md#verified-vendor-whitelist-branch).
-No installation or policy change was attempted; bypassing this gate is not yet a
-verified complete fix. This branch does not require a SELinux denial or thrown
-volume-resolution exception.
+Follow-up VDEX/ODEX analysis identified a vendor whitelist gate. The empty
+`zyzys.install.whitelist` property and zero-byte configuration file selected a
+branch that returned `-19` before copying. On 2026-10-25, a controlled
+fail-succeed-fail install test on this unit verified that setting the property
+to `0` opens normal installs. The change was saved in `/system/build.prop` and
+read back after one reboot. See [the gate evidence and hardware test](INSTALL_LOCKED.md#hardware-test-2026-10-25).
+This branch does not require a SELinux denial or a volume-resolution exception.
 
 ## Platform signature and exposed administration
 
@@ -145,8 +145,8 @@ only verifies that the system worked during that observation.
 
 1. Preserve working ADB/UART root access and document the actual installed clients.
 2. Fix root-daemon behavior with offline regression tests before deployment.
-3. Plan a scoped validation of the identified whitelist gate and later install
-   stages before proposing a policy or framework change.
+3. Use [the verified vendor gate fix](INSTALL_LOCKED.md#the-fix-for-people-who-only-want-the-fix)
+   only after a checked backup; it changes install policy for every app.
 4. Review and test recovery tooling; retain the HOLD until the relevant checks pass.
 5. Consider a narrowly scoped system change only with a verified original and a
    usable restore channel. Keep projector power, display and provisioning services.

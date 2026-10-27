@@ -1,7 +1,7 @@
 #!/bin/bash
 # Known toolkit invocation paths resolve to the stand-in; an absent fake fails closed.
 # This is not an operating-system sandbox or a security boundary.
-# The bypass audit covers all of scripts/, including the transport adapter.
+# The bypass audit covers all of scripts/.
 set -uo pipefail
 LC_ALL=C
 export LC_ALL
@@ -28,24 +28,6 @@ if [[ "$PT_FAKE_ADB_CANONICAL" != /* || "${PT_FAKE_ADB_CANONICAL##*/}" != adb \
 fi
 fake_dir="$(cd "${PT_FAKE_ADB_CANONICAL%/*}" && pwd -P)" || exit 2
 PT_FAKE_ADB_CANONICAL="$fake_dir/adb"
-PT_TRANSPORT=${PT_TRANSPORT:-fake}
-if [[ "$PT_TRANSPORT" != fake ]]; then
-    echo 'test runner requires PT_TRANSPORT=fake' >&2
-    exit 2
-fi
-if [[ "${PT_ADB_BIN+x}" == x ]]; then
-    if [[ "$PT_ADB_BIN" != /* || "${PT_ADB_BIN##*/}" != adb || ! -f "$PT_ADB_BIN" || ! -x "$PT_ADB_BIN" ]]; then
-        fail_fake_path adapter
-    fi
-    adb_dir="$(cd "${PT_ADB_BIN%/*}" && pwd -P)" || exit 2
-    PT_ADB_BIN="$adb_dir/adb"
-    [[ "$PT_ADB_BIN" == "$PT_FAKE_ADB_CANONICAL" ]] || {
-        echo 'adapter fake must match the canonical fake' >&2
-        exit 2
-    }
-else
-    PT_ADB_BIN="$PT_FAKE_ADB_CANONICAL"
-fi
 if [[ "${TOOLKIT_SCRIPTS:-$WT/scripts}" != "$WT/scripts" ]]; then
     echo 'TOOLKIT_SCRIPTS must match this runner worktree and bypass baseline' >&2
     exit 2
@@ -56,7 +38,9 @@ PT_TEST_PYTHON=${PT_TEST_PYTHON:-/usr/bin/python3}
 [[ "$PT_TEST_PYTHON" == /* && -x "$PT_TEST_PYTHON" ]] || { echo 'Python 3 is required for bounded supervision' >&2; exit 2; }
 PT_TEST_SUPERVISOR="$LOCAL_DIR/supervise.py"
 [[ -f "$PT_TEST_SUPERVISOR" ]] || { echo 'bounded supervisor is missing' >&2; exit 2; }
-PT_TEST_TIMEOUT_SECS=${PT_TEST_TIMEOUT_SECS:-120}
+# The cap catches hangs. unlock-tests runs about 135 s of real work under
+# /bin/bash 3.2, so 120 s failed a correct suite.
+PT_TEST_TIMEOUT_SECS=${PT_TEST_TIMEOUT_SECS:-300}
 case "$PT_TEST_TIMEOUT_SECS" in
     ''|*[!0-9]*|0) echo 'PT_TEST_TIMEOUT_SECS must be a positive integer' >&2; exit 2 ;;
 esac
@@ -84,7 +68,7 @@ BASH_SHIM
 chmod +x "$PT_CONTROL_DIR/bash-shim/bash"
 : > "$PT_SENTINEL_LOG"
 PATH="$fake_dir:$PT_CONTROL_DIR/sentinel:$PT_CONTROL_DIR/bash-shim:/usr/bin:/bin:/usr/sbin:/sbin"
-export PATH PT_TEST_BASH PT_TEST_RG PT_TEST_PYTHON PT_FAKE_ADB_CANONICAL PT_ADB_BIN PT_TRANSPORT
+export PATH PT_TEST_BASH PT_TEST_RG PT_TEST_PYTHON PT_FAKE_ADB_CANONICAL
 export PT_CONTROL_DIR PT_SENTINEL_LOG FAKE_ADB_STATE
 hash -r
 source "$LOCAL_DIR/lifecycle.sh"
@@ -162,13 +146,13 @@ PT_TEST_SCOPE=${PT_TEST_SCOPE:-all}
 case "$PT_TEST_SCOPE" in
     all)
         cat "$contract_list" >> "$suite_plan"
-        printf '%s\n' run-tests.sh unlock-tests.sh ui-tests.sh >> "$suite_plan"
+        printf '%s\n' run-tests.sh unlock-tests.sh ui-tests.sh root-tests.sh restore-tests.sh installgate-tests.sh sud-tests.sh >> "$suite_plan"
         ;;
     contracts)
         cat "$contract_list" >> "$suite_plan"
         ;;
     local-legacy)
-        printf '%s\n' run-tests.sh unlock-tests.sh ui-tests.sh >> "$suite_plan"
+        printf '%s\n' run-tests.sh unlock-tests.sh ui-tests.sh root-tests.sh restore-tests.sh installgate-tests.sh sud-tests.sh >> "$suite_plan"
         ;;
     local)
         ;;
@@ -239,6 +223,12 @@ run_suite() {
     pid=$CHILD_PID
     child_wait_reap "$pid" || rc=$?
     cat "$log"
+    if [[ "$suite" == sud-tests.sh && "$rc" == 2 ]] \
+       && grep -Eq '^SKIPPED: no working docker or podman; sud tests did not run$|^could not build nl5h00x-sud-test:alpine3[.]20$' "$log"; then
+        printf 'SUMMARY %s skipped, no toolchain exit=%s interpreter=%s\n' \
+            "$suite" "$rc" "$PT_TEST_BASH" | tee -a "$PT_CONTROL_DIR/summary.log"
+        return 0
+    fi
     summary=$(parse_summary "$suite" "$log")
     if [[ -n "$summary" ]]; then
         set -- $summary

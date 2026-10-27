@@ -11,6 +11,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/steps.sh"
 # system_rw / system_ro / system_mountpoint / system_is_rw only -- not
 # otherwise related to the launcher this file was written for.
 source "$SCRIPT_DIR/lib/unlock.sh"
@@ -25,53 +26,17 @@ MODE=menu
 WITH_SU=0
 ALLOW_PKG=""
 DENY_PKG=""
-
-# ---------------------------------------------------------------------------
-# preconditions
-# ---------------------------------------------------------------------------
-check_supported_device() {
-    local model device d
-    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
-
-    for d in "${SUPPORTED_DEVICES[@]}"; do
-        if [[ "$model" == "$d" || "$device" == "$d" ]]; then
-            print_success "Device: $model ($device)"
-            return 0
-        fi
-    done
-
-    print_error "Unsupported device: model='$model' device='$device'"
-    echo
-    echo "This tool installs a root daemon and init service specific to this"
-    echo "projector's /system layout. Running it elsewhere is guesswork on"
-    echo "hardware it was never written for."
-    echo
-    echo "Supported: ${SUPPORTED_DEVICES[*]}"
-    exit 1
-}
+RESUME_FILE=""
+STEP_NAME_WIDTH=16
+UNSUPPORTED_DEVICE_TEXT="This tool installs a root daemon and init service specific to this
+projector's /system layout. Running it elsewhere is guesswork on
+hardware it was never written for."
 
 # ---------------------------------------------------------------------------
 # state reporting
 # ---------------------------------------------------------------------------
-step_line() {
-    local step="$1" state label desc
-    state=$("${step}_state")
-    desc=$("${step}_describe")
-    case "$state" in
-        applied)     label="${GREEN}[done]${NC}   " ;;
-        not-applied) label="${YELLOW}[todo]${NC}   " ;;
-        blocked:*)   label="${RED}[blocked]${NC}"; desc="$desc  (${state#blocked:})" ;;
-        *)           label="${RED}[?]${NC}     " ;;
-    esac
-    printf "  %b %-16s %s\n" "$label" "$step" "$desc"
-}
-
 show_status() {
-    print_section "CURRENT STATE"
-    local step
-    for step in "${ROOT_STEPS[@]}"; do step_line "$step"; done
-    echo
+    steps_show_status ${ROOT_STEPS[@]+"${ROOT_STEPS[@]}"}
     if sud_running; then
         printf "  sud daemon: running\n"
     else
@@ -87,96 +52,23 @@ show_status() {
     echo
 }
 
-all_applied() {
-    local step
-    for step in $(apply_steps); do
-        [[ "$("${step}_state")" == "applied" ]] || return 1
-    done
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# running steps
-# ---------------------------------------------------------------------------
-run_step() {
-    local step="$1" state
-    state=$("${step}_state")
-
-    case "$state" in
-        applied)
-            print_success "$step: already done, nothing to change"
-            return 0 ;;
-        blocked:*)
-            print_error "$step: cannot run - ${state#blocked:}"
-            return 1 ;;
-    esac
-
-    print_step "$step: $("${step}_describe")"
-    if ! "${step}_apply"; then
-        print_error "$step FAILED - stopping, nothing further was changed"
-        return 1
-    fi
-
-    # Trust the read-back, not the return code.
-    state=$("${step}_state")
-    if [[ "$state" != "applied" ]]; then
-        print_error "$step reported success but the device still says '$state'"
-        return 1
-    fi
-    print_success "$step: done and verified"
-    return 0
-}
-
+all_applied() { steps_all_applied $(apply_steps); }
 apply_all() {
-    print_section "APPLYING ROOT"
-    local step
-    for step in $(apply_steps); do
-        run_step "$step" || return 1
-    done
-    echo
-    print_success "All steps applied and verified"
+    steps_apply_all "APPLYING ROOT" $(apply_steps) || return 1
     echo
     print_warning "sud only starts on the next boot. Reboot to bring it up:  adb reboot"
     print_warning "The boot result must be watched on the screen; once booted, ROOT.sh"
     print_warning "--status confirms the daemon via pidof sud over adb."
     return 0
 }
-
 revert_all() {
-    print_section "REVERTING"
-    print_warning "This removes the root daemon, its init service and the allow-list"
-    echo
-    # Reverse order, same reasoning as UNLOCK.sh: undo the thing that depends
-    # on another before removing what it depends on. Always covers su_hybrid
-    # regardless of --with-su -- reverting a step that was never applied is a
-    # no-op, so there is nothing to gate here.
-    local i step failed=0
-    for (( i=${#ROOT_STEPS[@]}-1; i>=0; i-- )); do
-        step="${ROOT_STEPS[$i]}"
-        print_step "reverting $step"
-        "${step}_revert" || { print_error "$step: revert failed"; failed=1; }
-    done
-    echo
-    if [[ "$failed" -eq 0 ]]; then
-        print_success "Reverted"
-    else
-        print_error "Revert finished with errors - check the state below"
-    fi
-    show_status
-    return "$failed"
+    steps_revert_all "This removes the root daemon, its init service and the allow-list" \
+        ${ROOT_STEPS[@]+"${ROOT_STEPS[@]}"}
 }
 
 # ---------------------------------------------------------------------------
 # repair: sud installed but not coming up, or adb unreachable
 # ---------------------------------------------------------------------------
-repair_describe() {
-    cat <<EOF
-Diagnose a projector whose root daemon does not come up after a reboot --
-usually SUD_SECLABEL naming a domain this device's SELinux policy does not
-define -- and print the manual equivalent when adb is not reachable.
-EOF
-}
-
 repair_manual_instructions() {
     cat <<EOF
 
@@ -265,56 +157,9 @@ repair_run() {
 # ---------------------------------------------------------------------------
 # menu
 # ---------------------------------------------------------------------------
-show_menu() {
-    echo
-    echo "  1) Apply all steps"
-    echo "  2) Run a single step"
-    echo "  3) Show current state"
-    echo "  4) Revert everything"
-    echo "  5) Restart the projector"
-    echo "  q) Quit"
-    echo
-}
-
-single_step_menu() {
-    local i n
-    echo
-    for i in "${!ROOT_STEPS[@]}"; do
-        printf "  %d)" "$((i + 1))"
-        step_line "${ROOT_STEPS[$i]}"
-    done
-    echo
-    read -r -p "Which step? (Enter to go back): " n
-    [[ -z "$n" ]] && return 0
-    if ! [[ "$n" =~ ^[0-9]+$ ]] || (( n < 1 || n > ${#ROOT_STEPS[@]} )); then
-        print_error "No such step"
-        return 0
-    fi
-    run_step "${ROOT_STEPS[$((n - 1))]}" || true
-}
-
-interactive() {
-    local choice
-    while true; do
-        show_menu
-        read -r -p "Choice: " choice || return 0
-        case "$choice" in
-            1)
-                if all_applied; then
-                    print_success "Everything is already applied"
-                elif [[ "$ASSUME_YES" == "1" ]] || confirm "Apply all steps now?"; then
-                    apply_all || true
-                fi
-                ;;
-            2) single_step_menu ;;
-            3) show_status ;;
-            4) confirm "Revert everything?" && { revert_all || true; } ;;
-            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
-            q|Q) echo "Bye"; return 0 ;;
-            *) print_error "Unknown choice: $choice" ;;
-        esac
-    done
-}
+show_menu() { steps_show_menu "Apply all steps" "Revert everything"; }
+single_step_menu() { steps_single_step_menu ${ROOT_STEPS[@]+"${ROOT_STEPS[@]}"}; }
+interactive() { steps_interactive "Revert everything?"; }
 
 usage() {
     cat <<EOF

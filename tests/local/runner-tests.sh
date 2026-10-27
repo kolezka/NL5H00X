@@ -81,14 +81,12 @@ EOF_SUITE
 make_fixture() {
     local name="$1" repo file
     repo="$control/$name"
-    mkdir -p "$repo/tests/local" "$repo/tests/fake-adb" "$repo/tests/contracts" "$repo/scripts/lib/transport"
+    mkdir -p "$repo/tests/local" "$repo/tests/fake-adb" "$repo/tests/contracts" "$repo/scripts/lib"
     for file in run.sh lifecycle.sh controls.sh bypass-audit.sh sentinel-adb capture-tree.sh; do
         cp "$SUBJECT_ROOT/tests/local/$file" "$repo/tests/local/$file" || return 1
     done
     copy_if_present "$SUBJECT_ROOT/tests/local/supervise.py" "$repo/tests/local/supervise.py"
     cp "$SUBJECT_ROOT/tests/fake-adb/adb" "$repo/tests/fake-adb/adb" || return 1
-    cp "$ROOT/scripts/lib/transport/select.sh" "$repo/scripts/lib/transport/select.sh" || return 1
-    cp "$ROOT/scripts/lib/transport/adb.sh" "$repo/scripts/lib/transport/adb.sh" || return 1
     chmod +x "$repo/tests/local/run.sh" "$repo/tests/local/bypass-audit.sh" "$repo/tests/local/sentinel-adb" "$repo/tests/fake-adb/adb"
     [[ ! -e "$repo/tests/local/supervise.py" ]] || chmod +x "$repo/tests/local/supervise.py"
     make_suite "$repo/tests/local/lifecycle-tests.sh" 'lifecycle: passed: 1   failed: 0' 0 \
@@ -96,6 +94,10 @@ make_fixture() {
     make_suite "$repo/tests/run-tests.sh" '  passed: 1   failed: 0' 0
     make_suite "$repo/tests/unlock-tests.sh" '  passed: 1   failed: 0' 0
     make_suite "$repo/tests/ui-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/root-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/restore-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/installgate-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/sud-tests.sh" '  passed: 1   failed: 0' 0
     make_suite "$repo/tests/contracts/a-colon.sh" 'a-colon: passed: 2   failed: 0' 0
     make_suite "$repo/tests/contracts/b-equals.sh" 'b-equals: passed=3 failed=0' 0
     make_suite "$repo/tests/contracts/c-words.sh" 'Summary: 4 passed, 0 failed' 0
@@ -137,11 +139,10 @@ repo=$(make_fixture no-timeout) || { bad 'create no-timeout fixture'; exit 1; }
 run_runner "$repo" "$repo/output" default "$TEST_BASH" /definitely/missing-timeout
 rc=$?
 if [[ "$rc" == 0 ]] \
-   && grep -q '^\[PASS\] adapter route decoded token ' "$repo/output" \
    && grep -q '^\[PASS\] legacy PATH route decoded token ' "$repo/output" \
-   && grep -q '^\[PASS\] adapter missing fake aborted with status 2 before suites and sentinel$' "$repo/output" \
+   && grep -q '^\[PASS\] legacy missing fake aborted with status 2 before suites and sentinel$' "$repo/output" \
    && grep -q '^\[PASS\] legacy non-executable fake aborted with status 2 before suites and sentinel$' "$repo/output"; then
-    ok 'runner has no GNU timeout dependency and validates both fake routes'
+    ok 'runner has no GNU timeout dependency and validates the fake PATH route'
 else
     bad "runner timeout or route controls rc=$rc"
 fi
@@ -150,11 +151,24 @@ repo=$(make_fixture discovery) || { bad 'create discovery fixture'; exit 1; }
 run_runner "$repo" "$repo/output"
 rc=$?
 actual=$(awk '/^SUITE / { print $2 }' "$repo/output" | paste -sd ' ' -)
-expected='local/lifecycle-tests.sh contracts/a-colon.sh contracts/b-equals.sh contracts/c-words.sh contracts/characterize-d-summary-exit.sh run-tests.sh unlock-tests.sh ui-tests.sh'
+expected='local/lifecycle-tests.sh contracts/a-colon.sh contracts/b-equals.sh contracts/c-words.sh contracts/characterize-d-summary-exit.sh run-tests.sh unlock-tests.sh ui-tests.sh root-tests.sh restore-tests.sh installgate-tests.sh sud-tests.sh'
 if [[ "$rc" == 0 && "$actual" == "$expected" ]]; then
-    ok 'default discovery runs contract shell files in lexical order plus fixed suites'
+    ok 'default discovery runs contracts and all fixed suites in order'
 else
     bad "default discovery rc=$rc order=<$actual>"
+fi
+
+repo=$(make_fixture no-sud-toolchain) || { bad 'create no-sud-toolchain fixture'; exit 1; }
+make_suite "$repo/tests/sud-tests.sh" 'SKIPPED: no working docker or podman; sud tests did not run' 2
+run_runner "$repo" "$repo/output" all
+rc=$?
+if [[ "$rc" == 0 ]] \
+   && grep -q '^SUMMARY sud-tests.sh skipped, no toolchain exit=2 ' "$repo/output" \
+   && grep -q '^RUN SUMMARY failed suites/checks: 0$' "$repo/output" \
+   && grep -q '^SUMMARY root-tests.sh passed: 1   failed: 0 exit=0 ' "$repo/output"; then
+    ok 'sud exit 2 is reported as skipped without failing other suites'
+else
+    bad "sud toolchain skip rc=$rc"
 fi
 
 repo=$(make_fixture failed-contract) || { bad 'create failing contract fixture'; exit 1; }

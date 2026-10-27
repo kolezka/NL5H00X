@@ -46,8 +46,8 @@ com.newlink.wtprovision/.MainActivity
 ```
 
 Because it is the only declarant of `SETUP_WIZARD`, it wins the home intent
-uniquely — no chooser, no ambiguity. It then starts `com.newlink.hisilauncher`
-by explicit component name.
+uniquely, with no chooser and no ambiguity. It then starts the component cached in
+`wtprovision`'s own preferences. On a stock unit that is the stock launcher.
 
 **The stock launcher never wins HOME on its own.** It is *started by*
 wtprovision. This is the single most important fact about this device's boot,
@@ -250,15 +250,13 @@ Board `NL-5H000-MAIN-V1`, SoC Hi3751v352F, Android 9 / API 28.
 
 ![NL-5H000-MAIN-V1 mainboard](../assets/hardware/board-overview.jpg)
 
-The `TX` and `RX` pads are top-right, immediately to the right of the 4-pin
-speaker connector. Close-up:
+On the `NL-5H000-MAIN-V1` board, the UART pads are two plated through-holes
+labelled `TX RX` at the top-right, immediately to the right of the 4-pin speaker
+connector (`VOR+ VOR- VOL- VOL+`). There is no adjacent ground pad. Take `GND`
+from the keypad connector (`LED-G LED-R KEY0-IN2 KEY0-IN1 GND`).
 
 ![UART TX/RX pads close-up](../assets/hardware/uart-pads-txrx-closeup.jpg)
 
-- **Pads:** two plated through-holes silkscreened `TX RX`, immediately right of
-  the 4-pin speaker connector (`VOR+ VOR- VOL- VOL+`).
-- **Ground:** no pad adjacent to `TX`/`RX`. Take `GND` from the keypad connector
-  (`LED-G  LED-R  KEY0-IN2  KEY0-IN1  GND`).
 - **Line:** 115200 8N1, no flow control, 3.3 V logic. Do not connect the
   adapter's VCC.
 - **Result:** `console:/ $`, an unprivileged shell (uid 2000). Verify the root

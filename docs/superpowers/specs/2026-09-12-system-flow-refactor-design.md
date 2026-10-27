@@ -1,5 +1,7 @@
 # System Flow Refactor Design Record
 
+Paused 2026-10-27: the staged modules were removed; see 2026-10-27-make-unlock-work-and-simplify-design.md.
+
 Date: 2026-09-12
 Workspace: `.claude/worktrees/docs+system-flow-refactor` (docs-only delta over the code pin)
 Companion plan: `docs/superpowers/plans/2026-09-12-system-flow-refactor.md`

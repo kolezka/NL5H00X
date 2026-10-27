@@ -1008,13 +1008,6 @@ component_disabled() {
         | grep -q "${comp#.}" 
 }
 
-repair_describe() {
-    cat <<EOF
-Diagnose a projector that stops at the vendor logo and never finishes booting,
-and re-enable the home dispatcher if that is what is wrong.
-EOF
-}
-
 # The commands that fix it from a serial console, printed when adb is gone.
 repair_manual_instructions() {
     cat <<EOF

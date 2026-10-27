@@ -357,10 +357,10 @@ git commit -m "feat: install-gate subcommand, explicit and separate from unlock"
 **Files:**
 - Modify: `scripts/lib/common.sh` (delete `adb_exec` 126-150, `adb_start_activity` 293-307, `adb_start_action` 308-323, `get_script_dir` 457-475), `scripts/lib/unlock.sh` (delete `repair_describe` 590-597), `scripts/ROOT.sh` (delete `repair_describe` 172-179)
 - Delete: `scripts/lib/ui/`, `scripts/lib/progress/`, `scripts/lib/transport/`, `tests/contracts/stream-discipline.sh`, `tests/contracts/status-protocol.sh`, `tests/contracts/transport.sh`, `tests/local/supervisor-python-tests.py`, `tests/local/heredoc-probe.sh`, `tests/local/direct-suite-probe.sh`, `prompt.md`, `.ai/lessons.md`, `firmware/wiring.html`
-- Modify: `tests/local/controls.sh:77-90` (remove the adapter-route branch), `tests/local/runner-tests.sh:85` (file list no longer needs changes unless it names a deleted file), `apks/PROVENANCE.md:115-` (delete the Netflix section), `docs/superpowers/specs/2026-09-12-system-flow-refactor-design.md` and `plans/2026-09-12-system-flow-refactor.md` (prepend "Paused 2026-10-27: the staged modules were removed; see 2026-10-27-make-unlock-work-and-simplify-design.md")
+- Modify: `tests/local/run.sh` (remove transport variables and adapter preflight), `tests/local/controls.sh` (keep only the fake PATH route), `tests/local/runner-tests.sh` (stop copying and asserting the adapter), `tests/local/bypass-audit-tests.sh` (move mutations under `scripts/lib/`), `tests/local/bypass-audit.sh` (update the scope header), `tests/local/bypass-baseline.txt` (record the reduced script set), `apks/PROVENANCE.md` (delete the Netflix section), `docs/superpowers/specs/2026-09-12-system-flow-refactor-design.md` and `plans/2026-09-12-system-flow-refactor.md` (prepend "Paused 2026-10-27: the staged modules were removed; see 2026-10-27-make-unlock-work-and-simplify-design.md")
 - Replace: `CHANGELOG.md` with a Keep-a-Changelog header and one `## [Unreleased]` block listing this project's user-visible changes (entry point, unlock, install-gate, README).
 
-- [ ] **Step 1: Before deleting, prove each function is unreferenced** (the survey did; redo it as the gate):
+- [ ] **Step 1: Before deleting, prove each function is unreferenced** (the controller verified this gate with a positive control):
 
 Run: `for f in adb_exec adb_start_activity adb_start_action get_script_dir repair_describe; do printf '%s ' $f; command rg --hidden --no-ignore -g '!graphify-out' -g '!.codegraph' -g '!.git' -n "\b$f\b" scripts tools tests | grep -v -E ':[0-9]+:\s*#' | wc -l; done`
 Expected: 1 1 1 1 2 (definitions only; `repair_describe` has two).
@@ -369,15 +369,14 @@ Expected: 1 1 1 1 2 (definitions only; `repair_describe` has two).
 
 - [ ] **Step 3: Run everything**
 
-Run: `bash tests/local/run.sh > /tmp/all.log 2>&1; echo rc=$?; tail -5 /tmp/all.log; bash tests/root-tests.sh | tail -1; bash tests/restore-tests.sh | tail -1; bash tests/installgate-tests.sh | tail -1`
-Expected: all rc 0; `tests/local/run.sh` no longer lists the three deleted contracts.
+Run `PT_TEST_BASH=/bin/bash bash tests/local/run.sh`, then `tests/root-tests.sh`, `tests/restore-tests.sh`, and `tests/installgate-tests.sh`; capture each command's own exit code and full output. The runner discovers contracts dynamically and no longer lists the three deleted contracts. `contracts/characterize-backup-signal.sh` fails on origin/main too (21 passed, 4 failed), so its failure and the runner's exit 1 are waived for this task. Any other failures must be reported, not waived without evidence.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add -A scripts/lib scripts/ROOT.sh tests/contracts tests/local apks/PROVENANCE.md docs/superpowers CHANGELOG.md
-git rm -q prompt.md .ai/lessons.md firmware/wiring.html
-git commit -m "chore: remove dead helpers, the stalled refactor's unwired modules and orphan files"
+git rm scripts/lib/{ui,progress,transport}/*.sh tests/contracts/{stream-discipline,status-protocol,transport}.sh tests/local/{supervisor-python-tests.py,heredoc-probe.sh,direct-suite-probe.sh} prompt.md .ai/lessons.md firmware/wiring.html
+git add scripts/lib/common.sh scripts/lib/unlock.sh scripts/ROOT.sh tests/local/{run,controls,runner-tests,bypass-audit-tests,bypass-audit}.sh tests/local/bypass-baseline.txt apks/PROVENANCE.md docs/superpowers/{specs,plans}/2026-09-12-system-flow-refactor*.md docs/superpowers/plans/2026-10-27-make-unlock-work-and-simplify.md CHANGELOG.md
+git commit -m "chore: remove dead helpers, stalled modules and orphans"
 ```
 
 ### Task 10: Deduplicate the step runner and helpers

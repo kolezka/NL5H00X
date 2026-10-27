@@ -69,7 +69,8 @@ mkapk "$STATE/system/app/Magiskv290/Magiskv290.apk"                    11801932
 mkapk "$STATE/system/app/APKPurev32051ap/APKPurev32051ap.apk"          20878645
 mkapk "$STATE/system/app/APKPurev32051apkpure/APKPurev32051apkpure.apk" 20878645
 # NovaLauncher/ exists but is empty -- a failed earlier attempt, kept on purpose
-head -c 3052 /dev/zero > "$STATE/system/build.prop"
+printf '# begin build properties\n' > "$STATE/system/build.prop"
+cat "$STATE/props" >> "$STATE/system/build.prop"
 
 # ---------------------------------------------------------------------------
 # Package database: path=package, mirroring `pm list packages -f`

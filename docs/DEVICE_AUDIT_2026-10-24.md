@@ -1,3 +1,5 @@
+Snapshot of 2026-10-24; later work supersedes parts of it, see [docs/README.md](README.md).
+
 # Device audit: root, boot and modification options
 
 Last updated: 2026-10-24.

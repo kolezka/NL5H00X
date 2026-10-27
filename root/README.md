@@ -142,6 +142,10 @@ SELinux Permissive does not bypass it. `u:r:su:s0` is used because this firmware
 is userdebug and Permissive, where the `su` domain exists. Name a domain the
 device's policy does not define and init logs an error, the service never
 starts, and boot continues normally. The failure mode is a missing daemon.
+If `sud` does not start after the restart, run `./scripts/ROOT.sh --repair`
+from the repository root. It checks the daemon and prints serial-console
+steps if adb is unavailable. Do not infer a working daemon from a completed
+boot.
 
 The service is deliberately not `oneshot`, so init restarts `sud` about five
 seconds after a crash.
@@ -171,7 +175,15 @@ NDK=/path/to/android-ndk ./build.sh
 
 The hybrid `su` is opt-in because it replaces the channel the rest of the
 toolkit runs on. `ROOT.sh` stages it to a separate path, proves `su 0 id` still
-returns uid 0 through that path, and only then promotes it.
+returns uid 0 through that path, and only then promotes it. It preserves the
+stock binary as `su_orig`; `--revert` restores it and checks the hashes.
+
+From the repository root, use `./nl5h00x root install` for the daemon and
+allow-list, then restart the projector so init starts `sud`. Check with
+`./nl5h00x root status`. Use `./nl5h00x root allow PKG` and `deny PKG` to
+change which apps can ask for root; use `./nl5h00x root revert` to remove the
+setup. The installer refuses another device or an unverified backup, verifies
+its changes on the device and treats already applied steps as no-ops.
 
 `bash ../tests/root-tests.sh` exercises all of this against the emulator,
 including a hybrid that fails live-verify and must leave the live `su` alone.
@@ -180,12 +192,11 @@ including a hybrid that fails live-verify and must leave the live `su` alone.
 
 Two different things are called "root" here, and they are worth keeping apart.
 
-**Shell root** must be checked against the installed client. The historical
-examples below use `su 0`, but on the October unit plain `su 0 id` from UART
-failed. `/system/xbin/su_hybrid 0 id` succeeded, as did `adb root` followed by an
-ADB identity check. Select and verify the appropriate prefix before using these
-examples; do not assume root from the prompt or assume one `su` syntax works for
-every installed version. The UART console service itself remains `user shell`.
+**Shell root** must be checked against the installed client. On this unit,
+`su 0 id` works and must print `uid=0` before you run these examples. The
+vendor `su` uses `su 0 <cmd>` and does not support `su -c`. Older observations
+of a failed plain `su 0 id` describe a different installed-client state. The
+UART console itself remains `user shell`, not root.
 
 **App root** is what `sud` adds: an app you put on the allow-list can run one
 command as uid 0 through the socket. Nothing else changes for that app.
@@ -291,16 +302,17 @@ booting.
 
 ### What root does not get you
 
-- **Normal installs still fail.** `pm install` and the package installer are
-  locked by the vendor and root does not lift it. Apps go to `/system/app`. See
+- **Root alone does not switch off the install gate.** Normal installs work on
+  this modified unit because the gate was turned off in `/system/build.prop`.
+  Other units may still need that change or the `/system/app` fallback. See
   [docs/INSTALL_LOCKED.md](../docs/INSTALL_LOCKED.md).
 - **No validated standard Magisk installation path.** The unusual image layout
   and unverified recovery path remain blockers. Header `ramdisk=0` alone does
   not rule out an embedded initramfs or every possible systemless integration.
   See [the audit](../docs/DEVICE_AUDIT_2026-10-24.md).
-- **The stock launcher still wins the boot intent** unless the home preference is
-  set the way [`scripts/UNLOCK.sh`](../scripts/UNLOCK.sh) sets it. That is an
-  intent-resolution problem, not a permission one.
+- **Root alone does not change HOME.** `wtprovision` wins the vendor home intent
+  and starts the component in its own cache. [`scripts/UNLOCK.sh`](../scripts/UNLOCK.sh)
+  writes the cache and checks the focused window. It does not disable anything.
 
 ## Files
 

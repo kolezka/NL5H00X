@@ -19,15 +19,17 @@ The deciding property is what happens when the change goes stale. With both the 
 
 An earlier version ran `pm disable-user` on the stock launcher before setting the preference, on the premise that it would otherwise reclaim home on the next boot. [historical: recorded in scripts/lib/unlock.sh] The premise was wrong. The firmware dispatches home as MAIN plus HOME plus CATEGORY_SETUP_WIZARD, and whatever declares SETUP_WIZARD wins and then starts the stock launcher by explicit component name. [verified] Disabling the component that owns that intent leaves it with zero candidates, no activity ever reaches idle, and boot never completes. [verified] Recovering from that took three days and a soldered UART console. [historical: recorded in scripts/lib/unlock.sh]
 
-## Hand the last step to the device's own chooser
+## Current correction: use the vendor launcher cache
 
-When a component owns the vendor home intent, `scripts/lib/unlock.sh::launcher_default_apply()` refuses and prints what the user should do on the device: press HOME, choose the launcher, confirm "Always". [verified] `scripts/lib/unlock.sh::launcher_default_state()` reports the same case as `blocked:` with the same reason, so `--status` never offers a step that cannot work. [verified]
-
-The reason given is the honest one and it is specific: no command on API 28 writes a preference covering CATEGORY_SETUP_WIZARD, so no CLI can win that intent. [verified] The chooser can, because the system records the preference against the intent it actually dispatched. [verified]
+The chooser route in this source-pinned block is obsolete. On this firmware,
+`wtprovision` owns the HOME intent; no chooser appears. The current unlock
+writes Projectivy into `wtprovision`'s launcher cache and restarts that service.
+See [the current unlock flow](../../BOOT_DEADLOCK.md#the-vendor-home-dispatch)
+and the [toolkit README](../../../README.md#how-the-unlock-works).
 
 ### Rejected alternative: write the preference anyway and hope
 
-Writing a preference the vendor intent ignores leaves a stale record and no change in behaviour. [verified] The refusal comment names that outcome as the thing that started the incident the file now carries scars from, which is why the check runs before the first write rather than after it. [verified]
+At source pin `f04ee86`, writing a preference the vendor intent ignored left a stale record and no change in behavior. This is historical; current unlock changes the vendor cache instead. See [the current unlock flow](../../../README.md#how-the-unlock-works).
 
 ## Read the home preference out of the preferred-activities dump
 

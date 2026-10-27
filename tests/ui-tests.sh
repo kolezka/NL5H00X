@@ -47,6 +47,16 @@ ui() {
         env HOME_SETTLE_SECS=0 LAUNCHER_SETTLE_SECS=0 WTPROV_RESTART_TIMEOUT=2 "$@" \
         /bin/bash "$SCRIPTS/$script" <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 }
+top() {
+    local sb="$1" command="$2" input="$3"; shift 3
+    local -a command_args
+    read -r -a command_args <<<"$command"
+    ( set -o pipefail
+      cd "$sb/run" || exit 1
+      PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+        env HOME_SETTLE_SECS=0 LAUNCHER_SETTLE_SECS=0 WTPROV_RESTART_TIMEOUT=2 "$@" \
+        /bin/bash "$REPO_ROOT/nl5h00x" ${command_args[@]+"${command_args[@]}"} <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
+}
 home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
 dev() { PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$1/state" adb shell "$2" 2>/dev/null | tr -d '\r'; }
 
@@ -80,8 +90,19 @@ for s in TOOLS.sh UNLOCK.sh PROJECTOR.sh MAKE_BACKUP.sh; do
         bad "$s does not parse: $(echo "$out" | head -1)"
     fi
 done
+if out=$(/bin/bash -n "$REPO_ROOT/nl5h00x" 2>&1); then
+    ok "nl5h00x parses under /bin/bash"
+else
+    bad "nl5h00x does not parse: ${out:-missing entry point}"
+fi
 
 new_sandbox
+out=$(top "$sb" "" $'q\n')
+if echo "$out" | grep -qiE 'invalid option|unbound variable|syntax error|command not found|No such file'; then
+    bad "nl5h00x fails at runtime under /bin/bash"
+else
+    ok "nl5h00x runs under /bin/bash"
+fi
 for s in TOOLS.sh PROJECTOR.sh; do
     out=$(ui "$sb" "$s" $'q\n')
     if echo "$out" | grep -qiE 'invalid option|unbound variable|syntax error|command not found'; then
@@ -189,6 +210,12 @@ if echo "$out" | grep -qi 'verified backup is required'; then
 else
     bad "did not refuse"
 fi
+[[ "$out" != *"disables your only working home screen"* ]] \
+    && ok "does not claim the unlock disables the home screen" \
+    || bad "still claims the unlock disables the home screen"
+[[ "$out" == *"rewrites the launcher cache"* ]] \
+    && ok "explains the launcher cache rewrite" \
+    || bad "does not explain the launcher cache rewrite"
 [[ "$(home_now "$sb")" == "$STOCK"* ]] \
     && ok "device untouched" || bad "device changed despite refusal"
 sandbox_finish "$sb"
@@ -364,6 +391,132 @@ grep -qx 'com.apkpure.aegon' "$sb/state/packages_disabled" \
 out=$(ui "$sb" TOOLS.sh $'27\ncom.apkpure.aegon\ny\n\nq\n')
 grep -qx 'com.apkpure.aegon' "$sb/state/packages_disabled" \
     && bad "still frozen after an unfreeze" || ok "unfreezes it again"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "nl5h00x help lists every subcommand"
+new_sandbox
+out=$(top "$sb" "help" "")
+for command in status backup unlock revert install root tools repair install-gate; do
+    echo "$out" | grep -q "  $command" \
+        && ok "$command is listed" || bad "$command is missing from help"
+done
+out=$(top "$sb" "-h" "")
+echo "$out" | grep -q 'Usage:' && ok "-h prints usage" || bad "-h does not print usage"
+if out=$(top "$sb" "not-a-command" ""); then
+    bad "unknown command exits successfully"
+else
+    rc=$?
+    [[ "$rc" -eq 2 && "$out" == *"Usage:"* ]] \
+        && ok "unknown command exits 2 with usage" || bad "unknown command returned $rc without usage"
+fi
+if out=$(top "$sb" "install-gate status" ""); then
+    echo "$out" | grep -qE '^  \[todo\] +install_gate +[^[:space:]]' \
+        && ok "install-gate status reports the seed as todo" || bad "install-gate status omitted its todo row"
+else
+    rc=$?
+    bad "install-gate status returned $rc"
+fi
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "nl5h00x delegates the remaining commands"
+new_sandbox
+out=$(top "$sb" "backup" "" env FAKE_ADB_NO_DEVICE=1)
+[[ "$out" == *"No Android device connected"* ]] \
+    && ok "backup reaches MAKE_BACKUP.sh" || bad "backup did not reach MAKE_BACKUP.sh"
+out=$(top "$sb" "install missing.apk" "")
+[[ "$out" == *"No such file: missing.apk"* ]] \
+    && ok "install reaches INSTALL_APP.sh" || bad "install did not reach INSTALL_APP.sh"
+out=$(top "$sb" "tools" $'q\n')
+[[ "$out" == *"Reset to Default Launcher"* ]] \
+    && ok "tools reaches TOOLS.sh" || bad "tools did not reach TOOLS.sh"
+out=$(top "$sb" "repair" "" env FAKE_ADB_NO_DEVICE=1)
+[[ "$out" == *"No device on adb"* ]] \
+    && ok "repair reaches UNLOCK.sh" || bad "repair did not reach UNLOCK.sh"
+out=$(top "$sb" "root install" "")
+[[ "$out" == *"No verified backup found"* ]] \
+    && ok "root install reaches ROOT.sh" || bad "root install did not reach ROOT.sh"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "nl5h00x status includes unlock, root and backup state"
+new_sandbox
+out=$(top "$sb" "status" "")
+[[ "$out" == *"home screen now:"* && "$out" == *"daemon_binary"* ]] \
+    && ok "both step lists are reported" || bad "unlock or root status is missing"
+echo "$out" | grep -qi 'backup.*none' \
+    && ok "missing backup is reported" || bad "missing backup state is missing"
+add_backup "$sb"
+out=$(top "$sb" "status" "")
+echo "$out" | grep -qi 'backup.*verified' \
+    && ok "verified backup is reported" || bad "verified backup state is missing"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "nl5h00x unlock drives UNLOCK.sh --apply-all"
+new_sandbox; add_backup "$sb"
+out=$(top "$sb" "unlock --yes" "")
+[[ "$out" == *"All steps applied and verified"* ]] \
+    && ok "unlock completes" || bad "unlock did not complete"
+[[ "$(home_now "$sb")" == "$PROJECTIVY"* ]] \
+    && ok "HOME is Projectivy" || bad "HOME did not change"
+out=$(top "$sb" "revert --yes" "")
+[[ "$(home_now "$sb")" == "$STOCK"* ]] \
+    && ok "revert delegates to UNLOCK.sh" || bad "revert did not restore HOME"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "nl5h00x root translates subcommand words"
+new_sandbox; add_backup "$sb"; install_fake_root "$sb"
+out=$(top "$sb" "root status" "")
+[[ "$out" == *"daemon_binary"* ]] \
+    && ok "root status prints step names" || bad "root status did not reach ROOT.sh"
+out=$(top "$sb" "root allow $PROJECTIVY" "")
+grep -qx "$PROJECTIVY" "$sb/state/data/adb/su-allow" \
+    && ok "root allow passes a package name" || bad "root allow failed"
+out=$(top "$sb" "root deny $PROJECTIVY" "")
+if grep -qx "$PROJECTIVY" "$sb/state/data/adb/su-allow"; then
+    bad "root deny did not remove package"
+else
+    ok "root deny passes a package name"
+fi
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "nl5h00x works through symlinks from another directory"
+new_sandbox
+ln -s "$REPO_ROOT/nl5h00x" "$sb/absolute-link"
+mkdir -p "$sb/links"
+ln -s ../absolute-link "$sb/links/relative-link"
+for link in "$sb/absolute-link" "$sb/links/relative-link"; do
+    if out=$(cd /tmp && PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" \
+        APK_DIR="$sb/apks" /bin/bash "$link" status 2>&1) \
+        && [[ "$out" == *"daemon_binary"* ]]; then
+        ok "$(basename "$link") resolves the scripts directory"
+    else
+        bad "$(basename "$link") did not find its scripts directory"
+    fi
+done
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "the guided menu offers install, root and tools"
+new_sandbox
+out=$(top "$sb" "" $'q\n')
+for label in 'Install an app' 'Root for apps' 'Tools and hidden settings'; do
+    [[ "$out" == *"$label"* ]] \
+        && ok "$label appears" || bad "$label is missing"
+done
+out=$(top "$sb" "" $'5\nmissing.apk\n\nq\n')
+[[ "$out" == *"No such file: missing.apk"* ]] \
+    && ok "install choice delegates to INSTALL_APP.sh" || bad "install choice did not delegate"
+out=$(top "$sb" "" $'6\nq\n\nq\n')
+[[ "$out" == *"PROJECTOR ROOT"* ]] \
+    && ok "root choice delegates to ROOT.sh" || bad "root choice did not delegate"
+out=$(top "$sb" "" $'7\nq\n\nq\n')
+[[ "$out" == *"Tools and hidden settings"* && "$out" == *"Reset to Default Launcher"* ]] \
+    && ok "tools choice delegates to TOOLS.sh" || bad "tools choice did not delegate"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

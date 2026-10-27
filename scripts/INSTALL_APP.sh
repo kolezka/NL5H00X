@@ -76,12 +76,6 @@ EOF
 # local helpers
 # ---------------------------------------------------------------------------
 
-local_md5() {
-    if command -v md5 >/dev/null 2>&1; then md5 -q "$1"
-    else md5sum "$1" | awk '{print $1}'
-    fi
-}
-
 # Read the APK's binary manifest and print shell-safe facts about it:
 #
 #   PKG=<package name>
