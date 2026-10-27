@@ -92,11 +92,11 @@ scripts/TOOLS.sh:94:    echo -e "${YELLOW}> adb shell $cmd${NC}"
 scripts/TOOLS.sh:97:    out=$(adb shell "$cmd" 2>&1); rc=$?
 scripts/UNLOCK.sh:181:    if ! adb reboot >/dev/null 2>&1; then
 scripts/UNLOCK.sh:182:        print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
-scripts/UNLOCK.sh:307:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
-scripts/UNLOCK.sh:326:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
-scripts/UNLOCK.sh:329:leaves the device with no adb at all. Without a device it prints the commands
+scripts/UNLOCK.sh:311:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
+scripts/UNLOCK.sh:330:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+scripts/UNLOCK.sh:333:leaves the device with no adb at all. Without a device it prints the commands
 scripts/UNLOCK.sh:34:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-scripts/UNLOCK.sh:351:    # in this failure has no adb by definition, and that is exactly when someone
+scripts/UNLOCK.sh:355:    # in this failure has no adb by definition, and that is exactly when someone
 scripts/UNLOCK.sh:35:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
 scripts/lib/common.sh:122:    adb shell "cat /proc/uptime" 2>/dev/null \
 scripts/lib/common.sh:126:# Wait for the device to come back after a reboot: adb sees it, boot has
@@ -125,20 +125,20 @@ scripts/lib/root.sh:493:    verify_root_after_su_touch    # exits outright if th
 scripts/lib/root.sh:522:    verify_root_after_su_touch    # exits outright if this cost us adb root
 scripts/lib/transport/select.sh:32:                PT_ADB_BIN=$(command -v adb 2>/dev/null) || {
 scripts/lib/transport/select.sh:33:                    printf 'transport: adb not on PATH\n' >&2
-scripts/lib/unlock.sh:1009:# The commands that fix it from a serial console, printed when adb is gone.
-scripts/lib/unlock.sh:1044:    if ! adb devices 2>/dev/null | grep -q "device$"; then
+scripts/lib/unlock.sh:1018:# The commands that fix it from a serial console, printed when adb is gone.
+scripts/lib/unlock.sh:1053:    if ! adb devices 2>/dev/null | grep -q "device$"; then
 scripts/lib/unlock.sh:14:#   value back off the device. `adb shell ... || true` is how you end up telling
 scripts/lib/unlock.sh:277:    if ! adb push "$tmp" "$WTPROV_STAGED_SHA" >/dev/null 2>&1 \
 scripts/lib/unlock.sh:325:            # Outer single quotes: adb shell joins its arguments, so host-side
 scripts/lib/unlock.sh:327:            print_error "  adb shell 'su 0 sh -c \"$aside\"'"
 scripts/lib/unlock.sh:380:    if ! adb push "$tmp/new.xml" "$WTPROV_STAGED" >/dev/null 2>&1 \
-scripts/lib/unlock.sh:599:# On this projector it does not work. Every install path -- adb install,
-scripts/lib/unlock.sh:620:    out=$(adb install -r "$apk" 2>&1)
-scripts/lib/unlock.sh:626:    # Staged through /data/local/tmp on purpose. `adb push` runs as the shell
-scripts/lib/unlock.sh:629:    # `adb root` is unavailable, which is every Magisk-rooted one.
-scripts/lib/unlock.sh:635:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
-scripts/lib/unlock.sh:686:        print_error "  adb shell 'su 0 sh -c \"mount -o remount,rw $mp && $undo; mount -o remount,ro $mp\"'"
-scripts/lib/unlock.sh:917:    adb push "$tmp" "$sidecar" >/dev/null 2>&1
+scripts/lib/unlock.sh:608:# On this projector it does not work. Every install path -- adb install,
+scripts/lib/unlock.sh:629:    out=$(adb install -r "$apk" 2>&1)
+scripts/lib/unlock.sh:635:    # Staged through /data/local/tmp on purpose. `adb push` runs as the shell
+scripts/lib/unlock.sh:638:    # `adb root` is unavailable, which is every Magisk-rooted one.
+scripts/lib/unlock.sh:644:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
+scripts/lib/unlock.sh:695:        print_error "  adb shell 'su 0 sh -c \"mount -o remount,rw $mp && $undo; mount -o remount,ro $mp\"'"
+scripts/lib/unlock.sh:926:    adb push "$tmp" "$sidecar" >/dev/null 2>&1
 MATCHED_LINES 136
 
 COMMAND rg -n '/adb|\$\{?ADB|command -v adb|which adb' scripts/
