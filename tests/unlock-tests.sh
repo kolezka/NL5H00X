@@ -466,6 +466,27 @@ echo "$out" | grep -qE "\[blocked\][[:space:]]+launcher_default.*$PROJECTIVY/\.M
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "a cache that is not valid XML stops the unlock before any write"
+# The pair can be read out of a broken file with sed, so only a real parse
+# tells wtprovision's cache apart from something it would choke on.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+printf '<broken\n' >> "$f"
+grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" && tail -1 "$f" | grep -q '<broken' \
+    && ok "control: the cache holds the pair and trailing junk" || bad "control: seed not built"
+before=$(shasum -a 256 "$f" | cut -d' ' -f1)
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock went ahead with an unparseable cache"
+[[ "$out" == *"not valid XML"* ]] \
+    && ok "names the XML problem" || bad "no XML message: $(echo "$out" | grep -i -e error | head -3)"
+[[ "$(shasum -a 256 "$f" | cut -d' ' -f1)" == "$before" ]] \
+    && ok "the cache is unchanged" || bad "the cache was written"
+[[ ! -e "$sb/state/data/local/tmp/wtprov_prefs.before.sha256" ]] \
+    && ok "no backup sidecar was created" || bad "a backup sidecar was written"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "the new cache is built from the trusted backup"
 # The backup is the original; keys only it carries must survive the write.
 

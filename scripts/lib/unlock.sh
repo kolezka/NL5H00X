@@ -184,6 +184,30 @@ local_sha256() {
     fi
 }
 
+# Why a host file is not usable XML, or nothing when it parses. sed can read the
+# pair out of a broken file, so only a real parse proves wtprovision can read it.
+xml_problem() {
+    local out
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "python3 is needed to validate the cache XML"; return
+    fi
+    out=$(python3 -I -c 'import sys, xml.etree.ElementTree as E; E.parse(sys.argv[1])' "$1" 2>&1) && return
+    echo "it is not valid XML ($(printf '%s\n' "$out" | tail -1))"
+}
+
+# xml_problem for a device file, read as root.
+remote_xml_problem() {
+    local tmp problem
+    tmp=$(mktemp) || { echo "could not make a temporary file"; return; }
+    if ! adb_root_exec "cat $1" > "$tmp" 2>/dev/null; then
+        rm -f "$tmp"; echo "it could not be read"; return
+    fi
+    problem=$(xml_problem "$tmp")
+    rm -f "$tmp"
+    [[ -n "$problem" ]] && echo "$problem"
+    return 0
+}
+
 # The value of one <string name="KEY"> entry in a prefs XML read from stdin.
 prefs_value() {
     sed -n "s|.*<string name=\"$1\">\([^<]*\)</string>.*|\1|p" | head -1
@@ -227,6 +251,10 @@ wtprov_backup_problem() {
     if [[ "$rec" != "$bk" ]]; then
         echo "its sha256 $bk does not match the recorded ${rec:-empty} value"; return
     fi
+    local xp; xp=$(remote_xml_problem "$WTPROV_BACKUP")
+    if [[ -n "$xp" ]]; then
+        echo "$xp"; return
+    fi
     if ! wtprov_backup_has_pair; then
         echo "it has no home_pkg/home_activity pair"; return
     fi
@@ -266,6 +294,12 @@ wtprov_backup_record() {
 wtprov_cache_backup() {
     local before bk problem aside stamp
     before=$(wtprov_cache_require) || return 1
+    # Checked before the backup is taken, so a broken cache leaves no sidecar.
+    problem=$(remote_xml_problem "$(wtprov_cache_path)")
+    if [[ -n "$problem" ]]; then
+        print_error "wtprovision's cache $(wtprov_cache_path): $problem; nothing was written"
+        return 1
+    fi
     bk=$(remote_sha256 "$WTPROV_BACKUP")
     if [[ "$bk" == "$before" ]]; then
         if [[ -n "$(wtprov_backup_problem)" ]]; then
@@ -311,7 +345,7 @@ wtprov_cache_backup() {
 # staged in /data/local/tmp and written as root by redirect, which keeps the
 # inode, mode and SELinux label. The cache itself must already exist.
 wtprov_cache_put() {
-    local pkg="$1" act="$2" src="$3" cache tmp before after staged
+    local pkg="$1" act="$2" src="$3" cache tmp before after staged problem
     cache=$(wtprov_cache_path)
     before=$(wtprov_cache_require) || return 1
     tmp=$(mktemp -d) || return 1
@@ -322,6 +356,11 @@ wtprov_cache_put() {
         print_error "$src is missing or has no home_pkg/home_activity pair; nothing was written"
         rm -rf "$tmp"; return 1
     fi
+    problem=$(xml_problem "$tmp/source.xml")
+    if [[ -n "$problem" ]]; then
+        print_error "$src: $problem; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
 
     sed -e "s|\(<string name=\"home_pkg\">\)[^<]*\(</string>\)|\1$pkg\2|" \
         -e "s|\(<string name=\"home_activity\">\)[^<]*\(</string>\)|\1$act\2|" \
@@ -329,6 +368,11 @@ wtprov_cache_put() {
     if [[ "$(prefs_value home_pkg < "$tmp/new.xml")" != "$pkg" \
         || "$(prefs_value home_activity < "$tmp/new.xml")" != "$act" ]]; then
         print_error "Could not build the new cache file; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+    problem=$(xml_problem "$tmp/new.xml")
+    if [[ -n "$problem" ]]; then
+        print_error "The new cache file: $problem; nothing was written"
         rm -rf "$tmp"; return 1
     fi
 
