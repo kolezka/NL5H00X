@@ -84,6 +84,25 @@ cmp -s "$sb/seed-build.prop" "$sb/state/system/build.prop" \
     && ok "cancelled off leaves build.prop unchanged" || bad "cancelled off changed build.prop"
 sandbox_finish "$sb"
 
+head_ "on never rolls back a build.prop change made after the backup"
+new_sandbox
+gate "$sb" off --yes >/dev/null
+gate "$sb" on --yes >/dev/null
+# An update or a hand edit lands after the first cycle; the old backup stays.
+printf '%s\n' 'ro.build.fingerprint=POST-OTA' >> "$sb/state/system/build.prop"
+cp "$sb/state/system/build.prop" "$sb/post-edit.prop"
+gate "$sb" off --yes >/dev/null
+out=$(gate "$sb" on --yes)
+[[ "$out" == *"RC=0"* ]] && ok "second on completes" || bad "second on did not complete"
+cmp -s "$sb/post-edit.prop" "$sb/state/system/build.prop" \
+    && ok "second on keeps the later edit and drops only the whitelist line" \
+    || bad "second on restored a stale backup over a later edit"
+[[ "$out" == *"differs from the live build.prop"* ]] \
+    && ok "second on says why it did not use the backup" || bad "second on gave no reason for skipping the backup"
+[[ "$(cat "$sb/state/mount_system")" == ro ]] \
+    && ok "second on restores the read-only mount" || bad "second on left the system writable"
+sandbox_finish "$sb"
+
 head_ "unreadable mount state after remount is a failure"
 new_sandbox
 out=$(gate "$sb" FAKE_ADB_MOUNTS_UNREADABLE=1 off --yes)

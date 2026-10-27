@@ -129,26 +129,37 @@ install_gate_apply() {
     return "$rc"
 }
 
+install_gate_strip() { awk 'index($0, "zyzys.install.whitelist=") != 1 { print }' "$1"; }
+
 install_gate_revert() {
     local tmp rc=0
     install_gate_require_file || return 1
     tmp=$(mktemp -d) || return 1
+    if ! adb_root_exec "cat $INSTALL_GATE_PROP" > "$tmp/original" 2>/dev/null \
+        || [[ "$(local_sha256 "$tmp/original")" != "$(remote_sha256 "$INSTALL_GATE_PROP")" ]]; then
+        print_error "Could not read and verify $INSTALL_GATE_PROP; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
     if install_gate_backup_hash; then
-        if ! adb_root_exec "cat $INSTALL_GATE_BACKUP" > "$tmp/restore" 2>/dev/null \
-            || [[ "$(local_sha256 "$tmp/restore")" != "$(remote_sha256 "$INSTALL_GATE_BACKUP")" ]]; then
+        if ! adb_root_exec "cat $INSTALL_GATE_BACKUP" > "$tmp/backup" 2>/dev/null \
+            || [[ "$(local_sha256 "$tmp/backup")" != "$(remote_sha256 "$INSTALL_GATE_BACKUP")" ]]; then
             print_error "Could not read and verify $INSTALL_GATE_BACKUP; nothing was written"
             rm -rf "$tmp"; return 1
         fi
-        install_gate_write "$tmp/restore" || rc=1
+    fi
+    # A backup older than a later edit would undo that edit, so use it only
+    # when it matches the live file everywhere except the whitelist line.
+    if [[ -f "$tmp/backup" ]] \
+        && cmp -s <(install_gate_strip "$tmp/backup") <(install_gate_strip "$tmp/original"); then
+        install_gate_write "$tmp/backup" || rc=1
         [[ "$rc" -ne 0 ]] || print_status "Restored the verified backup verbatim from $INSTALL_GATE_BACKUP"
     else
-        print_warning "No verified backup; removing the whitelist line from the live build.prop"
-        if ! adb_root_exec "cat $INSTALL_GATE_PROP" > "$tmp/original" 2>/dev/null \
-            || [[ "$(local_sha256 "$tmp/original")" != "$(remote_sha256 "$INSTALL_GATE_PROP")" ]]; then
-            print_error "Could not read and verify $INSTALL_GATE_PROP; nothing was written"
-            rm -rf "$tmp"; return 1
+        if [[ -f "$tmp/backup" ]]; then
+            print_warning "The backup at $INSTALL_GATE_BACKUP differs from the live build.prop in other lines; keeping the live file and removing only the whitelist line"
+        else
+            print_warning "No verified backup; removing the whitelist line from the live build.prop"
         fi
-        awk 'index($0, "zyzys.install.whitelist=") != 1 { print }' "$tmp/original" > "$tmp/restore"
+        install_gate_strip "$tmp/original" > "$tmp/restore"
         install_gate_write "$tmp/restore" || rc=1
         [[ "$rc" -ne 0 ]] || print_status "Removed the whitelist line from the live build.prop"
     fi
