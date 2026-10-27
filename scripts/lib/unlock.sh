@@ -47,7 +47,7 @@ LAUNCHER_NAME="${LAUNCHER_NAME:-Projectivy}"
 LAUNCHER_APK_GLOB="${LAUNCHER_APK_GLOB:-projectivy*.apk}"
 LAUNCHER_SYSTEM_DIR="${LAUNCHER_SYSTEM_DIR:-/system/app/Projectivy}"
 
-UNLOCK_STEPS=(dev_options launcher_present launcher_default cleanup_leftovers)
+UNLOCK_STEPS=(dev_options launcher_present launcher_default)
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -148,6 +148,167 @@ launcher_component() { home_component_of "$LAUNCHER_PKG"; }
 home_interceptor() {
     adb_root_exec "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.SETUP_WIZARD" 2>/dev/null \
         | tr -d '\r' | grep -oE '[a-z][A-Za-z0-9_.]*/[A-Za-z0-9_.$]+' | head -1
+}
+
+# ---------------------------------------------------------------------------
+# wtprovision's launcher cache
+# ---------------------------------------------------------------------------
+WTPROV_BACKUP="/data/local/tmp/wtprov_prefs.before.xml"
+WTPROV_STAGED="/data/local/tmp/wtprov_prefs.new.xml"
+
+wtprov_cache_path() {
+    echo "/data/user_de/0/$HOME_DISPATCHER_PKG/shared_prefs/$HOME_DISPATCHER_PKG.xml"
+}
+
+# True when the given interceptor component belongs to wtprovision.
+is_wtprov() { [[ "${1%%/*}" == "$HOME_DISPATCHER_PKG" ]]; }
+
+# sha256 of a device file, empty when it is missing or unreadable.
+remote_sha256() {
+    adb_root_exec "sha256sum $1" 2>/dev/null | tr -d '\r' \
+        | awk 'NR == 1 && $1 ~ /^[0-9a-f]+$/ && length($1) == 64 { print $1 }'
+}
+
+local_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+# The value of one <string name="KEY"> entry in a prefs XML read from stdin.
+prefs_value() {
+    sed -n "s|.*<string name=\"$1\">\([^<]*\)</string>.*|\1|p" | head -1
+}
+
+# "pkg activity" from the device cache, empty when the file or a key is missing.
+wtprov_cache_read() {
+    local xml pkg act
+    xml=$(adb_root_exec "cat $(wtprov_cache_path)" 2>/dev/null) || return 0
+    pkg=$(printf '%s\n' "$xml" | prefs_value home_pkg)
+    act=$(printf '%s\n' "$xml" | prefs_value home_activity)
+    [[ -n "$pkg" && -n "$act" ]] && echo "$pkg $act"
+    return 0
+}
+
+# Copy the cache to WTPROV_BACKUP once. An existing backup that differs from
+# the cache is the older "before", so it is kept.
+wtprov_cache_backup() {
+    local cache before bk
+    cache=$(wtprov_cache_path)
+    before=$(remote_sha256 "$cache")
+    if [[ -z "$before" ]]; then
+        print_error "wtprovision's cache is not on the device ($cache); nothing was written"
+        return 1
+    fi
+    bk=$(remote_sha256 "$WTPROV_BACKUP")
+    if [[ "$bk" == "$before" ]]; then
+        print_status "Backup of wtprovision's cache already at $WTPROV_BACKUP"
+    elif [[ -n "$bk" ]]; then
+        print_warning "Keeping the existing backup at $WTPROV_BACKUP: it differs from the current cache, so it is the older original"
+    else
+        adb_root_exec "sh -c \"cat $cache > $WTPROV_BACKUP\"" >/dev/null 2>&1
+        if [[ "$(remote_sha256 "$WTPROV_BACKUP")" != "$before" ]]; then
+            print_error "Could not back up wtprovision's cache to $WTPROV_BACKUP; nothing was written"
+            return 1
+        fi
+        print_status "Backed up wtprovision's cache to $WTPROV_BACKUP"
+    fi
+    return 0
+}
+
+# Replace the two keys in the device cache, keeping every other line. Built on
+# the host from the current file, staged in /data/local/tmp and written as root
+# by redirect, which keeps the inode, mode and SELinux label.
+wtprov_cache_put() {
+    local pkg="$1" act="$2" cache tmp before after staged
+    cache=$(wtprov_cache_path)
+    tmp=$(mktemp -d) || return 1
+
+    if ! adb_root_exec "cat $cache" > "$tmp/current.xml" 2>/dev/null \
+        || [[ -z "$(prefs_value home_pkg < "$tmp/current.xml")" ]] \
+        || [[ -z "$(prefs_value home_activity < "$tmp/current.xml")" ]]; then
+        print_error "wtprovision's cache is missing or has no home_pkg/home_activity pair ($cache); nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+    before=$(remote_sha256 "$cache")
+
+    sed -e "s|\(<string name=\"home_pkg\">\)[^<]*\(</string>\)|\1$pkg\2|" \
+        -e "s|\(<string name=\"home_activity\">\)[^<]*\(</string>\)|\1$act\2|" \
+        "$tmp/current.xml" > "$tmp/new.xml"
+    if [[ "$(prefs_value home_pkg < "$tmp/new.xml")" != "$pkg" \
+        || "$(prefs_value home_activity < "$tmp/new.xml")" != "$act" ]]; then
+        print_error "Could not build the new cache file; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+
+    staged=$(local_sha256 "$tmp/new.xml")
+    if ! adb push "$tmp/new.xml" "$WTPROV_STAGED" >/dev/null 2>&1 \
+        || [[ "$(remote_sha256 "$WTPROV_STAGED")" != "$staged" ]]; then
+        print_error "Could not stage the new cache at $WTPROV_STAGED; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+    rm -rf "$tmp"
+
+    adb_root_exec "sh -c \"cat $WTPROV_STAGED > $cache\"" >/dev/null 2>&1
+    after=$(remote_sha256 "$cache")
+    print_status "wtprovision cache sha256 before: ${before:-unknown}"
+    print_status "wtprovision cache sha256 after:  ${after:-unknown}"
+    if [[ "$after" != "$staged" ]]; then
+        print_error "The cache write did not land (expected sha256 $staged)"
+        print_warning "Restore it with: bash scripts/UNLOCK.sh --revert"
+        return 1
+    fi
+    return 0
+}
+
+# Back up once, then write the pair.
+wtprov_cache_write() {
+    wtprov_cache_backup || return 1
+    wtprov_cache_put "$1" "$2"
+}
+
+# wtprovision's pid(s), space separated, empty when it is not running.
+wtprov_pids() {
+    adb_root_exec "pidof $HOME_DISPATCHER_PKG" 2>/dev/null | tr -d '\r' \
+        | tr -s ' \n' '  ' | sed 's/^ *//; s/ *$//' | grep -E '^[0-9]+( [0-9]+)*$'
+}
+
+# Kill wtprovision so the system restarts it and it rereads the cache. It is
+# persistent, so `am force-stop` returns 0 and changes nothing.
+wtprov_restart() {
+    local pids new i
+    pids=$(wtprov_pids)
+    if [[ -z "$pids" ]]; then
+        print_error "wtprovision is not running"
+        return 1
+    fi
+    if ! adb_root_exec "kill -9 $pids" >/dev/null 2>&1; then
+        print_error "Could not kill wtprovision (pid $pids)"
+        return 1
+    fi
+    for (( i = 0; i < ${WTPROV_RESTART_TIMEOUT:-10}; i++ )); do
+        new=$(wtprov_pids)
+        [[ -n "$new" && "$new" != "$pids" ]] && return 0
+        sleep 1
+    done
+    print_error "wtprovision did not come back within ${WTPROV_RESTART_TIMEOUT:-10} s of kill -9"
+    return 1
+}
+
+# Press HOME and print the package that has window focus afterwards.
+home_focus() {
+    adb_root_exec "input keyevent HOME" >/dev/null 2>&1
+    sleep "${HOME_SETTLE_SECS:-2}"
+    adb_root_exec "dumpsys window" 2>/dev/null | tr -d '\r' \
+        | sed -n 's|.*mCurrentFocus=Window{[^ ]* [^ ]* \([^/ ]*\)/.*|\1|p' | head -1
+}
+
+# Expand a component's class to its full name: com.a/.b.C becomes com.a.b.C.
+full_component() {
+    local pkg="$1" cls="${2#*/}"
+    if [[ "$cls" == .* ]]; then echo "$pkg$cls"; else echo "$cls"; fi
 }
 
 # Prove the replacement launcher works before anything relies on it.
@@ -372,37 +533,31 @@ launcher_present_revert() {
 # ---------------------------------------------------------------------------
 # step: launcher_default
 #
-# The one that matters. Setting the home activity on its own does not survive a
-# restart while the stock launcher is still enabled -- which is why an earlier
-# attempt left Nova sitting in /system/app since July and the projector still
-# came up on the stock launcher. Disabling the stock launcher is what makes it
-# stick, so this step does both and treats either half failing as failure.
+# The one that matters. On this firmware wtprovision owns the home intent and
+# starts whatever its own SharedPreferences cache names, so the step rewrites
+# that cache as root, restarts wtprovision and checks which window HOME lands
+# on. Nothing is disabled: disabling wtprovision is what stops the device
+# booting (docs/BOOT_DEADLOCK.md).
 #
-# Disabling it is also the only moment in the unlock that can leave someone
-# staring at a projector with no home screen, so it happens last and only after
-# the replacement has been seen to actually run.
+# On a device without an interceptor the old route still applies: record the
+# home preference with set-home-activity.
 # ---------------------------------------------------------------------------
 launcher_default_describe() {
-    echo "Make $LAUNCHER_NAME the home screen (preference only -- nothing is disabled)"
+    echo "Make $LAUNCHER_NAME the home screen (rewrites wtprovision's launcher cache; nothing is disabled)"
 }
 
-# Who actually wins the intent the firmware dispatches at boot.
+# Who the next HOME press lands on.
 #
-# CORRECTED 2026-07-30. This used to be answered with home_activity(), which
-# reads the recorded preference. That is a different question. This firmware
-# adds CATEGORY_SETUP_WIZARD to the home intent, and a preference recorded
-# without that category loses to whatever declares it -- so the preference can
-# read back perfectly while the next boot ignores it. Ask the resolver instead.
-#
-# Empty interceptor means a device that resolves HOME normally; there the
-# recorded preference is the answer.
-#
-# On this firmware the interceptor is always wtprovision, and what the user
-# actually sees afterwards is decided by wtprovision's own cache (see
-# home_interceptor), which neither query here can show. The owner reported by
-# this function is therefore the dispatcher, not the launcher.
+# With wtprovision intercepting, that is the pair in its cache, which neither
+# the resolver nor the preference table can show. Any other interceptor owns
+# HOME outright. With none, the recorded preference is the answer.
 home_owner() {
-    local icept; icept=$(home_interceptor)
+    local icept pair
+    icept=$(home_interceptor)
+    if [[ -n "$icept" ]] && is_wtprov "$icept"; then
+        pair=$(wtprov_cache_read)
+        [[ -n "$pair" ]] && { echo "${pair%% *}/${pair#* }"; return; }
+    fi
     [[ -n "$icept" ]] && { echo "$icept"; return; }
     home_activity
 }
@@ -410,31 +565,29 @@ home_owner() {
 launcher_default_state() {
     package_installed "$LAUNCHER_PKG" || { echo "blocked:install the launcher first"; return; }
 
-    local owner; owner=$(home_owner)
-    if [[ "$owner" == "$LAUNCHER_PKG"* ]]; then
-        echo applied
-        return
-    fi
-
-    # An interceptor owning the vendor intent is no longer a hazard -- nothing
-    # is disabled now, so it is the fallback that keeps the device booting. It
-    # is still a blocker for the *automated* step: no command on API 28 writes
-    # a preference covering CATEGORY_SETUP_WIZARD, so the CLI cannot win that
-    # intent.
-    #
-    # The chooser route in the message below only ever worked with a launcher
-    # patched to declare SETUP_WIZARD itself (the locally re-signed Projectivy
-    # of 2026-07). An unpatched launcher never shows the chooser, and no
-    # preference reaches wtprovision, which starts whatever its own prefs cache
-    # names. The working route is to rewrite that cache; see home_interceptor
-    # and README "Unlocking the launcher". Not automated here yet.
     local icept; icept=$(home_interceptor)
-    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
-        echo "blocked:$icept owns the home intent on this firmware (it declares CATEGORY_SETUP_WIZARD); no command on API 28 writes a preference covering that, so no CLI can override it -- press HOME on the device, pick $LAUNCHER_NAME, confirm 'Always'"
+    if [[ -z "$icept" ]]; then
+        [[ "$(home_activity)" == "$LAUNCHER_PKG"* ]] && echo applied || echo not-applied
         return
     fi
 
-    echo not-applied
+    # A launcher that declares SETUP_WIZARD itself already owns HOME.
+    [[ "$icept" == "$LAUNCHER_PKG"/* ]] && { echo applied; return; }
+
+    if ! is_wtprov "$icept"; then
+        echo "blocked:$icept owns the home intent and is not wtprovision"
+        return
+    fi
+
+    # wtprovision needs both keys to name the launcher.
+    local pair pkg act
+    pair=$(wtprov_cache_read)
+    pkg="${pair%% *}"; act="${pair#* }"
+    if [[ -n "$pair" && "$pkg" == "$LAUNCHER_PKG" && "$act" == "$LAUNCHER_PKG".* ]]; then
+        echo applied
+    else
+        echo not-applied
+    fi
 }
 
 launcher_default_apply() {
@@ -443,20 +596,9 @@ launcher_default_apply() {
         return 1
     fi
 
-    # Refuse before writing anything. Setting a preference the vendor intent
-    # will ignore does not hand the home screen over -- it just leaves a stale
-    # record, and a stale record is what started the incident this whole file
-    # now carries scars from. wtprovision reads only its own prefs cache, so
-    # the chooser advice printed below holds only for a launcher that declares
-    # SETUP_WIZARD itself; see launcher_default_state.
     local icept; icept=$(home_interceptor)
-    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
-        print_error "'$icept' owns the home intent on this firmware"
-        print_warning "No command on API 28 writes a preference covering CATEGORY_SETUP_WIZARD,"
-        print_warning "so the CLI cannot win it. Nothing was changed."
-        print_status "Finish it on the device: press HOME, choose $LAUNCHER_NAME, confirm 'Always'."
-        print_status "Nothing is disabled, so the projector keeps booting to the stock launcher"
-        print_status "until you do -- and still would if the preference ever went stale."
+    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]] && ! is_wtprov "$icept"; then
+        print_error "'$icept' owns the home intent and is not wtprovision; nothing was changed"
         return 1
     fi
 
@@ -475,30 +617,15 @@ launcher_default_apply() {
         return 1
     fi
 
-    # NOTHING IS DISABLED HERE, AND THAT IS THE POINT.
-    #
-    # This step used to run `pm disable-user` on the stock launcher first, on
-    # the premise that it would otherwise win the home race on the next boot.
-    # It never competes. The firmware dispatches home as MAIN + HOME +
-    # CATEGORY_SETUP_WIZARD; whatever declares SETUP_WIZARD wins and then starts
-    # the component cached in its own prefs by explicit name (the stock
-    # launcher until that cache is rewritten). Disabling that interceptor
-    # leaves the intent with zero candidates and the device stops booting --
-    # three days and a soldered UART console to undo. See docs/BOOT_DEADLOCK.md.
-    #
-    # Known cost of the cache route: a launcher in /data/app is unresolvable
-    # until user 0 unlocks at boot, and wtprovision retries its dispatch
-    # recursively until then (1531 retries in 9.5 s on this unit, no crash).
-    # A much slower boot could overflow that stack; the system restarts the
-    # persistent process and home arrives late. Not a brick.
-    #
-    # Leaving both enabled is what makes this safe to get wrong: a preference
-    # that goes stale degrades to "boots to the stock launcher" rather than
-    # "does not boot".
+    if [[ -n "$icept" ]] && is_wtprov "$icept"; then
+        launcher_default_apply_wtprov "$comp"
+        return
+    fi
+
+    # No interceptor: the recorded preference decides HOME.
     adb_root_exec "cmd package set-home-activity $comp" >/dev/null || true
 
-    # Read back the question that decides the next boot, not the one that is
-    # convenient to ask. set-home-activity reports Success either way.
+    # set-home-activity reports Success either way, so read it back.
     local owner; owner=$(home_owner)
     if [[ "$owner" == "$LAUNCHER_PKG"* ]]; then
         return 0
@@ -510,13 +637,56 @@ launcher_default_apply() {
     return 1
 }
 
+# NOTHING IS DISABLED HERE, AND THAT IS THE POINT. Disabling wtprovision leaves
+# the home intent with no candidate and the device stops booting; three days
+# and a soldered UART console to undo. See docs/BOOT_DEADLOCK.md.
+#
+# Known cost: a launcher in /data/app cannot be resolved until user 0 unlocks
+# at boot, and wtprovision retries its dispatch recursively until then (1531
+# retries in 9.5 s on this unit, no crash). A much slower boot could overflow
+# that stack; the system restarts the persistent process and home arrives
+# late. Not a brick.
+launcher_default_apply_wtprov() {
+    local comp="$1" full focus
+
+    # Checked before writing, so a missing process changes nothing.
+    if [[ -z "$(wtprov_pids)" ]]; then
+        print_error "wtprovision is not running; nothing was changed"
+        return 1
+    fi
+
+    full=$(full_component "$LAUNCHER_PKG" "$comp")
+    print_status "Writing $LAUNCHER_PKG / $full into wtprovision's cache"
+    wtprov_cache_write "$LAUNCHER_PKG" "$full" || return 1
+
+    if ! wtprov_restart; then
+        print_warning "The cache was written; revert with: bash scripts/UNLOCK.sh --revert"
+        return 1
+    fi
+
+    # The file saying Projectivy proves nothing; the focused window does.
+    focus=$(home_focus)
+    if [[ "$focus" != "$LAUNCHER_PKG" ]]; then
+        print_error "the cache was written but HOME did not take effect; revert with: bash scripts/UNLOCK.sh --revert"
+        print_warning "HOME landed on '${focus:-nothing}'"
+        return 1
+    fi
+    return 0
+}
+
 launcher_default_revert() {
-    # Re-enable first: a disabled package registers no activities, so the
-    # component lookup below would come back empty.
+    # Re-enable first: a disabled package registers no activities, and an
+    # older version of this script did disable it.
     adb_root_exec "pm enable $STOCK_LAUNCHER" >/dev/null || true
     if package_disabled "$STOCK_LAUNCHER"; then
         print_error "Could not re-enable $STOCK_LAUNCHER"
         return 1
+    fi
+
+    local icept; icept=$(home_interceptor)
+    if [[ -n "$icept" ]] && is_wtprov "$icept"; then
+        launcher_default_revert_wtprov
+        return
     fi
 
     local comp; comp=$(home_component_of "$STOCK_LAUNCHER")
@@ -534,37 +704,39 @@ launcher_default_revert() {
     return 0
 }
 
-# ---------------------------------------------------------------------------
-# step: cleanup_leftovers
-# ---------------------------------------------------------------------------
-LEFTOVERS=(/system/app/APKPurev32051ap /system/app/NovaLauncher_old)
+# Put the cache back from the backup, or write the stock pair when there is
+# none, then restart wtprovision so it rereads it.
+launcher_default_revert_wtprov() {
+    local cache bk focus
+    cache=$(wtprov_cache_path)
 
-cleanup_leftovers_describe() {
-    echo "Remove empty and duplicated folders left by earlier unlock attempts"
-}
+    if [[ -z "$(wtprov_pids)" ]]; then
+        print_error "wtprovision is not running; nothing was changed"
+        return 1
+    fi
 
-cleanup_leftovers_state() {
-    local d
-    for d in "${LEFTOVERS[@]}"; do
-        adb_root_exec "ls -d $d" >/dev/null 2>&1 && { echo not-applied; return; }
-    done
-    echo applied
-}
+    bk=$(remote_sha256 "$WTPROV_BACKUP")
+    if [[ -n "$bk" ]]; then
+        adb_root_exec "sh -c \"cat $WTPROV_BACKUP > $cache\"" >/dev/null 2>&1
+        if [[ "$(remote_sha256 "$cache")" != "$bk" ]]; then
+            print_error "Could not restore wtprovision's cache from $WTPROV_BACKUP"
+            return 1
+        fi
+        print_status "Restored wtprovision's cache from $WTPROV_BACKUP (sha256 $bk)"
+    else
+        # Vendor spelling, not a typo. No backup is taken here: the current
+        # cache is the launcher, not the original.
+        print_status "No backup at $WTPROV_BACKUP; writing the stock pair"
+        wtprov_cache_put "$STOCK_LAUNCHER" "$STOCK_LAUNCHER.WizardAciticity" || return 1
+    fi
 
-cleanup_leftovers_apply() {
-    system_rw || return 1
-    local d
-    for d in "${LEFTOVERS[@]}"; do
-        adb_root_exec "rm -rf $d" >/dev/null 2>&1 || true
-    done
-    system_ro
-    return 0
-}
+    wtprov_restart || return 1
 
-cleanup_leftovers_revert() {
-    # Deliberately not reversible: these are duplicates of files that remain
-    # elsewhere on the device. Saying so is better than pretending.
-    print_warning "cleanup_leftovers cannot be undone (the duplicates are gone)"
+    focus=$(home_focus)
+    if [[ "$focus" != "$STOCK_LAUNCHER" ]]; then
+        print_error "The cache was restored but HOME landed on '${focus:-nothing}', not $STOCK_LAUNCHER"
+        return 1
+    fi
     return 0
 }
 

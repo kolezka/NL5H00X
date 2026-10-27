@@ -67,7 +67,7 @@ show_status() {
     local step
     for step in "${UNLOCK_STEPS[@]}"; do step_line "$step"; done
     echo
-    printf "  home screen now: %s\n" "$(home_activity)"
+    printf "  home screen now: %s\n" "$(home_owner)"
     echo
 }
 
