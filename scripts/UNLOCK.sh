@@ -296,7 +296,11 @@ interactive() {
         case "$choice" in
             1)
                 if all_applied; then
-                    print_success "Everything is already applied"
+                    # Same HOME check as --apply-all; on failure it has already said why.
+                    if confirm_home_on_launcher; then
+                        print_success "Everything is already applied"
+                        rm -f "$RESUME_MARKER"
+                    fi
                 elif [[ "$ASSUME_YES" == "1" ]] || confirm "Apply all steps now?"; then
                     apply_all || true
                 fi
