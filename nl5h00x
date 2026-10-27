@@ -1,0 +1,75 @@
+#!/bin/bash
+# NL5H00X toolkit command line and guided menu.
+
+set -uo pipefail
+
+resolved="$0"
+while [[ -L "$resolved" ]]; do
+    target=$(readlink "$resolved") || exit 1
+    case "$target" in
+        /*) resolved="$target" ;;
+        *)  resolved="$(dirname "$resolved")/$target" ;;
+    esac
+done
+HERE=$(cd "$(dirname "$resolved")" && pwd) || exit 1
+SCRIPTS="$HERE/scripts"
+
+usage() {
+    cat <<'EOF'
+Usage: nl5h00x [command] [args...]
+
+  (no command)             guided menu
+  status                   unlock, root and backup state
+  backup                   back up the device
+  unlock [--yes]           unlock the launcher
+  revert [--yes]           restore the stock launcher
+  install <apk> [flags]    install an app
+  root <command> [args]    status, install, allow PKG, deny PKG, revert
+  tools                    tools and hidden settings
+  repair                   diagnose a launcher boot failure
+  install-gate <command>  off, on, status (not available yet)
+  help                     show this usage
+EOF
+}
+
+command="${1:-}"
+if [[ $# -gt 0 ]]; then shift; fi
+case "$command" in
+    '')
+        source "$SCRIPTS/lib/menu.sh"
+        guided_menu
+        ;;
+    status)
+        "$SCRIPTS/UNLOCK.sh" --status "$@" || exit $?
+        "$SCRIPTS/ROOT.sh" --status "$@" || exit $?
+        source "$SCRIPTS/lib/menu.sh"
+        backup_status
+        ;;
+    backup) exec "$SCRIPTS/MAKE_BACKUP.sh" "$@" ;;
+    unlock) exec "$SCRIPTS/UNLOCK.sh" --apply-all "$@" ;;
+    revert) exec "$SCRIPTS/UNLOCK.sh" --revert "$@" ;;
+    install) exec "$SCRIPTS/INSTALL_APP.sh" "$@" ;;
+    root)
+        root_command="${1:-}"
+        if [[ $# -gt 0 ]]; then shift; fi
+        case "$root_command" in
+            status)  exec "$SCRIPTS/ROOT.sh" --status "$@" ;;
+            install) exec "$SCRIPTS/ROOT.sh" --apply-all "$@" ;;
+            allow)   exec "$SCRIPTS/ROOT.sh" --allow "$@" ;;
+            deny)    exec "$SCRIPTS/ROOT.sh" --deny "$@" ;;
+            revert)  exec "$SCRIPTS/ROOT.sh" --revert "$@" ;;
+            *)       usage >&2; exit 2 ;;
+        esac
+        ;;
+    tools) exec "$SCRIPTS/TOOLS.sh" "$@" ;;
+    repair) exec "$SCRIPTS/UNLOCK.sh" --repair "$@" ;;
+    install-gate)
+        if [[ -x "$SCRIPTS/INSTALL_GATE.sh" ]]; then
+            exec "$SCRIPTS/INSTALL_GATE.sh" "$@"
+        fi
+        echo 'install-gate is not available yet' >&2
+        exit 2
+        ;;
+    help|-h|--help) usage ;;
+    *) usage >&2; exit 2 ;;
+esac
