@@ -390,11 +390,36 @@ sandbox_finish "$sb"
 # ---------------------------------------------------------------------------
 head_ "the emulated device carries wtprovision's launcher cache"
 new_sandbox
-f="$sb/state/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml"
+WTPROV_XML=/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml
+f="$sb/state$WTPROV_XML"
 [[ -f "$f" ]] && ok "cache file seeded" || bad "no cache file in the seed"
 grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" && ok "stock pkg" || bad "stock pkg missing"
 out=$(dev "$sb" 'pidof com.newlink.wtprovision'); [[ "$out" =~ ^[0-9]+$ ]] && ok "pidof answers" || bad "pidof: '$out'"
 PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" adb shell "su -c 'sh -c \"cat /data/local/tmp/x.xml > $(echo /data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml)\"'" >/dev/null 2>&1
+
+# A firmware that ignores the cache starts stock, never a stale earlier pick.
+dev "$sb" "cmd package set-home-activity $NOVA/.Launcher" >/dev/null
+[[ "$(dev "$sb" 'dumpsys window')" == *"u0 $NOVA/"* ]] && ok "a non-stock home is selected" || bad "set-home-activity did not take"
+dev "$sb" FAKE_ADB_WTPROV_IGNORES_CACHE=1 'kill -9 2166' >/dev/null
+out=$(dev "$sb" 'dumpsys window')
+[[ "$out" == *"u0 $STOCK/"* ]] && ok "ignored cache restarts stock" || bad "ignored cache kept: $out"
+
+# A failed cache write must reach the toolkit as a nonzero status. Same piped
+# form adb_root_exec sends.
+echo probe > "$sb/state/data/local/tmp/src.xml"
+# dev cannot carry this: it reads any argument holding "=" as an env setting.
+out=$(PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" \
+    adb shell "echo 'sh -c \"cat /data/local/tmp/src.xml > /data/local/tmp\"' | su 2>&1; echo __RC__=\$?" 2>&1 | tr -d '\r')
+[[ "$out" == *"__RC__=1"* ]] && ok "root redirect to a directory fails" || bad "root redirect to a directory: '$out'"
+before=$(cat "$f")
+out=$(PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" \
+    adb shell "sh -c \"cat /data/local/tmp/src.xml > $WTPROV_XML\"; echo __RC__=\$?" 2>&1 | tr -d '\r')
+[[ "$out" == *"__RC__=1"* && "$(cat "$f")" == "$before" ]] \
+    && ok "non-root redirect fails and leaves the cache" || bad "non-root redirect: '$out'"
+
+# An interceptor override set to empty means no interceptor, seed or not.
+out=$(dev "$sb" FAKE_ADB_HOME_INTERCEPTOR= 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.SETUP_WIZARD')
+[[ "$out" != *wtprovision* ]] && ok "empty interceptor override wins" || bad "empty override still lists: $out"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

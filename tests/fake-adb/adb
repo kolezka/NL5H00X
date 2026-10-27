@@ -180,7 +180,9 @@ sget() { [[ -f "$STATE/$1" ]] && cat "$STATE/$1" || echo "$2"; }
 # The component that intercepts the firmware's home intent, or empty. The env
 # knob wins so a test can force one; otherwise the seeded state file decides.
 home_interceptor_comp() {
-    if [[ -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" ]]; then
+    # Set-ness, not emptiness: an explicit empty value means "no interceptor".
+    if [[ -n "${FAKE_ADB_HOME_INTERCEPTOR+x}" ]]; then
+        [[ -n "$FAKE_ADB_HOME_INTERCEPTOR" ]] || return 0
         printf '%s\n' "$FAKE_ADB_HOME_INTERCEPTOR"
     elif [[ -f "$STATE/home_interceptor" ]]; then
         tr -d '\r\n' < "$STATE/home_interceptor"; echo
@@ -190,9 +192,13 @@ home_interceptor_comp() {
 WTPROV_CACHE="/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml"
 
 # wtprovision starts whatever its own cache names, as it does on the device.
-# FAKE_ADB_WTPROV_IGNORES_CACHE=1 models a firmware that ignores the cache.
+# FAKE_ADB_WTPROV_IGNORES_CACHE=1 models a firmware that ignores the cache: it
+# starts stock, so an earlier non-stock pick can never look like a cache hit.
 wtprov_apply_cache() {
-    [[ "${FAKE_ADB_WTPROV_IGNORES_CACHE:-0}" == "1" ]] && return 0
+    if [[ "${FAKE_ADB_WTPROV_IGNORES_CACHE:-0}" == "1" ]]; then
+        echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
+        return 0
+    fi
     local f="${STATE}${WTPROV_CACHE}" pkg act
     [[ -f "$f" ]] || return 0
     pkg=$(sed -n 's|.*<string name="home_pkg">\(.*\)</string>.*|\1|p' "$f" | head -1)
@@ -494,12 +500,17 @@ run_remote() {
             mkdir -p "$(dirname "${STATE}${dst}")"
             # The shell truncates the target before cat runs, so a missing
             # source still empties it, as on the device.
-            : > "${STATE}${dst}"
+            if [[ -d "${STATE}${dst}" ]]; then
+                echo "sh: can't create $dst: Is a directory" >&2; return 1
+            fi
+            if ! { : > "${STATE}${dst}"; } 2>/dev/null; then
+                echo "sh: can't create $dst: Permission denied" >&2; return 1
+            fi
             if [[ ! -f "${STATE}${src}" ]]; then
                 echo "cat: $src: No such file or directory" >&2; return 1
             fi
             cat "${STATE}${src}" > "${STATE}${dst}"
-            return 0 ;;
+            return ;;
 
         # --- home activity ----------------------------------------------
         "cmd package query-activities"*SETUP_WIZARD*)
@@ -1052,11 +1063,7 @@ case "$subcmd" in
         # vendor intent. With one, the screen is whatever wtprovision's own
         # cache names, and a firmware that ignores the cache starts stock.
         if [[ -f "$STATE/home_activity" && -n "$(home_interceptor_comp)" ]]; then
-            if [[ "${FAKE_ADB_WTPROV_IGNORES_CACHE:-0}" == "1" ]]; then
-                echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
-            else
-                wtprov_apply_cache
-            fi
+            wtprov_apply_cache
         fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
         # Nothing survives a restart except what the system brings back up: the

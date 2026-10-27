@@ -120,7 +120,7 @@ EOF
 echo "com.newlink.hisilauncher" > "$STATE/running"
 
 # wtprovision owns HOME on this firmware and starts whatever its own
-# SharedPreferences cache names. Same 4-line layout as the real file.
+# SharedPreferences cache names. Same five-line layout as the real file.
 WTPROV_PREFS="$STATE/data/user_de/0/com.newlink.wtprovision/shared_prefs"
 mkdir -p "$WTPROV_PREFS"
 cat > "$WTPROV_PREFS/com.newlink.wtprovision.xml" <<'EOF'
