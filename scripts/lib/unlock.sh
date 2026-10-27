@@ -212,7 +212,7 @@ wtprov_cache_require() {
 # Why the backup cannot be trusted, or nothing when it can: it must match the
 # sha256 recorded when it was taken and hold both keys.
 wtprov_backup_problem() {
-    local bk rec xml
+    local bk rec
     bk=$(remote_sha256 "$WTPROV_BACKUP")
     if [[ -z "$bk" ]]; then
         echo "there is no backup at $WTPROV_BACKUP"; return
@@ -224,11 +224,17 @@ wtprov_backup_problem() {
     if [[ "$rec" != "$bk" ]]; then
         echo "its sha256 $bk does not match the recorded ${rec:-empty} value"; return
     fi
-    if ! xml=$(adb_root_exec "cat $WTPROV_BACKUP" 2>/dev/null) \
-        || [[ -z "$(printf '%s\n' "$xml" | prefs_value home_pkg)" ]] \
-        || [[ -z "$(printf '%s\n' "$xml" | prefs_value home_activity)" ]]; then
+    if ! wtprov_backup_has_pair; then
         echo "it has no home_pkg/home_activity pair"; return
     fi
+}
+
+# Does the file at WTPROV_BACKUP hold both home keys?
+wtprov_backup_has_pair() {
+    local xml
+    xml=$(adb_root_exec "cat $WTPROV_BACKUP" 2>/dev/null) || return 1
+    [[ -n "$(printf '%s\n' "$xml" | prefs_value home_pkg)" \
+        && -n "$(printf '%s\n' "$xml" | prefs_value home_activity)" ]]
 }
 
 # Record the backup's sha256 in WTPROV_BACKUP_SHA: staged, written as root by
@@ -252,25 +258,35 @@ wtprov_backup_record() {
     return 0
 }
 
-# Copy the cache to WTPROV_BACKUP once and record its sha256.
-# Returns 0 with a trusted backup, 2 when a file is already at the backup path
-# but is not a trusted backup (left in place), 1 on failure.
+# Copy the cache to WTPROV_BACKUP once and record its sha256. Returns 0 only
+# with a trusted backup; an untrusted file that differs from the cache is a refusal.
 wtprov_cache_backup() {
-    local before bk problem
+    local before bk problem aside
     before=$(wtprov_cache_require) || return 1
     bk=$(remote_sha256 "$WTPROV_BACKUP")
     if [[ "$bk" == "$before" ]]; then
-        # Same bytes as the live cache, so recording its hash is truthful.
         if [[ -n "$(wtprov_backup_problem)" ]]; then
+            if ! wtprov_backup_has_pair; then
+                print_error "wtprovision's cache has no home_pkg/home_activity pair; nothing was written"
+                return 1
+            fi
+            # Same bytes as the live cache, so recording its hash is truthful.
             wtprov_backup_record "$bk" || return 1
         fi
         print_status "Backup of wtprovision's cache already at $WTPROV_BACKUP"
     elif [[ -n "$bk" ]]; then
         problem=$(wtprov_backup_problem)
         if [[ -n "$problem" ]]; then
-            print_warning "The file at $WTPROV_BACKUP differs from the cache and is not a trusted backup: $problem"
-            print_warning "Leaving it in place; --revert will not use it and writes the stock pair instead"
-            return 2
+            aside="mv $WTPROV_BACKUP $WTPROV_BACKUP.old"
+            if adb_root_exec "cat $WTPROV_BACKUP_SHA" >/dev/null 2>&1; then
+                aside="$aside; mv $WTPROV_BACKUP_SHA $WTPROV_BACKUP_SHA.old"
+            fi
+            print_error "The file at $WTPROV_BACKUP (sha256 $bk) differs from the cache and is not a trusted backup: $problem"
+            print_error "Nothing was written. Set it aside, then run again:"
+            # Outer single quotes: adb shell joins its arguments, so host-side
+            # double quotes would not reach the device.
+            print_error "  adb shell 'su 0 sh -c \"$aside\"'"
+            return 1
         fi
         print_warning "Keeping the existing backup at $WTPROV_BACKUP: it differs from the current cache, so it is the older original"
     else
@@ -331,17 +347,11 @@ wtprov_cache_put() {
     return 0
 }
 
-# Back up once, then write the pair built from the trusted backup. When the
-# backup path holds a file that is not trusted, the live cache is the only
-# source left.
+# Back up once, then write the pair built from the trusted backup. Without a
+# trusted backup nothing is written.
 wtprov_cache_write() {
-    local rc=0
-    wtprov_cache_backup || rc=$?
-    case "$rc" in
-        0) wtprov_cache_put "$1" "$2" "$WTPROV_BACKUP" ;;
-        2) wtprov_cache_put "$1" "$2" "$(wtprov_cache_path)" ;;
-        *) return 1 ;;
-    esac
+    wtprov_cache_backup || return 1
+    wtprov_cache_put "$1" "$2" "$WTPROV_BACKUP"
 }
 
 # wtprovision's pid(s), space separated, empty when it is not running.
@@ -784,10 +794,10 @@ launcher_default_revert() {
     return 0
 }
 
-# Put the cache back from a trusted backup, or write the stock pair when there
-# is none, then restart wtprovision so it rereads it.
+# Put the cache back from a trusted backup that names the stock launcher, else
+# write the stock pair, then restart wtprovision so it rereads it.
 launcher_default_revert_wtprov() {
-    local cache bk problem focus
+    local cache bk bkpkg problem focus
     cache=$(wtprov_cache_path)
 
     if [[ -z "$(wtprov_pids)" ]]; then
@@ -797,6 +807,20 @@ launcher_default_revert_wtprov() {
     wtprov_cache_require >/dev/null || return 1
 
     problem=$(wtprov_backup_problem)
+    if [[ -n "$problem" ]]; then
+        if [[ -n "$(remote_sha256 "$WTPROV_BACKUP")" ]]; then
+            print_warning "The backup at $WTPROV_BACKUP is not trusted: $problem"
+        fi
+        print_status "Not restoring a backup ($problem); writing the stock pair"
+    else
+        # Revert exists to restore stock, so a backup naming another launcher is not used.
+        bkpkg=$(adb_root_exec "cat $WTPROV_BACKUP" 2>/dev/null | prefs_value home_pkg)
+        if [[ "$bkpkg" != "$STOCK_LAUNCHER" ]]; then
+            problem="names $bkpkg"
+            print_warning "The backup at $WTPROV_BACKUP names $bkpkg, not the stock launcher; writing the stock pair instead"
+        fi
+    fi
+
     if [[ -z "$problem" ]]; then
         bk=$(remote_sha256 "$WTPROV_BACKUP")
         adb_root_exec "sh -c \"cat $WTPROV_BACKUP > $cache\"" >/dev/null 2>&1
@@ -806,12 +830,8 @@ launcher_default_revert_wtprov() {
         fi
         print_status "Restored wtprovision's cache from $WTPROV_BACKUP (sha256 $bk)"
     else
-        if [[ -n "$(remote_sha256 "$WTPROV_BACKUP")" ]]; then
-            print_warning "The backup at $WTPROV_BACKUP is not trusted: $problem"
-        fi
-        # No trusted backup, so the current cache is the only source to edit.
+        # No usable backup, so the current cache is the only source to edit.
         # Vendor spelling, not a typo.
-        print_status "Not restoring a backup ($problem); writing the stock pair"
         wtprov_cache_put "$STOCK_LAUNCHER" "$STOCK_LAUNCHER.WizardAciticity" "$cache" || return 1
     fi
 

@@ -471,6 +471,54 @@ grep -q 'name="home_pkg">com.spocky.projengmenu<' "$f" && ok "and the cache name
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "a foreign file at the backup path stops the unlock before any write"
+# Nothing is written without a trusted backup. An unrecorded file that differs
+# from the cache is set aside by hand, not overwritten and not ignored.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+seed=$(cat "$f")
+echo '<map>foreign</map>' > "$bk"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock refuses" || bad "unlock went ahead with a foreign file at the backup path"
+[[ "$out" == *"/data/local/tmp/wtprov_prefs.before.xml"* && "$out" == *"mv "* ]] \
+    && ok "names the file and the mv that sets it aside" || bad "no path or mv command: $(echo "$out" | grep -i backup | head -3)"
+[[ "$(cat "$f")" == "$seed" ]] && ok "the cache is unchanged" || bad "the cache was written: $(tr -d '\n' < "$f")"
+[[ "$(cat "$bk")" == '<map>foreign</map>' ]] && ok "the foreign file is untouched" || bad "the foreign file changed"
+rm "$bk"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" == *"RC=0"* ]] && ok "control: with the file gone the unlock completes" \
+    || { bad "control: unlock failed without the foreign file"; echo "$out" | tail -6 | sed 's/^/        /'; }
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "revert writes the stock pair when the backup names another launcher"
+# Revert exists to put the stock launcher back. An unrecorded backup equal to a
+# live cache naming Nova is recorded, but restoring it would bring Nova back.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+sed -e "s|>$STOCK.WizardAciticity<|>$NOVA.NovaLauncher<|" -e "s|>$STOCK<|>$NOVA<|" "$f" > "$bk"
+cp "$bk" "$f"
+grep -q "name=\"home_pkg\">$NOVA<" "$f" && grep -q "name=\"home_activity\">$NOVA.NovaLauncher<" "$f" \
+    && ok "control: the live cache names Nova" || bad "control: Nova cache not built"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" == *"RC=0"* ]] && ok "unlock completes" || { bad "unlock failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+grep -q "name=\"home_pkg\">$PROJECTIVY<" "$f" && ok "Projectivy is in the cache" || bad "cache home_pkg is not Projectivy"
+out=$(unlock "$sb" --revert --yes)
+[[ "$out" == *"RC=0"* ]] && ok "revert completes" || { bad "revert failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+grep -q "name=\"home_pkg\">$STOCK<" "$f" \
+    && grep -q "name=\"home_activity\">$STOCK.WizardAciticity<" "$f" \
+    && ok "cache holds the stock pair" || bad "cache is: $(tr -d '\n' < "$f")"
+[[ "$out" == *"names $NOVA, not the stock launcher"* ]] \
+    && ok "says the backup names Nova" || bad "did not say the backup names Nova"
+home=$(home_now "$sb")
+[[ "$home" == "$STOCK"* ]] && ok "home screen is the stock launcher" || bad "home is '$home'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "a HOME press that fails is not read as success"
 
 new_sandbox
