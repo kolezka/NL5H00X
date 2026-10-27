@@ -357,6 +357,35 @@ echo "$out" | grep -qE '\[done\][[:space:]]+launcher_default' \
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "a cache that names the launcher while HOME shows stock is not 'nothing to do'"
+# wtprovision reads its cache when it starts. A cache written while it kept
+# running leaves HOME on stock until it restarts, and the file alone hides that.
+
+new_sandbox
+unlock "$sb" --apply-all --yes >/dev/null
+out=$(unlock "$sb" FAKE_ADB_WTPROV_STALE=1 --status)
+[[ "$out" == *"RC=0"* && "$out" != *"HOME shows"* ]] \
+    && ok "control: no warning while HOME agrees with the cache" || bad "control: warned with HOME on the launcher"
+echo "$STOCK/.WizardAciticity" > "$sb/state/home_activity"
+out=$(unlock "$sb" FAKE_ADB_WTPROV_STALE=1 --status)
+echo "$out" | grep -qE '^\[WARN\] .*HOME shows' \
+    && ok "--status warns that HOME disagrees with the cache" || bad "no status warning: $(echo "$out" | tail -4)"
+echo "$out" | grep -qE '^  \[(done|todo|blocked)\] +launcher_default +[^[:space:]]' \
+    && ok "the step row keeps its format" || bad "row format: $(echo "$out" | grep launcher_default)"
+echo "$out" | grep -qE '^[[:space:]]+home screen now: [a-z]' \
+    && ok "the home line keeps its format" || bad "home line format changed"
+pid1=$(cat "$sb/state/wtprov_pid")
+out=$(unlock "$sb" FAKE_ADB_WTPROV_STALE=1 --apply-all --yes)
+pid2=$(cat "$sb/state/wtprov_pid")
+[[ "$out" == *"RC=0"* ]] && ok "the run completes" || { bad "run failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+[[ "$out" == *"HOME shows $STOCK; restarting wtprovision"* ]] \
+    && ok "says HOME disagrees and restarts wtprovision" || bad "no HOME-shows message: $(echo "$out" | tail -4)"
+[[ "$pid2" != "$pid1" ]] && ok "wtprovision was restarted" || bad "pid unchanged: $pid1"
+home=$(home_now "$sb")
+[[ "$home" == "$PROJECTIVY"* ]] && ok "HOME lands on Projectivy" || bad "home is '$home'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "a missing wtprovision process is an error, not a silent skip"
 # Without a running process there is nothing to restart, so a cache write
 # would sit unread until the next boot. That has to stop the unlock loudly.

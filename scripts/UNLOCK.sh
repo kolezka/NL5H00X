@@ -67,13 +67,51 @@ step_line() {
     printf "  %b %-18s %s\n" "$label" "$step" "$desc"
 }
 
+# The package wtprovision's cache names, when wtprovision intercepts HOME and
+# the cache holds a pair; empty otherwise.
+wtprov_cache_pkg() {
+    local icept pair
+    icept=$(home_interceptor)
+    [[ -n "$icept" ]] && is_wtprov "$icept" || return 0
+    pair=$(wtprov_cache_read)
+    [[ -n "$pair" ]] && echo "${pair%% *}"
+    return 0
+}
+
 show_status() {
     print_section "CURRENT STATE"
-    local step
+    local step cached focus
     for step in "${UNLOCK_STEPS[@]}"; do step_line "$step"; done
     echo
     printf "  home screen now: %s\n" "$(home_owner)"
+    # The cache is only read when wtprovision starts, so the two can disagree.
+    # No HOME press here: --status changes nothing, so only a home screen
+    # already in front counts, not whatever app is open.
+    cached=$(wtprov_cache_pkg)
+    if [[ -n "$cached" ]]; then
+        focus=$(focused_package)
+        if [[ -n "$focus" && "$focus" != "$cached" && -n "$(home_component_of "$focus")" ]]; then
+            print_warning "HOME shows $focus, but wtprovision's cache names $cached; --apply-all restarts wtprovision"
+        fi
+    fi
     echo
+}
+
+# All steps applied: press HOME and make sure it agrees with the cache,
+# restarting wtprovision once if it does not.
+confirm_home_on_launcher() {
+    local shown focus
+    [[ -n "$(wtprov_cache_pkg)" ]] || return 0
+    shown=$(home_focus) || return 1
+    [[ "$shown" == "$LAUNCHER_PKG" ]] && return 0
+    shown="${shown:-nothing}"
+    print_warning "The cache names $LAUNCHER_PKG but HOME shows $shown; restarting wtprovision"
+    if wtprov_restart && focus=$(home_focus) && [[ "$focus" == "$LAUNCHER_PKG" ]]; then
+        print_success "HOME is on $LAUNCHER_NAME after the restart"
+        return 0
+    fi
+    print_error "HOME still shows '${focus:-$shown}', not $LAUNCHER_PKG; revert with: bash scripts/UNLOCK.sh --revert"
+    return 1
 }
 
 all_applied() {
@@ -328,6 +366,7 @@ main() {
         apply)
             show_status
             if all_applied; then
+                confirm_home_on_launcher || exit 1
                 rm -f "$RESUME_MARKER"
                 print_success "Nothing to do - everything is already applied"
                 exit 0

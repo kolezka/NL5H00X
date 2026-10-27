@@ -33,6 +33,8 @@
 #   FAKE_ADB_SYSTEM_CP_CORRUPTS
 #                         1 = a root `cp` or `cat X > Y` into /system drops the
 #                         last byte, so the copy's sha256 differs from its source
+#   FAKE_ADB_WTPROV_STALE 1 = a HOME press does not reread wtprovision's cache;
+#                         only a restart (kill -9 or reboot) does, as on the device
 #   FAKE_ADB_NO_UPTIME    1 = `cat /proc/uptime` fails with an error and status 1
 #   FAKE_ADB_REBOOT_FAILS 1 = `adb reboot` prints `error: closed`, exits 1 and
 #                         changes nothing
@@ -521,6 +523,7 @@ run_remote() {
                 echo "Error: Injecting to another application requires INJECT_EVENTS permission"
                 return 1
             fi
+            [[ "${FAKE_ADB_WTPROV_STALE:-0}" == "1" ]] && return 0
             [[ -n "$(home_interceptor_comp)" ]] && wtprov_apply_cache
             return 0 ;;
         "dumpsys window")

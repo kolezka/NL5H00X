@@ -439,6 +439,11 @@ home_focus() {
         return 1
     fi
     sleep "${HOME_SETTLE_SECS:-2}"
+    focused_package
+}
+
+# The package whose window has focus now, without pressing anything.
+focused_package() {
     adb_root_exec "dumpsys window" 2>/dev/null | tr -d '\r' \
         | sed -n 's|.*mCurrentFocus=Window{[^ ]* [^ ]* \([^/ ]*\)/.*|\1|p' | head -1
 }
