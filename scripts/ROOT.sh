@@ -169,14 +169,6 @@ revert_all() {
 # ---------------------------------------------------------------------------
 # repair: sud installed but not coming up, or adb unreachable
 # ---------------------------------------------------------------------------
-repair_describe() {
-    cat <<EOF
-Diagnose a projector whose root daemon does not come up after a reboot --
-usually SUD_SECLABEL naming a domain this device's SELinux policy does not
-define -- and print the manual equivalent when adb is not reachable.
-EOF
-}
-
 repair_manual_instructions() {
     cat <<EOF
 

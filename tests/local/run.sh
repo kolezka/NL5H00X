@@ -1,7 +1,7 @@
 #!/bin/bash
 # Known toolkit invocation paths resolve to the stand-in; an absent fake fails closed.
 # This is not an operating-system sandbox or a security boundary.
-# The bypass audit covers all of scripts/, including the transport adapter.
+# The bypass audit covers all of scripts/.
 set -uo pipefail
 LC_ALL=C
 export LC_ALL
@@ -28,24 +28,6 @@ if [[ "$PT_FAKE_ADB_CANONICAL" != /* || "${PT_FAKE_ADB_CANONICAL##*/}" != adb \
 fi
 fake_dir="$(cd "${PT_FAKE_ADB_CANONICAL%/*}" && pwd -P)" || exit 2
 PT_FAKE_ADB_CANONICAL="$fake_dir/adb"
-PT_TRANSPORT=${PT_TRANSPORT:-fake}
-if [[ "$PT_TRANSPORT" != fake ]]; then
-    echo 'test runner requires PT_TRANSPORT=fake' >&2
-    exit 2
-fi
-if [[ "${PT_ADB_BIN+x}" == x ]]; then
-    if [[ "$PT_ADB_BIN" != /* || "${PT_ADB_BIN##*/}" != adb || ! -f "$PT_ADB_BIN" || ! -x "$PT_ADB_BIN" ]]; then
-        fail_fake_path adapter
-    fi
-    adb_dir="$(cd "${PT_ADB_BIN%/*}" && pwd -P)" || exit 2
-    PT_ADB_BIN="$adb_dir/adb"
-    [[ "$PT_ADB_BIN" == "$PT_FAKE_ADB_CANONICAL" ]] || {
-        echo 'adapter fake must match the canonical fake' >&2
-        exit 2
-    }
-else
-    PT_ADB_BIN="$PT_FAKE_ADB_CANONICAL"
-fi
 if [[ "${TOOLKIT_SCRIPTS:-$WT/scripts}" != "$WT/scripts" ]]; then
     echo 'TOOLKIT_SCRIPTS must match this runner worktree and bypass baseline' >&2
     exit 2
@@ -84,7 +66,7 @@ BASH_SHIM
 chmod +x "$PT_CONTROL_DIR/bash-shim/bash"
 : > "$PT_SENTINEL_LOG"
 PATH="$fake_dir:$PT_CONTROL_DIR/sentinel:$PT_CONTROL_DIR/bash-shim:/usr/bin:/bin:/usr/sbin:/sbin"
-export PATH PT_TEST_BASH PT_TEST_RG PT_TEST_PYTHON PT_FAKE_ADB_CANONICAL PT_ADB_BIN PT_TRANSPORT
+export PATH PT_TEST_BASH PT_TEST_RG PT_TEST_PYTHON PT_FAKE_ADB_CANONICAL
 export PT_CONTROL_DIR PT_SENTINEL_LOG FAKE_ADB_STATE
 hash -r
 source "$LOCAL_DIR/lifecycle.sh"

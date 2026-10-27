@@ -57,20 +57,20 @@ else
 fi
 
 repo=$(make_repo literal-mutation) || { bad 'create literal mutation fixture'; exit 1; }
-cat > "$repo/scripts/lib/transport/raw-literal.sh" <<'EOF_MUTATION'
+cat > "$repo/scripts/lib/raw-literal.sh" <<'EOF_MUTATION'
 #!/bin/bash
 "/opt/vendor/adb" devices
 EOF_MUTATION
 PT_TEST_RG="$RG" "$TEST_BASH" "$repo/tests/local/bypass-audit.sh" --check > "$repo/check.log" 2>&1
 rc=$?
 if [[ "$rc" == 1 ]] && grep -q 'raw-literal.sh' "$repo/check.log"; then
-    ok 'audit rejects an absolute adb executable added under transport'
+    ok 'audit rejects an absolute adb executable added under scripts/lib'
 else
-    bad "transport literal mutation rc=$rc"
+    bad "scripts/lib literal mutation rc=$rc"
 fi
 
 repo=$(make_repo variable-mutation) || { bad 'create variable mutation fixture'; exit 1; }
-cat > "$repo/scripts/lib/transport/raw-variable.sh" <<'EOF_MUTATION'
+cat > "$repo/scripts/lib/raw-variable.sh" <<'EOF_MUTATION'
 #!/bin/bash
 RAW_ADB=/opt/vendor/adb
 "$RAW_ADB" devices
@@ -78,9 +78,9 @@ EOF_MUTATION
 PT_TEST_RG="$RG" "$TEST_BASH" "$repo/tests/local/bypass-audit.sh" --check > "$repo/check.log" 2>&1
 rc=$?
 if [[ "$rc" == 1 ]] && grep -q 'raw-variable.sh' "$repo/check.log"; then
-    ok 'audit rejects a variable-held absolute adb executable under transport'
+    ok 'audit rejects a variable-held absolute adb executable under scripts/lib'
 else
-    bad "transport variable mutation rc=$rc"
+    bad "scripts/lib variable mutation rc=$rc"
 fi
 
 printf 'bypass-regressions: passed: %s   failed: %s\n' "$PASS" "$FAIL"

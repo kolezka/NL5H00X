@@ -1,5 +1,7 @@
 # System Flow Refactor Implementation Plan
 
+Paused 2026-10-27: the staged modules were removed; see 2026-10-27-make-unlock-work-and-simplify-design.md.
+
 > For agentic workers: REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 ## Goal

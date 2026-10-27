@@ -81,14 +81,12 @@ EOF_SUITE
 make_fixture() {
     local name="$1" repo file
     repo="$control/$name"
-    mkdir -p "$repo/tests/local" "$repo/tests/fake-adb" "$repo/tests/contracts" "$repo/scripts/lib/transport"
+    mkdir -p "$repo/tests/local" "$repo/tests/fake-adb" "$repo/tests/contracts" "$repo/scripts/lib"
     for file in run.sh lifecycle.sh controls.sh bypass-audit.sh sentinel-adb capture-tree.sh; do
         cp "$SUBJECT_ROOT/tests/local/$file" "$repo/tests/local/$file" || return 1
     done
     copy_if_present "$SUBJECT_ROOT/tests/local/supervise.py" "$repo/tests/local/supervise.py"
     cp "$SUBJECT_ROOT/tests/fake-adb/adb" "$repo/tests/fake-adb/adb" || return 1
-    cp "$ROOT/scripts/lib/transport/select.sh" "$repo/scripts/lib/transport/select.sh" || return 1
-    cp "$ROOT/scripts/lib/transport/adb.sh" "$repo/scripts/lib/transport/adb.sh" || return 1
     chmod +x "$repo/tests/local/run.sh" "$repo/tests/local/bypass-audit.sh" "$repo/tests/local/sentinel-adb" "$repo/tests/fake-adb/adb"
     [[ ! -e "$repo/tests/local/supervise.py" ]] || chmod +x "$repo/tests/local/supervise.py"
     make_suite "$repo/tests/local/lifecycle-tests.sh" 'lifecycle: passed: 1   failed: 0' 0 \
@@ -137,11 +135,10 @@ repo=$(make_fixture no-timeout) || { bad 'create no-timeout fixture'; exit 1; }
 run_runner "$repo" "$repo/output" default "$TEST_BASH" /definitely/missing-timeout
 rc=$?
 if [[ "$rc" == 0 ]] \
-   && grep -q '^\[PASS\] adapter route decoded token ' "$repo/output" \
    && grep -q '^\[PASS\] legacy PATH route decoded token ' "$repo/output" \
-   && grep -q '^\[PASS\] adapter missing fake aborted with status 2 before suites and sentinel$' "$repo/output" \
+   && grep -q '^\[PASS\] legacy missing fake aborted with status 2 before suites and sentinel$' "$repo/output" \
    && grep -q '^\[PASS\] legacy non-executable fake aborted with status 2 before suites and sentinel$' "$repo/output"; then
-    ok 'runner has no GNU timeout dependency and validates both fake routes'
+    ok 'runner has no GNU timeout dependency and validates the fake PATH route'
 else
     bad "runner timeout or route controls rc=$rc"
 fi

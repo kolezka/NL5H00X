@@ -23,15 +23,8 @@ controls_invalid_fake() {
     (
         PATH="$PT_CONTROL_DIR/sentinel:$PATH"
         export PATH
-        if [[ "$route" == adapter ]]; then
-            PT_ADB_BIN="$invalid"
-            PT_FAKE_ADB_CANONICAL="$PT_FAKE_ADB_CANONICAL"
-            export PT_ADB_BIN PT_FAKE_ADB_CANONICAL
-        else
-            unset PT_ADB_BIN
-            PT_FAKE_ADB_CANONICAL="$invalid"
-            export PT_FAKE_ADB_CANONICAL
-        fi
+        PT_FAKE_ADB_CANONICAL="$invalid"
+        export PT_FAKE_ADB_CANONICAL
         PT_TEST_PREFLIGHT_ONLY=1 "$PT_TEST_BASH" "$LOCAL_DIR/run.sh"
     ) > "$output" 2>&1
     rc=$?
@@ -47,7 +40,7 @@ controls_invalid_fake() {
 }
 
 controls_run() {
-    local seed encoded decoded expected count route mode
+    local seed encoded decoded expected route mode
     printf -v seed '%04x%04x%04x%04x' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM"
     printf '%s\n' "$seed" > "$FAKE_ADB_STATE/control-seed"
 
@@ -74,26 +67,7 @@ controls_run() {
     fi
     printf '[PASS] legacy PATH route decoded token %s; invocation adb __pt_control recorded\n' "$decoded"
 
-    PT_TRANSPORT=fake
-    PT_ADB_BIN="$PT_FAKE_ADB_CANONICAL"
-    export PT_TRANSPORT PT_ADB_BIN
-    source "$WT/scripts/lib/transport/adb.sh" || return 1
-    encoded=$(adb_t_run __pt_control) || {
-        echo '[FAIL] adapter route did not answer through adb_t_run' >&2
-        return 1
-    }
-    decoded=$(decode_control "$encoded") || {
-        echo '[FAIL] adapter route returned an invalid control response' >&2
-        return 1
-    }
-    count=$(grep -Fxc $'adb\t__pt_control' "$FAKE_ADB_STATE/invocations.log")
-    if [[ "$decoded" != "$seed" || "$count" != 2 ]]; then
-        echo '[FAIL] adapter decoded token or invocation count did not match' >&2
-        return 1
-    fi
-    printf '[PASS] adapter route decoded token %s through adb_t_run; canonical invocation count=2\n' "$decoded"
-
-    for route in adapter legacy; do
+    for route in legacy; do
         for mode in missing non-executable; do
             controls_invalid_fake "$route" "$mode" || return 1
         done

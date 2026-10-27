@@ -1,5 +1,5 @@
 # Format: repository-relative-v1
-# Scope: all of scripts/, including scripts/lib/transport/.
+# Scope: all of scripts/.
 # Historical absolute-path baseline remains in git blob 69abc5299bb94ca102df558f8d4fc1f15ab0a30e.
 # Each result is sorted and recorded with repository-relative filenames.
 COMMAND rg -n '(^|[^-_./[:alnum:]])adb[[:space:]]' scripts/
@@ -62,15 +62,14 @@ scripts/MAKE_BACKUP.sh:62:    adb shell cmd package get-home-activity > current-
 scripts/MAKE_BACKUP.sh:73:    if adb backup -all -f complete-app-backup.ab 2>/dev/null; then
 scripts/ROOT.sh:139:    print_warning "sud only starts on the next boot. Reboot to bring it up:  adb reboot"
 scripts/ROOT.sh:170:# repair: sud installed but not coming up, or adb unreachable
-scripts/ROOT.sh:176:define -- and print the manual equivalent when adb is not reachable.
-scripts/ROOT.sh:183:  Either the device is not reachable over adb, or adb answers but su does not.
-scripts/ROOT.sh:210:  --- su itself broken (adb answers, su does not): restore it from the
-scripts/ROOT.sh:231:    # and both failures this diagnoses -- no adb at all, or adb up but su not
-scripts/ROOT.sh:233:    if ! adb devices 2>/dev/null | grep -q "device$"; then
-scripts/ROOT.sh:312:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
-scripts/ROOT.sh:334:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
-scripts/ROOT.sh:336:--repair is the exception: with adb it diagnoses; without it, it prints the
-scripts/ROOT.sh:337:serial-console equivalent, because a stuck seclabel does not cost adb the way
+scripts/ROOT.sh:175:  Either the device is not reachable over adb, or adb answers but su does not.
+scripts/ROOT.sh:202:  --- su itself broken (adb answers, su does not): restore it from the
+scripts/ROOT.sh:223:    # and both failures this diagnoses -- no adb at all, or adb up but su not
+scripts/ROOT.sh:225:    if ! adb devices 2>/dev/null | grep -q "device$"; then
+scripts/ROOT.sh:304:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
+scripts/ROOT.sh:326:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+scripts/ROOT.sh:328:--repair is the exception: with adb it diagnoses; without it, it prints the
+scripts/ROOT.sh:329:serial-console equivalent, because a stuck seclabel does not cost adb the way
 scripts/ROOT.sh:34:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
 scripts/ROOT.sh:35:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
 scripts/TOOLS.sh:116:    if adb shell "pm list packages -d" 2>/dev/null | grep -q "$STOCK_LAUNCHER_PKG"; then
@@ -102,16 +101,13 @@ scripts/lib/common.sh:122:    adb shell "cat /proc/uptime" 2>/dev/null \
 scripts/lib/common.sh:126:# Wait for the device to come back after a reboot: adb sees it, boot has
 scripts/lib/common.sh:141:        [[ "$(adb get-state 2>/dev/null | tr -d '\r\n')" == "device" ]] || continue
 scripts/lib/common.sh:142:        [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')" == "1" ]] || continue
-scripts/lib/common.sh:162:# Usage: adb_exec "description" "adb shell command"
-scripts/lib/common.sh:181:# `adb shell` cannot be trusted to propagate the far-side status: on older shell
-scripts/lib/common.sh:200:        direct) raw=$(adb shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
-scripts/lib/common.sh:201:        piped)  raw=$(adb shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
-scripts/lib/common.sh:229:#   exec-out, not shell -- `adb shell` runs the far side on a pty on some
-scripts/lib/common.sh:246:        direct) adb exec-out "su -c '$cmd 2>/dev/null'" ;;
-scripts/lib/common.sh:247:        piped)  adb exec-out "echo '$cmd 2>/dev/null' | su" ;;
-scripts/lib/common.sh:312:    out=$(adb shell "ls -l $path" 2>/dev/null | tr -d '\r' | awk 'NR==1 {print $5}')
-scripts/lib/common.sh:335:    if adb shell am start -n "$activity" 2>/dev/null | grep -q "Error"; then
-scripts/lib/common.sh:350:    adb shell am start -a "$action" 2>/dev/null
+scripts/lib/common.sh:163:# `adb shell` cannot be trusted to propagate the far-side status: on older shell
+scripts/lib/common.sh:182:        direct) raw=$(adb shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/common.sh:183:        piped)  raw=$(adb shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/common.sh:211:#   exec-out, not shell -- `adb shell` runs the far side on a pty on some
+scripts/lib/common.sh:228:        direct) adb exec-out "su -c '$cmd 2>/dev/null'" ;;
+scripts/lib/common.sh:229:        piped)  adb exec-out "echo '$cmd 2>/dev/null' | su" ;;
+scripts/lib/common.sh:294:    out=$(adb shell "ls -l $path" 2>/dev/null | tr -d '\r' | awk 'NR==1 {print $5}')
 scripts/lib/common.sh:60:    if ! command -v adb &>/dev/null; then
 scripts/lib/common.sh:69:    if ! adb devices 2>/dev/null | grep -q "device$"; then
 scripts/lib/common.sh:86:    result=$(adb shell "su -c 'whoami'" 2>/dev/null | tr -d '\r\n')
@@ -131,10 +127,8 @@ scripts/lib/root.sh:393:# adb root runs through su, so every touch to the live s
 scripts/lib/root.sh:476:    local out; out=$(adb shell "$SU_NEW_PATH 0 id" 2>/dev/null | tr -d '\r')
 scripts/lib/root.sh:493:    verify_root_after_su_touch    # exits outright if this cost us adb root
 scripts/lib/root.sh:522:    verify_root_after_su_touch    # exits outright if this cost us adb root
-scripts/lib/transport/select.sh:32:                PT_ADB_BIN=$(command -v adb 2>/dev/null) || {
-scripts/lib/transport/select.sh:33:                    printf 'transport: adb not on PATH\n' >&2
-scripts/lib/unlock.sh:1018:# The commands that fix it from a serial console, printed when adb is gone.
-scripts/lib/unlock.sh:1053:    if ! adb devices 2>/dev/null | grep -q "device$"; then
+scripts/lib/unlock.sh:1011:# The commands that fix it from a serial console, printed when adb is gone.
+scripts/lib/unlock.sh:1046:    if ! adb devices 2>/dev/null | grep -q "device$"; then
 scripts/lib/unlock.sh:14:#   value back off the device. `adb shell ... || true` is how you end up telling
 scripts/lib/unlock.sh:277:    if ! adb push "$tmp" "$WTPROV_STAGED_SHA" >/dev/null 2>&1 \
 scripts/lib/unlock.sh:325:            # Outer single quotes: adb shell joins its arguments, so host-side
@@ -147,7 +141,7 @@ scripts/lib/unlock.sh:638:    # `adb root` is unavailable, which is every Magisk
 scripts/lib/unlock.sh:644:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
 scripts/lib/unlock.sh:695:        print_error "  adb shell 'su 0 sh -c \"mount -o remount,rw $mp && $undo; mount -o remount,ro $mp\"'"
 scripts/lib/unlock.sh:926:    adb push "$tmp" "$sidecar" >/dev/null 2>&1
-MATCHED_LINES 144
+MATCHED_LINES 138
 
 COMMAND rg -n '/adb|\$\{?ADB|command -v adb|which adb' scripts/
 scripts/lib/common.sh:60:    if ! command -v adb &>/dev/null; then
@@ -155,30 +149,13 @@ scripts/lib/menu.sh:107:    command -v adb >/dev/null || return 0
 scripts/lib/menu.sh:299:    if ! command -v adb >/dev/null; then
 scripts/lib/root.sh:31:SU_ALLOW_DIR="/data/adb"
 scripts/lib/root.sh:32:SU_ALLOW_FILE="/data/adb/su-allow"
-scripts/lib/transport/select.sh:32:                PT_ADB_BIN=$(command -v adb 2>/dev/null) || {
-MATCHED_LINES 6
+MATCHED_LINES 5
 
 COMMAND rg -n '\beval\b' scripts/
 scripts/TOOLS.sh:140:# every Mac user. eval-based indirection is uglier and works everywhere.
 scripts/TOOLS.sh:142:section_items() { eval "printf '%s\n' \"\${$1[@]}\""; }
-scripts/lib/common.sh:170:    if eval "$cmd" 2>/dev/null; then
-MATCHED_LINES 3
+MATCHED_LINES 2
 
-COMMAND rg -n '\$\{?PT_ADB_BIN|(^|[[:space:];|&()])/[[:alnum:]_.~+/@:-]*/adb([[:space:];|&()]|$)' scripts/
-scripts/lib/transport/adb.sh:146:    out=$("$PT_ADB_BIN" shell "ls -l $path" 2>&1) || return 1
-scripts/lib/transport/adb.sh:21:    "$PT_ADB_BIN" "$verb" "$@"
-scripts/lib/transport/adb.sh:28:    result=$("$PT_ADB_BIN" shell "su -c 'whoami'" 2>/dev/null | tr -d '\r\n')
-scripts/lib/transport/adb.sh:34:    result=$("$PT_ADB_BIN" shell "echo 'whoami' | su" 2>/dev/null | tr -d '\r\n')
-scripts/lib/transport/adb.sh:57:        direct) raw=$("$PT_ADB_BIN" shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
-scripts/lib/transport/adb.sh:58:        piped) raw=$("$PT_ADB_BIN" shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
-scripts/lib/transport/adb.sh:90:        direct) "$PT_ADB_BIN" exec-out "su -c '$cmd 2>/dev/null'" ;;
-scripts/lib/transport/adb.sh:91:        piped) "$PT_ADB_BIN" exec-out "echo '$cmd 2>/dev/null' | su" ;;
-scripts/lib/transport/select.sh:11:            [[ -n "${PT_ADB_BIN:-}" ]] || {
-scripts/lib/transport/select.sh:15:            [[ "$PT_ADB_BIN" == /* && -f "$PT_ADB_BIN" && -x "$PT_ADB_BIN" ]] || {
-scripts/lib/transport/select.sh:19:            [[ "$PT_ADB_BIN" == "${PT_FAKE_ADB_CANONICAL:-}" ]] || {
-scripts/lib/transport/select.sh:26:            if [[ "${PT_ADB_BIN+x}" == x ]]; then
-scripts/lib/transport/select.sh:27:                [[ "$PT_ADB_BIN" == /* && -f "$PT_ADB_BIN" && -x "$PT_ADB_BIN" ]] || {
-scripts/lib/transport/select.sh:36:                [[ "$PT_ADB_BIN" == /* && -f "$PT_ADB_BIN" && -x "$PT_ADB_BIN" ]] || {
-scripts/lib/transport/select.sh:52:    printf '%s\n' "$PT_ADB_BIN"
-MATCHED_LINES 15
+COMMAND rg -n '(^|[[:space:];|&()])/[[:alnum:]_.~+/@:-]*/adb([[:space:];|&()]|$)' scripts/
+MATCHED_LINES 0
 
