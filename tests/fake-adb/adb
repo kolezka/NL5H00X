@@ -30,6 +30,9 @@
 #   FAKE_ADB_INPUT_FAILS  1 = `input keyevent HOME` fails with an error and status 1
 #   FAKE_ADB_REBOOT_IGNORED
 #                         1 = `adb reboot` returns 0 and changes nothing
+#   FAKE_ADB_SYSTEM_CP_CORRUPTS
+#                         1 = a root `cp` or `cat X > Y` into /system drops the
+#                         last byte, so the copy's sha256 differs from its source
 #
 # /proc/uptime reads $STATE/uptime (default 5000); a reboot resets it to 30.
 #
@@ -141,6 +144,15 @@ finish() {
 # ---------------------------------------------------------------------------
 # Remote command dispatch
 # ---------------------------------------------------------------------------
+# FAKE_ADB_SYSTEM_CP_CORRUPTS=1: a write into /system loses its last byte.
+system_cp_corrupt() {
+    local f="${STATE}$1" size
+    [[ "${FAKE_ADB_SYSTEM_CP_CORRUPTS:-0}" == "1" && "$1" == /system/* && -f "$f" ]] || return 0
+    size=$(wc -c < "$f" | tr -d ' ')
+    (( size > 0 )) || return 0
+    head -c $((size - 1)) "$f" > "$f.cut" && mv "$f.cut" "$f"
+}
+
 # Filesystem operations against the modelled device tree.
 #
 # The refusal is the point: /system starts read-only, and a write to it fails
@@ -174,6 +186,7 @@ fs_op() {
             cp -R "${STATE}${src}" "${STATE}${target}"
             # The .meta sidecar stands in for the manifest, so it travels with the APK.
             [[ -f "${STATE}${src}.meta" ]] && cp "${STATE}${src}.meta" "${STATE}${target}.meta"
+            system_cp_corrupt "$target"
             ;;
     esac
     return 0
@@ -518,6 +531,9 @@ run_remote() {
             if [[ "$AS_ROOT" != "1" ]]; then
                 echo "sh: can't create $dst: Permission denied" >&2; return 1
             fi
+            if [[ "$dst" == /system/* && "$(sget mount_system ro)" == "ro" ]]; then
+                echo "sh: can't create $dst: Read-only file system" >&2; return 1
+            fi
             mkdir -p "$(dirname "${STATE}${dst}")"
             # The shell truncates the target before cat runs, so a missing
             # source still empties it, as on the device.
@@ -530,8 +546,11 @@ run_remote() {
             if [[ ! -f "${STATE}${src}" ]]; then
                 echo "cat: $src: No such file or directory" >&2; return 1
             fi
-            cat "${STATE}${src}" > "${STATE}${dst}"
-            return ;;
+            cat "${STATE}${src}" > "${STATE}${dst}" || return 1
+            # The .meta sidecar stands in for the manifest, as with cp.
+            [[ -f "${STATE}${src}.meta" ]] && cp "${STATE}${src}.meta" "${STATE}${dst}.meta"
+            system_cp_corrupt "$dst"
+            return 0 ;;
 
         # --- home activity ----------------------------------------------
         "cmd package query-activities"*SETUP_WIZARD*)

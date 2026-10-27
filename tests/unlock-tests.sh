@@ -568,6 +568,10 @@ out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
     && ok "reports why the normal install failed" || bad "swallowed the install failure"
 [[ -f "$sb/state/system/app/Projectivy/Projectivy.apk" ]] \
     && ok "fell back to /system/app" || bad "no APK in /system/app after the fallback"
+apksha=$(shasum -a 256 "$sb/apks/projectivy-launcher-4.71.apk" | cut -d' ' -f1)
+destsha=$(shasum -a 256 "$sb/state/system/app/Projectivy/Projectivy.apk" 2>/dev/null | cut -d' ' -f1)
+[[ "$destsha" == "$apksha" ]] \
+    && ok "the /system/app copy has the APK's sha256" || bad "dest sha256 '$destsha', APK '$apksha'"
 [[ "$out" == *"Restarting the projector"* ]] \
     && ok "says it restarts the projector" || bad "did not announce the restart"
 [[ "$out" != *"Resuming"* ]] \
@@ -590,6 +594,24 @@ dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
 # is / -- it is system-as-root, so /system is never its own mount.
 dev "$sb" 'cat /proc/mounts' | awk '$2 == "/" && $4 ~ /^ro(,|$)/ { f = 1 } END { exit !f }' \
     && ok "/ put back read-only" || bad "/ left writable"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a /system/app copy that does not match the APK stops before the restart"
+# A partial copy followed by a reboot is the worst case: the next boot scans a
+# broken APK. The copy is checked by sha256 and the projector is not restarted.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_SYSTEM_CP_CORRUPTS=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "claimed success with a corrupt /system/app copy"
+[[ "$out" == *"sha256"*"does not match"* ]] \
+    && ok "names the hash mismatch" || bad "no hash mismatch message: $(echo "$out" | grep -i -e sha256 -e error | head -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "did not restart the projector" || bad "restarted after a bad copy: reboots $(cat "$sb/state/reboots")"
+dev "$sb" 'cat /proc/mounts' | awk '$2 == "/" && $4 ~ /^ro(,|$)/ { f = 1 } END { exit !f }' \
+    && ok "/ put back read-only" || bad "/ left writable"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

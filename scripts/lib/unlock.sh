@@ -475,9 +475,15 @@ system_rw() {
     return 1
 }
 
+# Remount read-only and check it took; a / left writable is an error.
 system_ro() {
     local mp; mp=$(system_mountpoint)
     adb_root_exec "mount -o remount,ro $mp" >/dev/null 2>&1 || true
+    if system_is_rw; then
+        print_error "Could not remount $mp read-only; it is still writable"
+        return 1
+    fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -574,21 +580,65 @@ launcher_present_apply() {
     # `adb root` is unavailable, which is every Magisk-rooted one.
     local staged="/data/local/tmp/$(basename "$apk")"
     local dest="$LAUNCHER_SYSTEM_DIR/$(basename "$LAUNCHER_SYSTEM_DIR").apk"
+    local mp want got aside="" aside_sha stamp undo
 
+    want=$(local_sha256 "$apk")
     if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
         print_error "Could not stage the launcher to $staged"
         return 1
     fi
+    got=$(remote_sha256 "$staged")
+    if [[ "$got" != "$want" ]]; then
+        print_error "The staged copy at $staged has sha256 ${got:-unreadable}, which does not match the APK's $want; nothing was written to /system"
+        adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
+        return 1
+    fi
 
     system_rw || { adb_root_exec "rm -f $staged" >/dev/null 2>&1; return 1; }
-    adb_root_exec "mkdir -p $LAUNCHER_SYSTEM_DIR" >/dev/null || true
-    adb_root_exec "cp $staged $dest" >/dev/null || true
-    adb_root_exec "chmod 644 $dest" >/dev/null || true
-    system_ro
-    adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
+    mp=$(system_mountpoint)
 
-    if ! adb_root_exec "ls -d $dest" >/dev/null 2>&1; then
-        print_error "Could not copy the launcher into $LAUNCHER_SYSTEM_DIR"
+    # An APK already at dest is kept aside first, so a bad write can be undone.
+    if adb_root_exec "ls -d $dest" >/dev/null 2>&1; then
+        stamp="$(date +%Y%m%d_%H%M%S).$$"
+        aside="/data/local/tmp/$(basename "$dest").before.$stamp"
+        adb_root_exec "cp $dest $aside" >/dev/null 2>&1 || true
+        aside_sha=$(remote_sha256 "$aside")
+        if [[ -z "$aside_sha" || "$aside_sha" != "$(remote_sha256 "$dest")" ]]; then
+            print_error "Could not keep a copy of the existing $dest at $aside; nothing was written to /system"
+            system_ro
+            adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
+            return 1
+        fi
+        print_status "Kept the existing $dest at $aside (sha256 $aside_sha)"
+        undo="cat $aside > $dest"
+    else
+        undo="rm -f $dest"
+    fi
+
+    # Root redirect, not cp: same write path as the cache, and its status is checked.
+    if ! adb_root_exec "mkdir -p $LAUNCHER_SYSTEM_DIR" >/dev/null 2>&1 \
+        || ! adb_root_exec "sh -c \"cat $staged > $dest\"" >/dev/null 2>&1; then
+        print_error "Could not write the launcher to $dest"
+    elif ! adb_root_exec "chmod 644 $dest" >/dev/null 2>&1; then
+        print_error "Could not chmod 644 $dest"
+    else
+        got=$(remote_sha256 "$dest")
+        if [[ "$got" == "$want" ]]; then
+            undo=""
+        else
+            print_error "$dest has sha256 ${got:-unreadable}, which does not match the APK's $want"
+        fi
+    fi
+
+    adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
+    if [[ -n "$undo" ]]; then
+        system_ro
+        print_error "The projector was not restarted. To undo the write:"
+        print_error "  adb shell 'su 0 sh -c \"mount -o remount,rw $mp && $undo; mount -o remount,ro $mp\"'"
+        return 1
+    fi
+    if ! system_ro; then
+        print_error "The launcher is in $dest, but $mp is still writable, so the projector was not restarted"
         return 1
     fi
 
