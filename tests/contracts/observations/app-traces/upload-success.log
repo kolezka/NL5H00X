@@ -18,7 +18,6 @@ adb	shell	su\ -c\ \'chown\ -R\ root:root\ /system/app/Fixture\'\ 2\>\&1\;\ echo\
 adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
 adb	shell	su\ -c\ \'mount\ -o\ remount\,ro\ /\'\ 2\>\&1\;\ echo\ __RC__=\$\?
 adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
-adb	shell	su\ -c\ \'cat\ /proc/mounts\'\ 2\>\&1\;\ echo\ __RC__=\$\?
 adb	shell	su\ -c\ \'rm\ -f\ /data/local/tmp/utf16.apk\'\ 2\>\&1\;\ echo\ __RC__=\$\?
 adb	shell	su\ -c\ \'rm\ -rf\ /data/local/tmp/applibs\'\ 2\>\&1\;\ echo\ __RC__=\$\?
 adb	shell	su\ -c\ \'md5sum\ /system/app/Fixture/Fixture.apk\'\ 2\>\&1\;\ echo\ __RC__=\$\?
