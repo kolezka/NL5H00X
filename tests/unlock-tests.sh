@@ -646,14 +646,70 @@ reboot_dev "$sb"
     && ok "control: the cut-off run left the marker" || bad "control: no launcher_present marker"
 out=$(unlock "$sb" --apply-all --yes)
 
-[[ "$out" == *"Resuming after a restart"* ]] \
-    && ok "says it is resuming" || bad "no resume notice"
+[[ "$out" == *"Resuming after a restart, from launcher_present"* ]] \
+    && ok "says it is resuming from the saved step" || bad "no resume notice naming launcher_present"
 n=$(echo "$out" | grep -c 'dev_options:')
 [[ "$n" == "0" ]] && ok "steps before the marker are skipped" || bad "dev_options ran again ($n lines)"
+echo "$out" | grep -q 'launcher_present: already done' \
+    && ok "the saved step is checked again and found done" || bad "launcher_present was not rerun"
 echo "$out" | grep -q 'launcher_default: done and verified' \
     && ok "the step after the marker is applied" || bad "launcher_default was not applied"
 [[ "$out" == *"RC=0"* ]] && ok "the resumed run finishes" || bad "resumed run failed"
 [[ ! -e "$sb/run/.unlock-resume" ]] && ok "marker removed on success" || bad "marker still there"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a resumed step that still needs a restart is not restarted a second time"
+# The marker says a restart already happened for this step. If the launcher
+# still has not registered, another restart will not help; stop and say so.
+
+new_sandbox
+log="$sb/state/invocations.log"
+unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_REBOOT_IGNORED=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes >/dev/null
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "control: the first run left the marker" || bad "control: no launcher_present marker"
+n1=$(grep -c $'^adb\treboot' "$log")
+[[ "$n1" == "1" ]] && ok "control: the first run asked for one restart" || bad "control: first run reboot calls: $n1"
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_REBOOT_IGNORED=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes)
+n2=$(grep -c $'^adb\treboot' "$log")
+[[ "$out" != *"RC=0"* ]] && ok "the second run fails" || bad "claimed success though the launcher never registered"
+[[ "$out" == *"did not register"* ]] \
+    && ok "says the launcher did not register" || bad "no did-not-register message: $(echo "$out" | tail -3)"
+[[ "$n2" == "$n1" ]] && ok "the second run did not restart again" || bad "reboot calls went from $n1 to $n2"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "the projector was never restarted" || bad "reboots: $(cat "$sb/state/reboots")"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker is kept" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "no restart without the uptime that proves it"
+# Only uptime going backwards proves a restart happened. Without the value
+# from before, nothing can be proven, so the projector is not restarted.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_NO_UPTIME=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "carried on without an uptime"
+[[ "$out" == *"Could not read /proc/uptime, so the projector was not restarted"* ]] \
+    && ok "says why it did not restart" || bad "no uptime message: $(echo "$out" | tail -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "did not restart the projector" || bad "restarted without an uptime: reboots $(cat "$sb/state/reboots")"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker names the step" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a failed adb reboot is reported and keeps the place"
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_REBOOT_FAILS=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "carried on after a failed reboot"
+[[ "$out" == *"adb reboot failed"* ]] \
+    && ok "names the failed reboot" || bad "no failed-reboot message: $(echo "$out" | tail -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "the projector was not restarted" || bad "reboots: $(cat "$sb/state/reboots")"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker is kept" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

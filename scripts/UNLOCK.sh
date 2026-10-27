@@ -123,10 +123,16 @@ run_step() {
 # Save the step, reboot, and wait until the projector has really restarted.
 restart_for_step() {
     local step="$1" uptime_before rc=0
+    # Read first: without it a restart cannot be proven, so none is attempted.
+    uptime_before=$(device_uptime_s)
     # No marker, no restart: without it the place is lost.
     if ! printf '%s\n' "$step" 2>/dev/null > "$RESUME_MARKER" \
         || [[ "$(cat "$RESUME_MARKER" 2>/dev/null)" != "$step" ]]; then
         print_error "Could not save the resume marker $RESUME_MARKER, so the projector was not restarted"
+        return 1
+    fi
+    if [[ -z "$uptime_before" ]]; then
+        print_error "Could not read /proc/uptime, so the projector was not restarted. Restart it by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
         return 1
     fi
     print_status "Restarting the projector to register $step; the unlock continues on its own"
@@ -134,7 +140,6 @@ restart_for_step() {
         print_warning "Not restarted. Restart the projector, then run the same command again; the marker $RESUME_MARKER keeps the place."
         return 1
     fi
-    uptime_before=$(device_uptime_s)
     if ! adb reboot >/dev/null 2>&1; then
         print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
         return 1
@@ -152,24 +157,30 @@ restart_for_step() {
 
 apply_all() {
     print_section "APPLYING UNLOCK"
-    local step rc skip_through=""
+    local step rc resumed="" skip_to=""
     if [[ -f "$RESUME_MARKER" ]]; then
-        skip_through=$(tr -d ' \r\n' < "$RESUME_MARKER")
-        if [[ " ${UNLOCK_STEPS[*]} " == *" $skip_through "* ]]; then
-            print_status "Resuming after a restart, from the step after $skip_through"
+        resumed=$(tr -d ' \r\n' < "$RESUME_MARKER")
+        if [[ " ${UNLOCK_STEPS[*]} " == *" $resumed "* ]]; then
+            print_status "Resuming after a restart, from $resumed"
+            skip_to="$resumed"
         else
-            print_warning "Ignoring $RESUME_MARKER: '$skip_through' is not a step"
-            skip_through=""
+            print_warning "Ignoring $RESUME_MARKER: '$resumed' is not a step"
+            resumed=""
         fi
     fi
     for step in "${UNLOCK_STEPS[@]}"; do
-        if [[ -n "$skip_through" ]]; then
-            [[ "$step" == "$skip_through" ]] && skip_through=""
-            continue
+        # The saved step runs again: the restart is not proof it worked.
+        if [[ -n "$skip_to" ]]; then
+            [[ "$step" == "$skip_to" ]] || continue
+            skip_to=""
         fi
         rc=0
         run_step "$step" || rc=$?
         if [[ "$rc" -eq "$NEEDS_REBOOT" ]]; then
+            if [[ "$step" == "$resumed" ]]; then
+                print_error "$step still needs a restart after the last one; the launcher did not register. Check /system/app on the device."
+                return 1
+            fi
             restart_for_step "$step" || return 1
         elif [[ "$rc" -ne 0 ]]; then
             return 1

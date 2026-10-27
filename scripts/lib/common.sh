@@ -126,19 +126,21 @@ device_uptime_s() {
 # Wait for the device to come back after a reboot: adb sees it, boot has
 # completed, root answers, and uptime is below uptime_before. The uptime check
 # is what proves a restart happened; the old adbd can answer the rest.
-# Returns 0 when back, 1 on timeout, 2 if it answered but uptime never reset.
+# Returns 0 when back, 1 on timeout or a missing uptime_before, 2 if it
+# answered but uptime never reset.
 wait_for_device_boot() {
     local timeout_s="${1:-180}" uptime_before="${2:-}"
     local deadline=$((SECONDS + timeout_s)) uptime_now="" answered=0
-    if [[ -z "$uptime_before" ]]; then
-        print_warning "Uptime before the restart is unknown; trusting boot and root checks alone"
+    # Without it, boot and root checks could be answered by the old adbd.
+    if ! [[ "$uptime_before" =~ ^[0-9]+$ ]]; then
+        print_error "cannot prove a restart without the uptime before it"
+        return 1
     fi
     while (( SECONDS < deadline )); do
         sleep 2
         [[ "$(adb get-state 2>/dev/null | tr -d '\r\n')" == "device" ]] || continue
         [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')" == "1" ]] || continue
         check_root_access || continue
-        [[ -z "$uptime_before" ]] && return 0
         uptime_now=$(device_uptime_s)
         if [[ -n "$uptime_now" ]] && (( uptime_now < uptime_before )); then
             return 0

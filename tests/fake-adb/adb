@@ -33,6 +33,9 @@
 #   FAKE_ADB_SYSTEM_CP_CORRUPTS
 #                         1 = a root `cp` or `cat X > Y` into /system drops the
 #                         last byte, so the copy's sha256 differs from its source
+#   FAKE_ADB_NO_UPTIME    1 = `cat /proc/uptime` fails with an error and status 1
+#   FAKE_ADB_REBOOT_FAILS 1 = `adb reboot` prints `error: closed`, exits 1 and
+#                         changes nothing
 #
 # /proc/uptime reads $STATE/uptime (default 5000); a reboot resets it to 30.
 #
@@ -381,6 +384,9 @@ run_remote() {
         "mount -o remount,ro /system"|"mount -o ro,remount /system")
             echo "mount: '/system' not in /proc/mounts" >&2; return 1 ;;
         "cat /proc/uptime")
+            if [[ "${FAKE_ADB_NO_UPTIME:-0}" == "1" ]]; then
+                echo "cat: /proc/uptime: Permission denied" >&2; return 1
+            fi
             # Whole seconds since boot. Each read moves it on by one, so a
             # second reboot still makes it go backwards.
             local up
@@ -1094,6 +1100,9 @@ case "$subcmd" in
     reboot)
         # The old adbd answering after `adb reboot` without a restart, in miniature.
         [[ "${FAKE_ADB_REBOOT_IGNORED:-0}" == "1" ]] && exit 0
+        if [[ "${FAKE_ADB_REBOOT_FAILS:-0}" == "1" ]]; then
+            echo "error: closed" >&2; exit 1
+        fi
         # CORRECTED 2026-07-30 against hardware. The previous model here was a
         # labelled hypothesis: that the stock launcher re-claims HOME on boot
         # while it is enabled, which is why Nova sat unused since July. It was
