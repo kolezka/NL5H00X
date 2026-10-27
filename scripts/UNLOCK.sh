@@ -21,6 +21,11 @@ SUPPORTED_DEVICES=(NL5H00X NL5H00X_TP)
 ASSUME_YES=0
 MODE=menu
 
+# A step that needs a reboot is saved here, so a run cut short by the reboot
+# can pick up where it stopped. Lives in the working directory.
+RESUME_MARKER=".unlock-resume"
+UNLOCK_BOOT_TIMEOUT="${UNLOCK_BOOT_TIMEOUT:-180}"
+
 # ---------------------------------------------------------------------------
 # preconditions
 # ---------------------------------------------------------------------------
@@ -96,7 +101,11 @@ run_step() {
     esac
 
     print_step "$step: $("${step}_describe")"
-    if ! "${step}_apply"; then
+    local rc=0
+    "${step}_apply" || rc=$?
+    # Not a failure: the caller restarts the projector and moves on.
+    [[ "$rc" -eq "$NEEDS_REBOOT" ]] && return "$NEEDS_REBOOT"
+    if [[ "$rc" -ne 0 ]]; then
         print_error "$step FAILED - stopping, nothing further was changed"
         return 1
     fi
@@ -111,16 +120,51 @@ run_step() {
     return 0
 }
 
+# Save the step, reboot, and wait for the projector and root to answer again.
+restart_for_step() {
+    local step="$1"
+    echo "$step" > "$RESUME_MARKER"
+    print_status "Restarting the projector to register $step; the unlock continues on its own"
+    if [[ "$ASSUME_YES" != "1" ]] && ! confirm "Restart the projector now?"; then
+        print_warning "Not restarted. Restart the projector, then run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    fi
+    adb reboot >/dev/null 2>&1 || true
+    if ! wait_for_device_boot "$UNLOCK_BOOT_TIMEOUT"; then
+        print_error "The projector did not come back within $UNLOCK_BOOT_TIMEOUT s. When it is up, run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    fi
+    print_success "The projector is back"
+}
+
 apply_all() {
     print_section "APPLYING UNLOCK"
-    local step
+    local step rc skip_through=""
+    if [[ -f "$RESUME_MARKER" ]]; then
+        skip_through=$(tr -d ' \r\n' < "$RESUME_MARKER")
+        if [[ " ${UNLOCK_STEPS[*]} " == *" $skip_through "* ]]; then
+            print_status "Resuming after a restart, from the step after $skip_through"
+        else
+            print_warning "Ignoring $RESUME_MARKER: '$skip_through' is not a step"
+            skip_through=""
+        fi
+    fi
     for step in "${UNLOCK_STEPS[@]}"; do
-        run_step "$step" || return 1
+        if [[ -n "$skip_through" ]]; then
+            [[ "$step" == "$skip_through" ]] && skip_through=""
+            continue
+        fi
+        rc=0
+        run_step "$step" || rc=$?
+        if [[ "$rc" -eq "$NEEDS_REBOOT" ]]; then
+            restart_for_step "$step" || return 1
+        elif [[ "$rc" -ne 0 ]]; then
+            return 1
+        fi
     done
+    rm -f "$RESUME_MARKER"
     echo
     print_success "All steps applied and verified"
-    echo
-    print_warning "Restart the projector for the new home screen to appear:  adb reboot"
     return 0
 }
 
@@ -128,6 +172,7 @@ revert_all() {
     print_section "REVERTING"
     print_warning "This puts the stock launcher back as the home screen"
     echo
+    rm -f "$RESUME_MARKER"
     # Reverse order: restore the launcher before removing its files.
     local i step failed=0
     for (( i=${#UNLOCK_STEPS[@]}-1; i>=0; i-- )); do
@@ -173,7 +218,12 @@ single_step_menu() {
         print_error "No such step"
         return 0
     fi
-    run_step "${UNLOCK_STEPS[$((n - 1))]}" || true
+    local rc=0
+    run_step "${UNLOCK_STEPS[$((n - 1))]}" || rc=$?
+    if [[ "$rc" -eq "$NEEDS_REBOOT" ]]; then
+        print_warning "Restart the projector (option 5) for this to take effect"
+    fi
+    return 0
 }
 
 interactive() {
@@ -205,7 +255,8 @@ Unlock the launcher on a Newlink NL5H00X projector.
 
   ./UNLOCK.sh              interactive menu (default)
   ./UNLOCK.sh --status     show what is and is not applied, change nothing
-  ./UNLOCK.sh --apply-all  apply every step, then stop
+  ./UNLOCK.sh --apply-all  apply every step, then stop; restarts the projector
+                           once if the launcher can only go into /system/app
   ./UNLOCK.sh --revert     put the stock launcher back
   ./UNLOCK.sh --repair     projector stuck on the vendor logo? diagnose and fix
   ./UNLOCK.sh --yes        do not ask for confirmation (for scripting)
@@ -253,6 +304,7 @@ main() {
         apply)
             show_status
             if all_applied; then
+                rm -f "$RESUME_MARKER"
                 print_success "Nothing to do - everything is already applied"
                 exit 0
             fi

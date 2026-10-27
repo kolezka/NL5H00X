@@ -168,6 +168,8 @@ fs_op() {
             [[ -e "${STATE}${src}" ]] || { echo "cp: '$src': No such file or directory" >&2; return 1; }
             mkdir -p "$(dirname "${STATE}${target}")"
             cp -R "${STATE}${src}" "${STATE}${target}"
+            # The .meta sidecar stands in for the manifest, so it travels with the APK.
+            [[ -f "${STATE}${src}.meta" ]] && cp "${STATE}${src}.meta" "${STATE}${target}.meta"
             ;;
     esac
     return 0
@@ -308,7 +310,9 @@ run_remote() {
 
         # --- properties -------------------------------------------------
         "getprop sys.boot_completed")
-            echo 1; return 0 ;;
+            # FAKE_ADB_NEVER_BOOTS=1: adb answers but boot never completes.
+            if [[ "${FAKE_ADB_NEVER_BOOTS:-0}" == "1" ]]; then echo 0; else echo 1; fi
+            return 0 ;;
         "getprop "*)
             local k="${cmd#getprop }"
             [[ -f "$STATE/props" ]] && awk -F= -v k="$k" '$1==k{print $2}' "$STATE/props"
@@ -952,6 +956,15 @@ case "$subcmd" in
         exit 0
         ;;
 
+    get-state)
+        # Still "device" under FAKE_ADB_NEVER_BOOTS, so a wait reaches the boot check.
+        if [[ "${FAKE_ADB_NO_DEVICE:-0}" == "1" ]]; then
+            echo "error: no devices/emulators found" >&2; exit 1
+        fi
+        echo device
+        exit 0
+        ;;
+
     devices)
         echo "List of devices attached"
         [[ "${FAKE_ADB_NO_DEVICE:-0}" == "1" ]] || echo "FAKE0123456	device"
@@ -976,6 +989,7 @@ case "$subcmd" in
             exit "$push_rc"
         fi
         cp "$push_source" "${STATE}${push_target}"
+        [[ -f "$push_source.meta" ]] && cp "$push_source.meta" "${STATE}${push_target}.meta"
         if [[ -n "${FAKE_ADB_CORRUPT_PUSH_TARGET:-}" && "$push_target" == "$FAKE_ADB_CORRUPT_PUSH_TARGET" \
               && -f "${STATE}${push_target}" ]]; then
             printf 'corrupt\n' >> "${STATE}${push_target}"
@@ -1071,6 +1085,16 @@ case "$subcmd" in
             wtprov_apply_cache
         fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
+        # The package manager scans /system/app on boot. Only APKs whose identity
+        # is known (a .meta sidecar or a known name) register.
+        for sys_apk in "$STATE"/system/app/*/*.apk; do
+            [[ -f "$sys_apk" ]] || continue
+            sys_pkg=$(apk_meta "$sys_apk" pkg)
+            [[ -n "$sys_pkg" ]] || continue
+            pkg_known "$sys_pkg" && continue
+            echo "${sys_apk#$STATE}=$sys_pkg" >> "$STATE/packages"
+            apk_meta "$sys_apk" home >> "$STATE/home_activities"
+        done
         # Nothing survives a restart except what the system brings back up: the
         # home package. Without this, a launcher proven alive before a reboot
         # would still look alive after one, and the gate would never be tested.

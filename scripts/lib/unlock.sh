@@ -49,6 +49,9 @@ LAUNCHER_SYSTEM_DIR="${LAUNCHER_SYSTEM_DIR:-/system/app/Projectivy}"
 
 UNLOCK_STEPS=(dev_options launcher_present launcher_default)
 
+# A step returns this when its change only takes effect after a reboot.
+NEEDS_REBOOT=3
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -549,7 +552,7 @@ launcher_present_state() {
 #
 # So: prefer the clean path, and drop to /system/app when the device refuses.
 # The cost of the fallback is that the package only registers on the next boot,
-# which is why this reports needs-restart rather than pretending to be done.
+# which is why this returns NEEDS_REBOOT rather than pretending to be done.
 launcher_present_apply() {
     if package_installed "$LAUNCHER_PKG"; then return 0; fi
 
@@ -589,8 +592,8 @@ launcher_present_apply() {
         return 1
     fi
 
-    print_warning "$LAUNCHER_NAME will only register after a restart - rerun this afterwards"
-    return 1
+    print_warning "$LAUNCHER_NAME only registers after a restart"
+    return "$NEEDS_REBOOT"
 }
 
 launcher_present_revert() {

@@ -554,12 +554,11 @@ out=$(unlock "$sb" FAKE_ADB_INPUT_FAILS=1 --apply-all --yes)
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
-head_ "a device that refuses installs still gets the launcher"
+head_ "a stock unit reboots once in the middle and the unlock finishes by itself"
 # The real projector rejects every pm install with
-# INSTALL_FAILED_INVALID_INSTALL_LOCATION -- nothing has ever been installed
-# normally on it. Copying into /system/app is the only route that works there,
-# so the fallback has to fire, and it must be honest that a restart is needed
-# rather than reporting a launcher that is not registered yet as present.
+# INSTALL_FAILED_INVALID_INSTALL_LOCATION, so the launcher goes into /system/app
+# and only registers after a restart. One command has to cover that: the runner
+# restarts the projector itself, waits, and carries on.
 
 new_sandbox
 out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
@@ -568,20 +567,65 @@ out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
     && ok "reports why the normal install failed" || bad "swallowed the install failure"
 [[ -f "$sb/state/system/app/Projectivy/Projectivy.apk" ]] \
     && ok "fell back to /system/app" || bad "no APK in /system/app after the fallback"
-[[ "$out" == *"restart"* ]] \
-    && ok "says a restart is needed" || bad "did not mention the restart"
-[[ "$out" != *"RC=0"* ]] \
-    && ok "does not claim the unlock finished" || bad "claimed success with an unregistered launcher"
+[[ "$out" == *"Restarting the projector"* ]] \
+    && ok "says it restarts the projector" || bad "did not announce the restart"
+[[ "$out" != *"Resuming"* ]] \
+    && ok "carries on in the same run" || bad "printed Resuming in a single run"
+[[ "$(cat "$sb/state/reboots")" == "1" ]] \
+    && ok "restarted exactly once" || bad "reboots: $(cat "$sb/state/reboots")"
+[[ "$out" == *"RC=0"* ]] \
+    && ok "the one run finishes the unlock" || { bad "unlock did not finish"; echo "$out" | tail -6 | sed 's/^/        /'; }
+home=$(home_now "$sb")
+[[ "$home" == "$PROJECTIVY"* ]] && ok "home screen is Projectivy" || bad "home is '$home'"
+[[ ! -e "$sb/run/.unlock-resume" ]] \
+    && ok "no resume marker left behind" || bad "marker left: $(cat "$sb/run/.unlock-resume")"
 
 # and it must not have touched the stock launcher on the way past
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
-    && bad "disabled the stock launcher despite an incomplete install" \
+    && bad "disabled the stock launcher" \
     || ok "stock launcher left alone"
 
 # The filesystem holding /system must not be left writable. On this device that
 # is / -- it is system-as-root, so /system is never its own mount.
 dev "$sb" 'cat /proc/mounts' | awk '$2 == "/" && $4 ~ /^ro(,|$)/ { f = 1 } END { exit !f }' \
     && ok "/ put back read-only" || bad "/ left writable"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "an interrupted run resumes from the marker instead of starting over"
+
+# The first run is cut off during the restart, then the projector comes up.
+new_sandbox
+unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_NEVER_BOOTS=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes >/dev/null
+reboot_dev "$sb"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "control: the cut-off run left the marker" || bad "control: no launcher_present marker"
+out=$(unlock "$sb" --apply-all --yes)
+
+[[ "$out" == *"Resuming after a restart"* ]] \
+    && ok "says it is resuming" || bad "no resume notice"
+n=$(echo "$out" | grep -c 'dev_options:')
+[[ "$n" == "0" ]] && ok "steps before the marker are skipped" || bad "dev_options ran again ($n lines)"
+echo "$out" | grep -q 'launcher_default: done and verified' \
+    && ok "the step after the marker is applied" || bad "launcher_default was not applied"
+[[ "$out" == *"RC=0"* ]] && ok "the resumed run finishes" || bad "resumed run failed"
+[[ ! -e "$sb/run/.unlock-resume" ]] && ok "marker removed on success" || bad "marker still there"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a projector that never comes back is reported, not waited for forever"
+
+new_sandbox
+start=$SECONDS
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_NEVER_BOOTS=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes)
+elapsed=$((SECONDS - start))
+
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "claimed success with a projector that never booted"
+[[ "$out" == *"did not come back"* && "$out" == *".unlock-resume"* ]] \
+    && ok "names the marker that keeps the place" || bad "no marker hint: $(echo "$out" | tail -3)"
+(( elapsed < 30 )) && ok "gave up within the timeout (${elapsed}s)" || bad "took ${elapsed}s"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker names the step that needed the restart" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

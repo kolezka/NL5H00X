@@ -117,6 +117,20 @@ require_device() {
     fi
 }
 
+# Wait for the device to come back after a reboot: adb sees it, boot has
+# completed, and root answers. Returns 1 after timeout_s seconds.
+wait_for_device_boot() {
+    local timeout_s="${1:-180}"
+    local deadline=$((SECONDS + timeout_s))
+    while (( SECONDS < deadline )); do
+        sleep 2
+        [[ "$(adb get-state 2>/dev/null | tr -d '\r\n')" == "device" ]] || continue
+        [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')" == "1" ]] || continue
+        check_root_access && return 0
+    done
+    return 1
+}
+
 # ============================================================================
 # ADB HELPER FUNCTIONS
 # ============================================================================
