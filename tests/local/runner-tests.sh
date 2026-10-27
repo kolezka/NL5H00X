@@ -94,6 +94,10 @@ make_fixture() {
     make_suite "$repo/tests/run-tests.sh" '  passed: 1   failed: 0' 0
     make_suite "$repo/tests/unlock-tests.sh" '  passed: 1   failed: 0' 0
     make_suite "$repo/tests/ui-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/root-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/restore-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/installgate-tests.sh" '  passed: 1   failed: 0' 0
+    make_suite "$repo/tests/sud-tests.sh" '  passed: 1   failed: 0' 0
     make_suite "$repo/tests/contracts/a-colon.sh" 'a-colon: passed: 2   failed: 0' 0
     make_suite "$repo/tests/contracts/b-equals.sh" 'b-equals: passed=3 failed=0' 0
     make_suite "$repo/tests/contracts/c-words.sh" 'Summary: 4 passed, 0 failed' 0
@@ -147,11 +151,24 @@ repo=$(make_fixture discovery) || { bad 'create discovery fixture'; exit 1; }
 run_runner "$repo" "$repo/output"
 rc=$?
 actual=$(awk '/^SUITE / { print $2 }' "$repo/output" | paste -sd ' ' -)
-expected='local/lifecycle-tests.sh contracts/a-colon.sh contracts/b-equals.sh contracts/c-words.sh contracts/characterize-d-summary-exit.sh run-tests.sh unlock-tests.sh ui-tests.sh'
+expected='local/lifecycle-tests.sh contracts/a-colon.sh contracts/b-equals.sh contracts/c-words.sh contracts/characterize-d-summary-exit.sh run-tests.sh unlock-tests.sh ui-tests.sh root-tests.sh restore-tests.sh installgate-tests.sh sud-tests.sh'
 if [[ "$rc" == 0 && "$actual" == "$expected" ]]; then
-    ok 'default discovery runs contract shell files in lexical order plus fixed suites'
+    ok 'default discovery runs contracts and all fixed suites in order'
 else
     bad "default discovery rc=$rc order=<$actual>"
+fi
+
+repo=$(make_fixture no-sud-toolchain) || { bad 'create no-sud-toolchain fixture'; exit 1; }
+make_suite "$repo/tests/sud-tests.sh" 'SKIPPED: no working docker or podman; sud tests did not run' 2
+run_runner "$repo" "$repo/output" all
+rc=$?
+if [[ "$rc" == 0 ]] \
+   && grep -q '^SUMMARY sud-tests.sh skipped, no toolchain exit=2 ' "$repo/output" \
+   && grep -q '^RUN SUMMARY failed suites/checks: 0$' "$repo/output" \
+   && grep -q '^SUMMARY root-tests.sh passed: 1   failed: 0 exit=0 ' "$repo/output"; then
+    ok 'sud exit 2 is reported as skipped without failing other suites'
+else
+    bad "sud toolchain skip rc=$rc"
 fi
 
 repo=$(make_fixture failed-contract) || { bad 'create failing contract fixture'; exit 1; }

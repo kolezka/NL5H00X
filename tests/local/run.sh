@@ -146,13 +146,13 @@ PT_TEST_SCOPE=${PT_TEST_SCOPE:-all}
 case "$PT_TEST_SCOPE" in
     all)
         cat "$contract_list" >> "$suite_plan"
-        printf '%s\n' run-tests.sh unlock-tests.sh ui-tests.sh >> "$suite_plan"
+        printf '%s\n' run-tests.sh unlock-tests.sh ui-tests.sh root-tests.sh restore-tests.sh installgate-tests.sh sud-tests.sh >> "$suite_plan"
         ;;
     contracts)
         cat "$contract_list" >> "$suite_plan"
         ;;
     local-legacy)
-        printf '%s\n' run-tests.sh unlock-tests.sh ui-tests.sh >> "$suite_plan"
+        printf '%s\n' run-tests.sh unlock-tests.sh ui-tests.sh root-tests.sh restore-tests.sh installgate-tests.sh sud-tests.sh >> "$suite_plan"
         ;;
     local)
         ;;
@@ -223,6 +223,12 @@ run_suite() {
     pid=$CHILD_PID
     child_wait_reap "$pid" || rc=$?
     cat "$log"
+    if [[ "$suite" == sud-tests.sh && "$rc" == 2 ]] \
+       && grep -Eq '^SKIPPED: no working docker or podman; sud tests did not run$|^could not build nl5h00x-sud-test:alpine3[.]20$' "$log"; then
+        printf 'SUMMARY %s skipped, no toolchain exit=%s interpreter=%s\n' \
+            "$suite" "$rc" "$PT_TEST_BASH" | tee -a "$PT_CONTROL_DIR/summary.log"
+        return 0
+    fi
     summary=$(parse_summary "$suite" "$log")
     if [[ -n "$summary" ]]; then
         set -- $summary
