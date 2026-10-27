@@ -55,7 +55,7 @@ top() {
       cd "$sb/run" || exit 1
       PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
         env HOME_SETTLE_SECS=0 LAUNCHER_SETTLE_SECS=0 WTPROV_RESTART_TIMEOUT=2 "$@" \
-        /bin/bash "$REPO_ROOT/nl5h00x" "${command_args[@]}" <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
+        /bin/bash "$REPO_ROOT/nl5h00x" ${command_args[@]+"${command_args[@]}"} <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 }
 home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
 dev() { PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$1/state" adb shell "$2" 2>/dev/null | tr -d '\r'; }
