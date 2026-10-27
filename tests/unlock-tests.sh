@@ -481,6 +481,7 @@ bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
 seed=$(cat "$f")
 echo '<map>foreign</map>' > "$bk"
 out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" =~ wtprov_prefs\.before\.xml\.old\.[0-9]{8}_[0-9]{6} ]] && ok "set-aside name carries a timestamp" || bad "set-aside name is a fixed .old"
 [[ "$out" != *"RC=0"* ]] && ok "the unlock refuses" || bad "unlock went ahead with a foreign file at the backup path"
 [[ "$out" == *"/data/local/tmp/wtprov_prefs.before.xml"* && "$out" == *"mv "* ]] \
     && ok "names the file and the mv that sets it aside" || bad "no path or mv command: $(echo "$out" | grep -i backup | head -3)"

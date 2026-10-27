@@ -261,7 +261,7 @@ wtprov_backup_record() {
 # Copy the cache to WTPROV_BACKUP once and record its sha256. Returns 0 only
 # with a trusted backup; an untrusted file that differs from the cache is a refusal.
 wtprov_cache_backup() {
-    local before bk problem aside
+    local before bk problem aside stamp
     before=$(wtprov_cache_require) || return 1
     bk=$(remote_sha256 "$WTPROV_BACKUP")
     if [[ "$bk" == "$before" ]]; then
@@ -277,9 +277,11 @@ wtprov_cache_backup() {
     elif [[ -n "$bk" ]]; then
         problem=$(wtprov_backup_problem)
         if [[ -n "$problem" ]]; then
-            aside="mv $WTPROV_BACKUP $WTPROV_BACKUP.old"
+            # Keep a later set-aside from replacing this copy.
+            stamp=$(date +%Y%m%d_%H%M%S)
+            aside="mv $WTPROV_BACKUP $WTPROV_BACKUP.old.$stamp"
             if adb_root_exec "cat $WTPROV_BACKUP_SHA" >/dev/null 2>&1; then
-                aside="$aside; mv $WTPROV_BACKUP_SHA $WTPROV_BACKUP_SHA.old"
+                aside="$aside; mv $WTPROV_BACKUP_SHA $WTPROV_BACKUP_SHA.old.$stamp"
             fi
             print_error "The file at $WTPROV_BACKUP (sha256 $bk) differs from the cache and is not a trusted backup: $problem"
             print_error "Nothing was written. Set it aside, then run again:"
