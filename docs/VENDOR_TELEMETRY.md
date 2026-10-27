@@ -146,10 +146,10 @@ calls `RecoverySystem.installPackage`. That app has no boot receiver, no alarm
 and no scheduled job. `com.newlink.service` contains no firmware install code.
 No `update.zip` or recovery command file exists on the device.
 
-Even a live package would probably not apply here: `RecoverySystem` writes a
-command to `misc` and reboots into recovery, and on this unit U-Boot boots the
-normal image regardless (see [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md)). Untested,
-and it must stay untested: it is a one-shot experiment on the only unit.
+A `boot-recovery` BCB in `misc` booted the stock recovery image once on this
+unit. `adb reboot recovery` did not write that BCB and instead booted Android.
+Whether the vendor OTA installer writes a valid BCB or can apply a package is
+untested. See [RECOVERY.md](RECOVERY.md).
 
 ## 4. Can Android be updated
 
@@ -160,12 +160,13 @@ No.
 | Vendor OTA | Package returns 404. Was an Android 9 build anyway. |
 | GSI / Treble | `ro.treble.enabled=false`, `ro.vndk.lite=true`, 32-bit ARM. No maintained arm32 GSI exists past Android 10. |
 | A/B or `update_engine` | Not present. |
-| Recovery flash | Recovery image is real, U-Boot does not boot it. |
+| Recovery flash | U-Boot booted stock recovery once with a valid `boot-recovery` BCB. No Android update or restore was tested; see [RECOVERY.md](RECOVERY.md). |
 | U-Boot USB upgrade | The bootloader has `loader_upgrade` and "USB mandatory upgrade" strings, so a HiSilicon field-flash path exists in principle. There is no firmware to feed it and no console to watch it. |
 | Custom ROM | Kernel `4.9.127_s5` has no located GPL source; the display path needs vendor HALs plus per-unit panel calibration partitions. |
 
 Security patch level stays at 2019-11-05. What can be kept current is user
-space: the launcher, media apps and whatever else goes into `/system/app`.
+space: the launcher and media apps, installed normally while the vendor gate is
+off or through `/system/app` as a fallback. See [INSTALL_LOCKED.md](INSTALL_LOCKED.md).
 
 ## 5. Stopping the reporting
 

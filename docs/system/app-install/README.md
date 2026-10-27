@@ -9,9 +9,10 @@ depends_on: [device-access, unlock]
 
 # App install
 
-This block installs one APK on a device whose package manager answers
-`INSTALL_FAILED_INVALID_INSTALL_LOCATION` to every normal install, by writing the
-app into `/system/app` and rebooting so the package manager rescans it [verified].
+This block describes the source at `f04ee86`. On the current unit, normal installs
+work after disabling the vendor gate in `/system/build.prop`. The script tries a
+normal install first; `/system/app` is a fallback when the gate blocks it. See
+[INSTALL_LOCKED.md](../../INSTALL_LOCKED.md) for the device test and revert.
 It also owns the only supported way to remove such an app again, because an app
 placed this way is a system app [verified].
 
@@ -44,8 +45,9 @@ an install.
 | [device-access](../device-access/README.md) | Every device read and every write into `/system` goes through `scripts/lib/common.sh::adb_root_exec()`, so the install cannot start until `scripts/lib/common.sh::require_device()` has established root. Without it the script has no way to write outside `/data/local/tmp`. | [verified] |
 | [unlock](../unlock/README.md) | `scripts/lib/unlock.sh::system_rw()` and `scripts/lib/unlock.sh::system_ro()` bracket the copy, and `scripts/lib/unlock.sh::package_installed()` is the post-boot registration check. A failed remount aborts the install before anything is written. | [verified] |
 
-Setting the launcher default also lives in unlock, and the order between the two
-matters. See the ordering contract in [CONTRACTS](CONTRACTS.md).
+The ordering contract in [CONTRACTS](CONTRACTS.md) describes the older
+preference-based unlock. Current unlock writes the vendor launcher cache after
+Projectivy is installed; see [the current flow](../../../README.md#how-the-unlock-works).
 
 ## Intra-block flow
 

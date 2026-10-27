@@ -7,7 +7,7 @@ The NL5H00X is an Android 9 projector whose stock launcher cannot be changed fro
 ## Requirements
 
 - Install `adb` on your computer.
-- Connect the projector to the same network as your computer, or use USB if your unit exposes device-mode ADB. Check the connection with `adb devices`.
+- Connect the projector to the same network as your computer, or use USB if your unit exposes device-mode ADB. Find its IP in the projector's network settings, run `adb connect <ip>:5555`, then check with `adb devices`.
 - Confirm root works: `adb shell su 0 id` must print `uid=0`. The vendor `su` accepts `su 0 <cmd>`, not `su -c`.
 
 ## Quick start
@@ -20,7 +20,7 @@ adb shell su 0 id                 # confirm uid=0
 ./nl5h00x
 ```
 
-The guided menu shows backup, unlock, stock-launcher restore, detailed unlock state, app installation, root for apps, tools and hidden settings, refresh, and quit. Choose **1** to back up the device, then **2** to unlock it. The toolkit asks before it changes anything.
+The guided menu shows backup, unlock, stock-launcher restore, detailed unlock state, app installation, root for apps, tools and hidden settings, refresh, and quit. Choose **1** to back up the device, then **2** to unlock it. Before unlock, the launcher step may say "blocked (install the launcher first)"; option 2 installs Projectivy before that step. The toolkit asks before it changes anything.
 
 Unlock follows these steps:
 
@@ -40,7 +40,7 @@ Leave the projector connected during a fallback restart. After unlock, HOME open
 - `./nl5h00x unlock [--yes]`: run the checked launcher unlock; `--yes` skips the prompt.
 - `./nl5h00x revert [--yes]`: put the stock launcher back through the cache; `--yes` skips the prompt.
 - `./nl5h00x install <apk> [flags]`: install an app normally, with a checked `/system/app` fallback if installs are gated. See [Installing apps](docs/INSTALL_LOCKED.md).
-- `./nl5h00x root <command> [args]`: manage app root with `status`, `install`, `allow PKG`, `deny PKG` or `revert`. See [Root for apps](root/README.md).
+- `./nl5h00x root <command> [args]`: manage app root with `status`, `install`, `allow PKG`, `deny PKG` or `revert`. For the optional app-root setup, build its artifacts with `root/build.sh` first. See [Root for apps](root/README.md).
 - `./nl5h00x tools`: open tools and hidden settings.
 - `./nl5h00x repair`: diagnose a launcher boot failure and print serial-console steps when adb is unavailable.
 - `./nl5h00x install-gate off|on|status`: inspect or change the vendor install gate. `off` changes `/system/build.prop` for every app on the projector and needs `adb reboot` to take effect; unlock never runs it. See [the gate and its revert](docs/INSTALL_LOCKED.md).

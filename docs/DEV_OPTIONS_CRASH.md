@@ -152,5 +152,6 @@ adb shell settings put global window_animation_scale 0.5
 `WRITE_SECURE_SETTINGS` has protection level `signature|privileged|development`,
 and the `development` flag means an ordinary app can be granted it from the
 shell (`pm grant`) — so a replacement UI is possible without the platform key at
-all. Note that installing that app still lands in `/system/app`, because normal
-installs fail on this device; see [INSTALL_LOCKED.md](INSTALL_LOCKED.md).
+all. Normal installs now work on this unit after the vendor gate was disabled;
+`/system/app` remains a fallback if the gate is on. See
+[INSTALL_LOCKED.md](INSTALL_LOCKED.md).

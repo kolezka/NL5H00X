@@ -23,9 +23,14 @@ A device that returns correct lengths while serving wrong bytes outside those tw
 
 `scripts/MAKE_BACKUP.sh::backup_full_device_direct()` removes the staged file on a failed `dd` and on a device-side size mismatch, but the two failure paths after that, a failed pull and a pulled image of the wrong length, return without removing it. [verified] That leaves a copy the size of the whole device sitting on `/sdcard`, on the one path that was chosen because free space looked sufficient. [inferred, from the resolver picking direct only when free space is at least the device size] A later run then sees less free space than it should. [inferred, from the same free-space probe being read on every run]
 
-## The generated restore script is never parsed or tested
+## Generated restore tested on fake device, not on hardware
 
-The refusal logic in `RESTORE.sh` is the last guard before an operator overwrites the whole device, and no test loads it. [verified] The suite that parses every entry script under the system bash covers `scripts/MAKE_BACKUP.sh` itself, not the text it emits, because that text lives inside a quoted heredoc and is never evaluated during a test run. [verified] Its enforcement is recorded as convention in [CONTRACTS](CONTRACTS.md). [verified]
+The gap recorded at source pin `f04ee86` has narrowed: `tests/restore-tests.sh`
+now generates and exercises `RESTORE.sh` against a fake device. It checks that
+failed restore steps report failure and refuse unsafe writes. No restore has run
+on the physical unit, so the [recovery safety HOLD](../../SECURITY_ANALYSIS.md#recovery-safety-hold)
+remains open. See [the restore test](../../../tests/restore-tests.sh) and
+[RECOVERY.md](../../RECOVERY.md#limits).
 
 ## The restore script ignores the manifest fields it could use
 

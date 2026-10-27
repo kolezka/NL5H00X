@@ -57,7 +57,7 @@ See [the root inventory](DEVICE_AUDIT_2026-10-24.md#root-paths).
 |---|---|---|---|
 | mmcblk0p1 | fastboot | 8 MiB | Bootloader, not the Android boot image |
 | mmcblk0p2 / p3 | bootargs / bootargsbak | 1 MiB each | Boot environment storage; names do not prove automatic fallback |
-| mmcblk0p5 | recovery | 40 MiB | Recovery image; boot path not validated |
+| mmcblk0p5 | recovery | 40 MiB | Recovery booted once through a `boot-recovery` BCB in `misc`; see [RECOVERY.md](RECOVERY.md) |
 | mmcblk0p8 | logo | 40 MiB | Boot branding |
 | mmcblk0p9 | boot | 40 MiB | Android kernel image |
 | mmcblk0p20 | system | 1843 MiB | Mounted at `/`; `/system` is a directory on it |
@@ -85,16 +85,17 @@ the separate safety review described below; a completed download is not enough.
 ## Installation and system changes
 
 Historical install attempts failed with `INSTALL_FAILED_INVALID_INSTALL_LOCATION`
-even as root. SELinux is currently permissive, so audit denials alone do not
-prove enforcement caused this error. Follow-up bytecode analysis found a vendor
-whitelist gate that returns this error under the currently read property and
-empty-file inputs. No install trial or policy change was made. See
-[INSTALL_LOCKED.md](INSTALL_LOCKED.md#verified-vendor-whitelist-branch).
+even as root. The vendor whitelist gate caused that error on this unit. A
+fail-succeed-fail hardware test on 2026-10-25 confirmed normal installs work
+when `zyzys.install.whitelist=0`. The owner then saved that setting to
+`/system/build.prop`, checked it after one reboot, and used a normal install to
+update SmartTube. See [INSTALL_LOCKED.md](INSTALL_LOCKED.md#hardware-test-2026-10-25).
 
-The documented workaround installs compatible APKs under `/system/app`, including
-native libraries when required. Use the toolkit's reviewed installation workflow
-rather than an ad hoc `pm install` after copying an APK. No install or remount
-was tested in the October audit.
+The `/system/app` route, including native libraries when required, remains a
+fallback if normal installs are gated. The toolkit tries a normal install first.
+Remounts and writes have since been used on this unit for the gate setting and
+the [Developer options patch](DEV_OPTIONS_CRASH.md#the-patch); the October 24
+audit itself made no install or remount change.
 
 The remount target on this system-as-root layout is `/`, not `/system`. Any write
 requires a scoped change, a verified original copy, a restore plan, and on-device
@@ -111,9 +112,10 @@ Preserve projector power, display and boot-critical components. In particular:
 | `com.newlink.service` | Factory provisioning, activation and telemetry; see [VENDOR_TELEMETRY.md](VENDOR_TELEMETRY.md) |
 | `com.newlink.wtprovision` | Vendor setup/home dispatch; disabling its main component caused a documented boot deadlock |
 
-Ordinary HOME resolved to Projectivy during the audit. That does not invalidate
-the vendor's separate setup-wizard dispatch documented in
-[BOOT_DEADLOCK.md](BOOT_DEADLOCK.md).
+The October 24 audit reported Projectivy as the HOME activity, but that alone
+did not show which component owned the vendor HOME intent. `wtprovision` owns
+that intent and starts the component in its launcher cache; the current unlock
+updates that cache. See [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md#the-vendor-home-dispatch).
 
 ## Emergency recovery
 
@@ -122,10 +124,12 @@ follow [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md). For a system that does not reach
 Android, start with [UNBOOTABLE.md](UNBOOTABLE.md) and capture evidence before
 writing anything.
 
-**Do not run a raw whole-device restore from a one-line example.** The recorded
-[restore hazards](../tests/contracts/observations/recovery-hazards.md) include
-missing integrity gates and misleading success handling. The recovery safety
-HOLD remains open until the applicable path has been checked.
+**Do not run a raw whole-device restore from a one-line example.** The
+[restore hazards](../tests/contracts/observations/recovery-hazards.md) were
+fixed in generated scripts and checked against a fake device by
+[tests/restore-tests.sh](../tests/restore-tests.sh). No hardware restore was
+tested. The [recovery safety HOLD](SECURITY_ANALYSIS.md#recovery-safety-hold)
+remains open.
 
 The existence of a recovery partition, a full image, or a working Android UART
 shell is not proof of recovery from a bootloader/kernel failure. Bootloader
