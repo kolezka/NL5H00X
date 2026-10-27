@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Every script must run under `/bin/bash` 3.2 (macOS system bash); `tests/ui-tests.sh` "every entry script runs under the system bash" enforces it.
-- No long dashes (em or en) in any new or rewritten text. Check: `rg -n -- ' , |-' <file>` returns nothing.
+- No long dashes (em or en) in any new or rewritten text. Check: `rg -n -- '—|–' <file>` returns nothing.
 - Device writes in verification follow the project rule: stage in `/data/local/tmp`, write as root by redirect (`su 0 sh -c "cat staged > target"`), read back with `sha256sum`, keep a backup with its hash, know the revert first. Never `adb push` into `/system` or `/data/user_de`.
 - `am force-stop` does not restart a persistent app; `kill -9 $(pidof com.newlink.wtprovision)` does.
 - The cache file is `/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml`, keys `home_pkg` and `home_activity`, `home_activity` is a full class name (`com.spocky.projengmenu.ui.home.MainActivity`), stock pair is `com.newlink.hisilauncher` and `com.newlink.hisilauncher.WizardAciticity` (vendor spelling).
@@ -416,7 +416,7 @@ git commit -m "refactor: one step runner for UNLOCK, ROOT and INSTALL_GATE; drop
 
 - [ ] **Step 1: Write the new README** following the design's nine sections. Quick start shows `./nl5h00x` and the menu; "What else it can do" is one line per subcommand including `install-gate` with its warning; "How the unlock works" is six to eight sentences; "When something goes wrong" three links; Documentation table lists every file under `docs/` plus `root/README.md` and `tools/recovery/README.md`.
 
-- [ ] **Step 2: Check** `wc -l README.md` under 200; `rg -n -- ' , |-' README.md` empty; every relative link resolves (`python3 -I /tmp/docsurvey/links.py README.md` or a one-liner that tests `os.path.exists`); none of the Appendix A sentences remain (grep each distinctive phrase, expect 0).
+- [ ] **Step 2: Check** `wc -l README.md` under 200; `rg -n -- '—|–' README.md` empty; every relative link resolves (`python3 -I /tmp/docsurvey/links.py README.md` or a one-liner that tests `os.path.exists`); none of the Appendix A sentences remain (grep each distinctive phrase, expect 0).
 
 - [ ] **Step 3: Move the content** into the three docs; run the link check over `docs/`.
 
@@ -443,7 +443,7 @@ git commit -m "docs: README for the person who wants to unlock the launcher"
 
 - [ ] **Step 6: Final gates**
 
-Run: `bash tests/local/run.sh > /tmp/final.log 2>&1; echo rc=$?; grep -E 'skipped|SUMMARY|passed:' /tmp/final.log | tail -12; rg -n -- ' , |-' README.md docs/README.md docs/SECURITY_ANALYSIS.md docs/TECHNICAL_NOTES.md | wc -l`
+Run: `bash tests/local/run.sh > /tmp/final.log 2>&1; echo rc=$?; grep -E 'skipped|SUMMARY|passed:' /tmp/final.log | tail -12; rg -n -- '—|–' README.md docs/README.md docs/SECURITY_ANALYSIS.md docs/TECHNICAL_NOTES.md | wc -l`
 Expected: rc 0; `sud-tests.sh` either passed or "skipped, no toolchain"; dash count 0 for the rewritten files.
 
 - [ ] **Step 7: Commit, push, PR 2** `refactor: one entry point, README rewrite, dead code removed` with the suite counts in the body; independent review as in Task 6; merge; Outline checkpoint and `/complete` on the task record.
