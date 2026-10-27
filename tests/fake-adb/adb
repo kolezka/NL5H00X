@@ -1138,6 +1138,14 @@ case "$subcmd" in
         if [[ -f "$STATE/home_activity" && -n "$(home_interceptor_comp)" ]]; then
             wtprov_apply_cache
         fi
+        if [[ -f "$STATE/props" ]]; then
+            awk 'index($0, "zyzys.install.whitelist=") != 1' "$STATE/props" > "$STATE/props.new"
+            if [[ -f "$STATE/system/build.prop" ]]; then
+                awk 'index($0, "zyzys.install.whitelist=") == 1 { line=$0 }
+                     END { if (line != "") print line }' "$STATE/system/build.prop" >> "$STATE/props.new"
+            fi
+            mv "$STATE/props.new" "$STATE/props"
+        fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
         # A unit that never comes back keeps its old uptime.
         [[ "${FAKE_ADB_NEVER_BOOTS:-0}" == "1" ]] || echo 30 > "$STATE/uptime"

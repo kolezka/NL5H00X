@@ -27,7 +27,7 @@ Usage: nl5h00x [command] [args...]
   root <command> [args]    status, install, allow PKG, deny PKG, revert
   tools                    tools and hidden settings
   repair                   diagnose a launcher boot failure
-  install-gate <command>  off, on, status (not available yet)
+  install-gate <command>   off, on, status
   help                     show this usage
 EOF
 }

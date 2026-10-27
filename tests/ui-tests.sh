@@ -411,11 +411,11 @@ else
         && ok "unknown command exits 2 with usage" || bad "unknown command returned $rc without usage"
 fi
 if out=$(top "$sb" "install-gate status" ""); then
-    bad "unavailable install-gate exits successfully"
+    echo "$out" | grep -qE '^  \[todo\] +install_gate +[^[:space:]]' \
+        && ok "install-gate status reports the seed as todo" || bad "install-gate status omitted its todo row"
 else
     rc=$?
-    [[ "$rc" -eq 2 && "$out" == *"install-gate is not available yet"* ]] \
-        && ok "install-gate says it is unavailable" || bad "install-gate returned $rc without its diagnostic"
+    bad "install-gate status returned $rc"
 fi
 sandbox_finish "$sb"
 
