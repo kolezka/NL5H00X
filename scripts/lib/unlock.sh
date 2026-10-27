@@ -898,6 +898,33 @@ launcher_default_revert() {
     return 0
 }
 
+# Copy the live cache to /data/local/tmp/wtprov_prefs.live.<stamp>.xml as root
+# and record its sha256 next to it. Fails unless both read back.
+wtprov_cache_keep_live() {
+    local cache live sidecar sha tmp
+    cache=$(wtprov_cache_path)
+    # The pid keeps two runs apart even within one second.
+    live="/data/local/tmp/wtprov_prefs.live.$(date +%Y%m%d_%H%M%S).$$.xml"
+    sidecar="${live%.xml}.sha256"
+    sha=$(remote_sha256 "$cache")
+    adb_root_exec "sh -c \"cat $cache > $live\"" >/dev/null 2>&1
+    if [[ -z "$sha" || "$(remote_sha256 "$live")" != "$sha" ]]; then
+        print_error "Could not keep a copy of the live cache at $live; nothing was written"
+        return 1
+    fi
+    tmp=$(mktemp) || return 1
+    echo "$sha" > "$tmp"
+    adb push "$tmp" "$sidecar" >/dev/null 2>&1
+    rm -f "$tmp"
+    if [[ "$(adb_root_exec "cat $sidecar" 2>/dev/null | tr -d '\r\n ')" != "$sha" ]]; then
+        print_error "Could not record the live cache's sha256 at $sidecar; nothing was written"
+        return 1
+    fi
+    print_status "Kept the live cache at $live (sha256 $sha)"
+    print_status "Its sha256 is recorded at $sidecar"
+    return 0
+}
+
 # Put the cache back from a trusted backup that names the stock launcher, else
 # write the stock pair, then restart wtprovision so it rereads it.
 launcher_default_revert_wtprov() {
@@ -934,7 +961,9 @@ launcher_default_revert_wtprov() {
         fi
         print_status "Restored wtprovision's cache from $WTPROV_BACKUP (sha256 $bk)"
     else
-        # No usable backup, so the current cache is the only source to edit.
+        # No usable backup, so the live cache is the only copy of what is there.
+        # Keep it, with its hash, before overwriting it.
+        wtprov_cache_keep_live || return 1
         # Vendor spelling, not a typo.
         wtprov_cache_put "$STOCK_LAUNCHER" "$STOCK_LAUNCHER.WizardAciticity" "$cache" || return 1
     fi

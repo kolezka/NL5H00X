@@ -475,8 +475,33 @@ for case_ in corrupt nosidecar; do
         && ok "$case_: cache holds the stock pair" || bad "$case_: cache is: $(tr -d '\n' < "$f")"
     [[ "$out" == *"not trusted"* ]] \
         && ok "$case_: says the backup was not trusted" || bad "$case_: did not say the backup was not trusted"
+    # The live cache is the only copy of what was there; it is kept first.
+    live=$(ls "$sb/state/data/local/tmp/"wtprov_prefs.live.*.xml 2>/dev/null | head -1)
+    livesha="${live%.xml}.sha256"
+    [[ -n "$live" ]] && grep -q "name=\"home_pkg\">$PROJECTIVY<" "$live" \
+        && ok "$case_: the live cache was kept before the revert" || bad "$case_: no wtprov_prefs.live.*.xml naming Projectivy"
+    [[ -n "$live" && -f "$livesha" && "$(tr -d '\r\n ' < "$livesha")" == "$(shasum -a 256 "$live" | cut -d' ' -f1)" ]] \
+        && ok "$case_: its sha256 is recorded next to it" || bad "$case_: no matching sidecar at '$livesha'"
     sandbox_finish "$sb"
 done
+
+# ---------------------------------------------------------------------------
+head_ "a cache and an identical backup without the keys are refused"
+# Same bytes means recording the hash would be truthful, but a backup without
+# the pair can never be restored, so nothing is recorded or written.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+printf '<map></map>\n' > "$f"
+cp "$f" "$bk"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock went ahead without the keys"
+[[ "$out" == *"no home_pkg/home_activity pair"* ]] \
+    && ok "names the missing keys" || bad "no missing-keys message: $(echo "$out" | grep -i error | head -3)"
+[[ ! -e "$sb/state/data/local/tmp/wtprov_prefs.before.sha256" ]] \
+    && ok "no sidecar was written" || bad "a sidecar was written"
+sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
 head_ "an interceptor that is not wtprovision blocks the step, even the launcher"
