@@ -210,6 +210,12 @@ if echo "$out" | grep -qi 'verified backup is required'; then
 else
     bad "did not refuse"
 fi
+[[ "$out" != *"disables your only working home screen"* ]] \
+    && ok "does not claim the unlock disables the home screen" \
+    || bad "still claims the unlock disables the home screen"
+[[ "$out" == *"rewrites the launcher cache"* ]] \
+    && ok "explains the launcher cache rewrite" \
+    || bad "does not explain the launcher cache rewrite"
 [[ "$(home_now "$sb")" == "$STOCK"* ]] \
     && ok "device untouched" || bad "device changed despite refusal"
 sandbox_finish "$sb"

@@ -219,7 +219,7 @@ run_unlock() {
         echo
         print_error "A verified backup is required before unlocking"
         echo "  Run the backup first (option 1). This is not a formality:"
-        echo "  the unlock disables your only working home screen."
+        echo "  the unlock rewrites the launcher cache, and the backup is how you get the original back."
         pause; return 1
     fi
     echo
