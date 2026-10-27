@@ -43,7 +43,8 @@ add_backup() {
 ui() {
     local sb="$1" script="$2" input="$3"; shift 3
     ( cd "$sb/run" || exit 1
-      PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" "$@" \
+      PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+        env HOME_SETTLE_SECS=0 LAUNCHER_SETTLE_SECS=0 WTPROV_RESTART_TIMEOUT=2 "$@" \
         /bin/bash "$SCRIPTS/$script" <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 }
 home_now() { tr -d '\r\n' < "$1/state/home_activity"; }

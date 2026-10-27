@@ -54,7 +54,8 @@ unlock() {
         # command and returned 127. Tests then read that 127 as the script
         # failing and passed while proving nothing.
         PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
-            env ${envs[@]+"${envs[@]}"} \
+            env HOME_SETTLE_SECS=0 LAUNCHER_SETTLE_SECS=0 WTPROV_RESTART_TIMEOUT=2 \
+            ${envs[@]+"${envs[@]}"} \
             bash "$SCRIPTS/UNLOCK.sh" "$@" </dev/null 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
         echo "RC=${PIPESTATUS[0]}"
     )
