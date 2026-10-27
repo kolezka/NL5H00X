@@ -71,7 +71,11 @@ dev() { # run a command on the emulated device; leading VAR=val become env
 reboot_dev() { PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$1/state" adb reboot >/dev/null 2>&1; }
 
 sha256_of() { sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'; }
-mode_of()   { stat -f%Lp "$1" 2>/dev/null || stat -c%a "$1"; }
+# BSD `stat -f %Lp` drops the setuid bit; ask GNU stat first, else BSD `%p`.
+mode_of() {
+    if stat -c%a "$1" >/dev/null 2>&1; then stat -c%a "$1"; return; fi
+    stat -f%p "$1" | awk '{ printf "%d\n", substr($0, length($0) - 3) }'
+}
 
 # ---------------------------------------------------------------------------
 head_ "apply-all installs the daemon, its service and the allow-list"
