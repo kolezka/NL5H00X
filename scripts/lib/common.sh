@@ -117,6 +117,43 @@ require_device() {
     fi
 }
 
+# Whole seconds since the device booted, or nothing if it cannot be read.
+device_uptime_s() {
+    adb shell "cat /proc/uptime" 2>/dev/null \
+        | awk '$1 ~ /^[0-9]+(\.[0-9]+)?$/ { print int($1); exit }' || true
+}
+
+# Wait for the device to come back after a reboot: adb sees it, boot has
+# completed, root answers, and uptime is below uptime_before. The uptime check
+# is what proves a restart happened; the old adbd can answer the rest.
+# Returns 0 when back, 1 on timeout or a missing uptime_before, 2 if it
+# answered but uptime never reset.
+wait_for_device_boot() {
+    local timeout_s="${1:-180}" uptime_before="${2:-}"
+    local deadline=$((SECONDS + timeout_s)) uptime_now="" answered=0
+    # Without it, boot and root checks could be answered by the old adbd.
+    if ! [[ "$uptime_before" =~ ^[0-9]+$ ]]; then
+        print_error "cannot prove a restart without the uptime before it"
+        return 1
+    fi
+    while (( SECONDS < deadline )); do
+        sleep 2
+        [[ "$(adb get-state 2>/dev/null | tr -d '\r\n')" == "device" ]] || continue
+        [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')" == "1" ]] || continue
+        check_root_access || continue
+        uptime_now=$(device_uptime_s)
+        if [[ -n "$uptime_now" ]] && (( uptime_now < uptime_before )); then
+            return 0
+        fi
+        answered=1
+    done
+    if (( answered )); then
+        print_warning "The device answered but uptime did not reset ($uptime_before s -> ${uptime_now:-?} s)"
+        return 2
+    fi
+    return 1
+}
+
 # ============================================================================
 # ADB HELPER FUNCTIONS
 # ============================================================================

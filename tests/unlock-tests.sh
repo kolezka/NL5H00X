@@ -54,7 +54,8 @@ unlock() {
         # command and returned 127. Tests then read that 127 as the script
         # failing and passed while proving nothing.
         PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
-            env ${envs[@]+"${envs[@]}"} \
+            env HOME_SETTLE_SECS=0 LAUNCHER_SETTLE_SECS=0 WTPROV_RESTART_TIMEOUT=2 \
+            ${envs[@]+"${envs[@]}"} \
             bash "$SCRIPTS/UNLOCK.sh" "$@" </dev/null 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
         echo "RC=${PIPESTATUS[0]}"
     )
@@ -251,77 +252,389 @@ dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
-head_ "a firmware that owns HOME is handed back to the user, not fought"
-# The real NL5H00X adds CATEGORY_SETUP_WIZARD to the home intent, so
-# com.newlink.wtprovision/.MainActivity wins HOME outright and then starts the
-# stock launcher by name.
-#
-# The refusal is kept but its reason is now the true one. It is NOT that
-# disabling the stock launcher "would leave none" -- that was the model that
-# bricked a device. It is that no command on API 28 writes a preference covering
-# SETUP_WIZARD, so the CLI simply cannot win that intent. A human can, from the
-# device's own chooser, and the step has to say so instead of trying.
+head_ "on the real firmware the unlock writes wtprovision's cache and HOME lands on the launcher"
+# The real NL5H00X routes HOME through com.newlink.wtprovision/.MainActivity,
+# which starts whatever its own SharedPreferences cache names. No preference
+# reaches it, so the unlock rewrites that cache as root and restarts the
+# process. Nothing gets disabled on the way: that is the bricking pattern.
 
+WTPROV_XML=/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml
 new_sandbox
-ICEPT=com.newlink.wtprovision/.MainActivity
-out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes)
+f="$sb/state$WTPROV_XML"
+out=$(unlock "$sb" --apply-all --yes)
 
-[[ "$out" == *"owns the home intent on this firmware"* ]] \
-    && ok "names the component that owns HOME" || bad "did not name the interceptor"
-[[ "$out" == *"CATEGORY_SETUP_WIZARD"* ]] \
-    && ok "gives the real reason the CLI cannot win" || bad "did not explain why the CLI cannot do it"
-[[ "$out" == *"press HOME"* && "$out" == *"Always"* ]] \
-    && ok "tells the user how to finish it on the device" || bad "no instruction for the user"
-[[ "$out" != *"RC=0"* ]] && ok "refuses rather than reporting success" || bad "claimed the unlock worked"
-
-dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
-    && bad "disabled the stock launcher anyway - that is the bricking pattern" \
-    || ok "stock launcher left enabled"
-
-dev "$sb" 'pm list packages -d' | grep -q 'com.newlink.wtprovision' \
-    && bad "disabled the home interceptor - this is what stops the device booting" \
-    || ok "and the home interceptor was never touched"
-
+[[ "$out" == *"RC=0"* ]] && ok "unlock completes on the intercepting firmware" \
+    || { bad "unlock failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+[[ "$out" != *"owns the home intent"* ]] \
+    && ok "no longer refuses the firmware" || bad "still prints the 'owns the home intent' refusal"
+grep -q 'name="home_pkg">com.spocky.projengmenu<' "$f" \
+    && ok "cache names the Projectivy package" || bad "cache home_pkg is not Projectivy"
+grep -q 'name="home_activity">com.spocky.projengmenu.ui.home.MainActivity<' "$f" \
+    && ok "cache names the Projectivy activity" || bad "cache home_activity is not Projectivy"
+pid=$(cat "$sb/state/wtprov_pid" 2>/dev/null)
+[[ -n "$pid" && "$pid" != 2166 ]] && ok "wtprovision was restarted" || bad "wtprovision pid is '$pid'"
 home=$(home_now "$sb")
-[[ "$home" == "$STOCK"* ]] && ok "no stale preference was written" || bad "home changed to '$home'"
+[[ "$home" == "$PROJECTIVY"* ]] && ok "HOME lands on Projectivy" || bad "home is '$home'"
 
-# and --status has to say so too, rather than offering a step that cannot work
-out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --status)
-[[ "$out" == *"owns the home intent on this firmware"* ]] \
-    && ok "--status reports it as blocked" || bad "--status did not flag the interception"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+[[ -f "$bk" ]] && grep -q hisilauncher "$bk" \
+    && ok "the stock cache was backed up first" || bad "no backup of the stock cache at $bk"
+bksha="$sb/state/data/local/tmp/wtprov_prefs.before.sha256"
+[[ -f "$bksha" && "$(tr -d '\r\n ' < "$bksha")" == "$(shasum -a 256 "$bk" | cut -d' ' -f1)" ]] \
+    && ok "the backup's sha256 was recorded next to it" || bad "no matching sha256 sidecar at $bksha"
+
+disabled=$(dev "$sb" 'pm list packages -d')
+[[ "$disabled" != *"$STOCK"* ]] \
+    && ok "stock launcher left enabled" || bad "disabled the stock launcher - that is the bricking pattern"
+[[ "$disabled" != *"com.newlink.wtprovision"* ]] \
+    && ok "wtprovision left enabled" || bad "disabled wtprovision - this is what stops the device booting"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
-head_ "the launcher the user picked from the chooser survives a restart"
-# The one path that does work on this firmware. The system's own chooser records
-# a preference against the real intent -- including SETUP_WIZARD -- so it wins
-# where set-home-activity cannot. home_pref_strong is how the emulator models a
-# preference written that way; there is no CLI that produces one.
+head_ "the cache write survives a restart"
+# The cache is what wtprovision reads on boot, so a restart must land on the
+# launcher again with nobody touching anything.
 
 new_sandbox
-ICEPT=com.newlink.wtprovision/.MainActivity
-unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes >/dev/null 2>&1
-
-# the user presses HOME on the device and picks Projectivy
-echo "$PROJECTIVY/com.spocky.projengmenu.ui.home.MainActivity" > "$sb/state/home_activity"
-touch "$sb/state/home_pref_strong"
-
+f="$sb/state$WTPROV_XML"
+unlock "$sb" --apply-all --yes >/dev/null
 reboot_dev "$sb"
 home=$(home_now "$sb")
-[[ "$home" == "$PROJECTIVY"* ]] \
-    && ok "the chooser's preference survives a restart" || bad "reverted to '$home'"
-
-dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
-    && bad "the stock launcher ended up disabled" || ok "with nothing disabled to achieve it"
+[[ "$home" == "$PROJECTIVY"* ]] && ok "still Projectivy after a restart" || bad "reverted to '$home' after restart"
+grep -q 'name="home_pkg">com.spocky.projengmenu<' "$f" \
+    && ok "the cache still names Projectivy after a restart" || bad "cache lost Projectivy over a restart"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
-head_ "a device that refuses installs still gets the launcher"
+head_ "a cache write that does not take effect is reported as a failure, not success"
+# A firmware build that ignores the cache starts stock after the restart. The
+# file on disk saying Projectivy proves nothing; only the focused window does.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_WTPROV_IGNORES_CACHE=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock claimed success when HOME stayed stock"
+[[ "$out" == *"did not take effect"* ]] \
+    && ok "says the cache write did not take effect" || bad "did not report the ineffective cache write"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "revert restores the stock pair and restarts wtprovision"
+# A cache rewrite is only undone once wtprovision rereads it, so the revert
+# has to restart the process too, not just put the file back.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+unlock "$sb" --apply-all --yes >/dev/null
+pid1=$(cat "$sb/state/wtprov_pid" 2>/dev/null)
+out=$(unlock "$sb" --revert --yes)
+pid2=$(cat "$sb/state/wtprov_pid" 2>/dev/null)
+
+[[ "$out" == *"RC=0"* ]] && ok "revert completes" || { bad "revert failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+[[ -n "$pid1" && "$pid1" != 2166 ]] && ok "the unlock restarted wtprovision" || bad "pid after unlock is '$pid1'"
+[[ -n "$pid2" && "$pid2" != "$pid1" ]] && ok "the revert restarted it again" || bad "pid after revert is '$pid2' (was '$pid1')"
+grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" \
+    && grep -q 'name="home_activity">com.newlink.hisilauncher.WizardAciticity<' "$f" \
+    && ok "cache holds the stock pair again" || bad "cache does not hold the stock pair"
+home=$(home_now "$sb")
+[[ "$home" == "$STOCK"* ]] && ok "home screen is the stock launcher again" || bad "home is '$home'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "--status reads the cache, not the preference"
+# On this firmware the HOME preference is not what decides the home screen;
+# the cache is. A stale preference must not make --status lie.
+
+new_sandbox
+unlock "$sb" --apply-all --yes >/dev/null
+echo "$STOCK/.WizardAciticity" > "$sb/state/home_activity"
+out=$(unlock "$sb" --status)
+[[ "$out" == *"home screen now: $PROJECTIVY"* ]] \
+    && ok "reports Projectivy from the cache" || bad "home screen line does not name Projectivy"
+echo "$out" | grep -qE '\[done\][[:space:]]+launcher_default' \
+    && ok "launcher_default shows [done]" || bad "launcher_default is not [done]: $(echo "$out" | grep launcher_default)"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a cache that names the launcher while HOME shows stock is not 'nothing to do'"
+# wtprovision reads its cache when it starts. A cache written while it kept
+# running leaves HOME on stock until it restarts, and the file alone hides that.
+
+new_sandbox
+unlock "$sb" --apply-all --yes >/dev/null
+out=$(unlock "$sb" FAKE_ADB_WTPROV_STALE=1 --status)
+[[ "$out" == *"RC=0"* && "$out" != *"HOME shows"* ]] \
+    && ok "control: no warning while HOME agrees with the cache" || bad "control: warned with HOME on the launcher"
+echo "$STOCK/.WizardAciticity" > "$sb/state/home_activity"
+out=$(unlock "$sb" FAKE_ADB_WTPROV_STALE=1 --status)
+echo "$out" | grep -qE '^\[WARN\] .*HOME shows' \
+    && ok "--status warns that HOME disagrees with the cache" || bad "no status warning: $(echo "$out" | tail -4)"
+echo "$out" | grep -qE '^  \[(done|todo|blocked)\] +launcher_default +[^[:space:]]' \
+    && ok "the step row keeps its format" || bad "row format: $(echo "$out" | grep launcher_default)"
+echo "$out" | grep -qE '^[[:space:]]+home screen now: [a-z]' \
+    && ok "the home line keeps its format" || bad "home line format changed"
+pid1=$(cat "$sb/state/wtprov_pid")
+out=$(unlock "$sb" FAKE_ADB_WTPROV_STALE=1 --apply-all --yes)
+pid2=$(cat "$sb/state/wtprov_pid")
+[[ "$out" == *"RC=0"* ]] && ok "the run completes" || { bad "run failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+[[ "$out" == *"HOME shows $STOCK; restarting wtprovision"* ]] \
+    && ok "says HOME disagrees and restarts wtprovision" || bad "no HOME-shows message: $(echo "$out" | tail -4)"
+[[ "$pid2" != "$pid1" ]] && ok "wtprovision was restarted" || bad "pid unchanged: $pid1"
+home=$(home_now "$sb")
+[[ "$home" == "$PROJECTIVY"* ]] && ok "HOME lands on Projectivy" || bad "home is '$home'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a missing wtprovision process is an error, not a silent skip"
+# Without a running process there is nothing to restart, so a cache write
+# would sit unread until the next boot. That has to stop the unlock loudly.
+
+new_sandbox
+rm "$sb/state/wtprov_pid"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock claimed success with no wtprovision process"
+[[ "$out" == *"wtprovision is not running"* ]] \
+    && ok "says wtprovision is not running" || bad "did not report the missing process"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a half-written cache is not reported as applied"
+# wtprovision needs both keys to agree. An activity that names Projectivy
+# while the package still names the stock launcher is not an applied step.
+# The full unlock runs first so the launcher is installed and the only thing
+# wrong is the cache pair.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+unlock "$sb" --apply-all --yes >/dev/null
+out=$(unlock "$sb" --status)
+echo "$out" | grep -qE '\[done\][[:space:]]+launcher_default' \
+    && ok "control: a full cache shows [done]" || bad "control: launcher_default is not [done] after the unlock"
+cat > "$f" <<'EOF'
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="home_activity">com.spocky.projengmenu.ui.home.MainActivity</string>
+    <string name="home_pkg">com.newlink.hisilauncher</string>
+</map>
+EOF
+out=$(unlock "$sb" --status)
+echo "$out" | grep -qE '\[todo\][[:space:]]+launcher_default' \
+    && ok "launcher_default shows [todo]" || bad "half-written cache: $(echo "$out" | grep launcher_default)"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "--status keeps its line format"
+
+new_sandbox
+out=$(unlock "$sb" --status)
+echo "$out" | grep -qE '^  \[(done|todo|blocked)\] +launcher_default +[^[:space:]]' \
+    && ok "step row format" || bad "step row format changed"
+echo "$out" | grep -qE '^[[:space:]]+home screen now: [a-z]' \
+    && ok "home line format" || bad "home line format changed"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "revert never creates a missing cache file"
+# A file created by a root redirect is owned by root, not by wtprovision, so
+# the revert must refuse rather than recreate it.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+unlock "$sb" --apply-all --yes >/dev/null
+[[ -f "$sb/state/data/local/tmp/wtprov_prefs.before.xml" ]] \
+    && ok "control: the unlock left a backup" || bad "control: no backup after the unlock"
+rm "$f"
+out=$(unlock "$sb" --revert --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the revert fails" || bad "revert claimed success with no cache file"
+[[ "$out" == *"cache is not on the device"* ]] \
+    && ok "names the missing cache" || bad "did not name the missing cache: $(echo "$out" | grep -i cache | head -3)"
+[[ ! -e "$f" ]] && ok "the cache file is still absent" || bad "the revert created the cache file"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "revert does not trust a backup whose recorded hash does not match"
+# The backup is only the original if its sha256 matches the one recorded when
+# it was taken. Anything else falls back to writing the stock pair.
+
+for case_ in corrupt nosidecar; do
+    new_sandbox
+    f="$sb/state$WTPROV_XML"
+    bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+    unlock "$sb" --apply-all --yes >/dev/null
+    if [[ "$case_" == corrupt ]]; then
+        echo '<map>invalid cache</map>' > "$bk"
+    else
+        rm -f "$sb/state/data/local/tmp/wtprov_prefs.before.sha256"
+    fi
+    out=$(unlock "$sb" --revert --yes)
+    [[ "$out" == *"RC=0"* ]] && ok "$case_: revert completes" \
+        || { bad "$case_: revert failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+    grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" \
+        && grep -q 'name="home_activity">com.newlink.hisilauncher.WizardAciticity<' "$f" \
+        && ok "$case_: cache holds the stock pair" || bad "$case_: cache is: $(tr -d '\n' < "$f")"
+    [[ "$out" == *"not trusted"* ]] \
+        && ok "$case_: says the backup was not trusted" || bad "$case_: did not say the backup was not trusted"
+    # The live cache is the only copy of what was there; it is kept first.
+    live=$(ls "$sb/state/data/local/tmp/"wtprov_prefs.live.*.xml 2>/dev/null | head -1)
+    livesha="${live%.xml}.sha256"
+    [[ -n "$live" ]] && grep -q "name=\"home_pkg\">$PROJECTIVY<" "$live" \
+        && ok "$case_: the live cache was kept before the revert" || bad "$case_: no wtprov_prefs.live.*.xml naming Projectivy"
+    [[ -n "$live" && -f "$livesha" && "$(tr -d '\r\n ' < "$livesha")" == "$(shasum -a 256 "$live" | cut -d' ' -f1)" ]] \
+        && ok "$case_: its sha256 is recorded next to it" || bad "$case_: no matching sidecar at '$livesha'"
+    sandbox_finish "$sb"
+done
+
+# ---------------------------------------------------------------------------
+head_ "a cache and an identical backup without the keys are refused"
+# Same bytes means recording the hash would be truthful, but a backup without
+# the pair can never be restored, so nothing is recorded or written.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+printf '<map></map>\n' > "$f"
+cp "$f" "$bk"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock went ahead without the keys"
+[[ "$out" == *"no home_pkg/home_activity pair"* ]] \
+    && ok "names the missing keys" || bad "no missing-keys message: $(echo "$out" | grep -i error | head -3)"
+[[ ! -e "$sb/state/data/local/tmp/wtprov_prefs.before.sha256" ]] \
+    && ok "no sidecar was written" || bad "a sidecar was written"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "an interceptor that is not wtprovision blocks the step, even the launcher"
+# Only wtprovision's cache is understood. Any other owner of the home intent,
+# the launcher included, is reported and left alone.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+before=$(cat "$f")
+out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$PROJECTIVY/.Main" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock succeeded with the launcher as interceptor"
+[[ "$(cat "$f")" == "$before" ]] && ok "the cache is unchanged" || bad "the cache was written"
+out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$PROJECTIVY/.Main" --status)
+echo "$out" | grep -qE "\[blocked\][[:space:]]+launcher_default.*$PROJECTIVY/\.Main" \
+    && ok "--status shows [blocked] naming the component" || bad "status: $(echo "$out" | grep launcher_default)"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a cache that is not valid XML stops the unlock before any write"
+# The pair can be read out of a broken file with sed, so only a real parse
+# tells wtprovision's cache apart from something it would choke on.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+printf '<broken\n' >> "$f"
+grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" && tail -1 "$f" | grep -q '<broken' \
+    && ok "control: the cache holds the pair and trailing junk" || bad "control: seed not built"
+before=$(shasum -a 256 "$f" | cut -d' ' -f1)
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock went ahead with an unparseable cache"
+[[ "$out" == *"not valid XML"* ]] \
+    && ok "names the XML problem" || bad "no XML message: $(echo "$out" | grep -i -e error | head -3)"
+[[ "$(shasum -a 256 "$f" | cut -d' ' -f1)" == "$before" ]] \
+    && ok "the cache is unchanged" || bad "the cache was written"
+[[ ! -e "$sb/state/data/local/tmp/wtprov_prefs.before.sha256" ]] \
+    && ok "no backup sidecar was created" || bad "a backup sidecar was written"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "the new cache is built from the trusted backup"
+# The backup is the original; keys only it carries must survive the write.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+awk '/<\/map>/ { print "    <string name=\"other\">keep</string>" } { print }' "$f" > "$bk"
+shasum -a 256 "$bk" | cut -d' ' -f1 > "$sb/state/data/local/tmp/wtprov_prefs.before.sha256"
+grep -q 'name="other"' "$f" && bad "control: the live cache already has the extra key" \
+    || ok "control: only the backup carries the extra key"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" == *"RC=0"* ]] && ok "unlock completes" || { bad "unlock failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+grep -q 'name="other">keep<' "$f" && ok "the extra key from the backup survived" || bad "cache lost the backup's extra key"
+grep -q 'name="home_pkg">com.spocky.projengmenu<' "$f" && ok "and the cache names Projectivy" || bad "cache home_pkg is not Projectivy"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a foreign file at the backup path stops the unlock before any write"
+# Nothing is written without a trusted backup. An unrecorded file that differs
+# from the cache is set aside by hand, not overwritten and not ignored.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+seed=$(cat "$f")
+echo '<map>foreign</map>' > "$bk"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" =~ wtprov_prefs\.before\.xml\.old\.[0-9]{8}_[0-9]{6}\.[0-9]+ ]] && ok "set-aside name carries a timestamp and pid" || bad "set-aside name lacks the timestamp or pid"
+# Freeze the clock so both runs land in the same second; the names must still differ.
+frozen="$sb/frozen-date"; mkdir -p "$frozen"
+printf '#!/bin/bash\n[[ "$1" == +%%Y%%m%%d_%%H%%M%%S ]] && { echo 20261027_120000; exit 0; }\nexec /bin/date "$@"\n' > "$frozen/date"
+chmod +x "$frozen/date"
+aside_name() { echo "$1" | grep -o 'wtprov_prefs\.before\.xml\.old\.[0-9_.]*' | head -1; }
+name1=$(aside_name "$(PATH="$frozen:$PATH" unlock "$sb" --apply-all --yes)")
+name2=$(aside_name "$(PATH="$frozen:$PATH" unlock "$sb" --apply-all --yes)")
+[[ "$name1" == *.old.20261027_120000* && "$name2" == *.old.20261027_120000* ]] \
+    && ok "control: both runs used the frozen clock" || bad "control: frozen clock not used: '$name1' '$name2'"
+[[ -n "$name1" && "$name1" != "$name2" ]] && ok "two runs in one second print different set-aside names" \
+    || bad "two runs printed the same set-aside name: '$name1'"
+[[ "$out" != *"RC=0"* ]] && ok "the unlock refuses" || bad "unlock went ahead with a foreign file at the backup path"
+[[ "$out" == *"/data/local/tmp/wtprov_prefs.before.xml"* && "$out" == *"mv "* ]] \
+    && ok "names the file and the mv that sets it aside" || bad "no path or mv command: $(echo "$out" | grep -i backup | head -3)"
+[[ "$(cat "$f")" == "$seed" ]] && ok "the cache is unchanged" || bad "the cache was written: $(tr -d '\n' < "$f")"
+[[ "$(cat "$bk")" == '<map>foreign</map>' ]] && ok "the foreign file is untouched" || bad "the foreign file changed"
+rm "$bk"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" == *"RC=0"* ]] && ok "control: with the file gone the unlock completes" \
+    || { bad "control: unlock failed without the foreign file"; echo "$out" | tail -6 | sed 's/^/        /'; }
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "revert writes the stock pair when the backup names another launcher"
+# Revert exists to put the stock launcher back. An unrecorded backup equal to a
+# live cache naming Nova is recorded, but restoring it would bring Nova back.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+sed -e "s|>$STOCK.WizardAciticity<|>$NOVA.NovaLauncher<|" -e "s|>$STOCK<|>$NOVA<|" "$f" > "$bk"
+cp "$bk" "$f"
+grep -q "name=\"home_pkg\">$NOVA<" "$f" && grep -q "name=\"home_activity\">$NOVA.NovaLauncher<" "$f" \
+    && ok "control: the live cache names Nova" || bad "control: Nova cache not built"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" == *"RC=0"* ]] && ok "unlock completes" || { bad "unlock failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+grep -q "name=\"home_pkg\">$PROJECTIVY<" "$f" && ok "Projectivy is in the cache" || bad "cache home_pkg is not Projectivy"
+out=$(unlock "$sb" --revert --yes)
+[[ "$out" == *"RC=0"* ]] && ok "revert completes" || { bad "revert failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+grep -q "name=\"home_pkg\">$STOCK<" "$f" \
+    && grep -q "name=\"home_activity\">$STOCK.WizardAciticity<" "$f" \
+    && ok "cache holds the stock pair" || bad "cache is: $(tr -d '\n' < "$f")"
+[[ "$out" == *"names $NOVA, not the stock launcher"* ]] \
+    && ok "says the backup names Nova" || bad "did not say the backup names Nova"
+home=$(home_now "$sb")
+[[ "$home" == "$STOCK"* ]] && ok "home screen is the stock launcher" || bad "home is '$home'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a HOME press that fails is not read as success"
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_INPUT_FAILS=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock claimed success though HOME could not be pressed"
+[[ "$out" == *"input keyevent HOME failed"* ]] \
+    && ok "says pressing HOME failed" || bad "did not report the failed HOME press"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a stock unit reboots once in the middle and the unlock finishes by itself"
 # The real projector rejects every pm install with
-# INSTALL_FAILED_INVALID_INSTALL_LOCATION -- nothing has ever been installed
-# normally on it. Copying into /system/app is the only route that works there,
-# so the fallback has to fire, and it must be honest that a restart is needed
-# rather than reporting a launcher that is not registered yet as present.
+# INSTALL_FAILED_INVALID_INSTALL_LOCATION, so the launcher goes into /system/app
+# and only registers after a restart. One command has to cover that: the runner
+# restarts the projector itself, waits, and carries on.
 
 new_sandbox
 out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
@@ -330,20 +643,192 @@ out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
     && ok "reports why the normal install failed" || bad "swallowed the install failure"
 [[ -f "$sb/state/system/app/Projectivy/Projectivy.apk" ]] \
     && ok "fell back to /system/app" || bad "no APK in /system/app after the fallback"
-[[ "$out" == *"restart"* ]] \
-    && ok "says a restart is needed" || bad "did not mention the restart"
-[[ "$out" != *"RC=0"* ]] \
-    && ok "does not claim the unlock finished" || bad "claimed success with an unregistered launcher"
+apksha=$(shasum -a 256 "$sb/apks/projectivy-launcher-4.71.apk" | cut -d' ' -f1)
+destsha=$(shasum -a 256 "$sb/state/system/app/Projectivy/Projectivy.apk" 2>/dev/null | cut -d' ' -f1)
+[[ "$destsha" == "$apksha" ]] \
+    && ok "the /system/app copy has the APK's sha256" || bad "dest sha256 '$destsha', APK '$apksha'"
+[[ "$out" == *"Restarting the projector"* ]] \
+    && ok "says it restarts the projector" || bad "did not announce the restart"
+[[ "$out" != *"Resuming"* ]] \
+    && ok "carries on in the same run" || bad "printed Resuming in a single run"
+[[ "$(cat "$sb/state/reboots")" == "1" ]] \
+    && ok "restarted exactly once" || bad "reboots: $(cat "$sb/state/reboots")"
+[[ "$out" == *"RC=0"* ]] \
+    && ok "the one run finishes the unlock" || { bad "unlock did not finish"; echo "$out" | tail -6 | sed 's/^/        /'; }
+home=$(home_now "$sb")
+[[ "$home" == "$PROJECTIVY"* ]] && ok "home screen is Projectivy" || bad "home is '$home'"
+[[ ! -e "$sb/run/.unlock-resume" ]] \
+    && ok "no resume marker left behind" || bad "marker left: $(cat "$sb/run/.unlock-resume")"
 
 # and it must not have touched the stock launcher on the way past
 dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
-    && bad "disabled the stock launcher despite an incomplete install" \
+    && bad "disabled the stock launcher" \
     || ok "stock launcher left alone"
 
 # The filesystem holding /system must not be left writable. On this device that
 # is / -- it is system-as-root, so /system is never its own mount.
 dev "$sb" 'cat /proc/mounts' | awk '$2 == "/" && $4 ~ /^ro(,|$)/ { f = 1 } END { exit !f }' \
     && ok "/ put back read-only" || bad "/ left writable"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a /system/app copy that does not match the APK stops before the restart"
+# A partial copy followed by a reboot is the worst case: the next boot scans a
+# broken APK. The copy is checked by sha256 and the projector is not restarted.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_SYSTEM_CP_CORRUPTS=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "claimed success with a corrupt /system/app copy"
+[[ "$out" == *"sha256"*"does not match"* ]] \
+    && ok "names the hash mismatch" || bad "no hash mismatch message: $(echo "$out" | grep -i -e sha256 -e error | head -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "did not restart the projector" || bad "restarted after a bad copy: reboots $(cat "$sb/state/reboots")"
+dev "$sb" 'cat /proc/mounts' | awk '$2 == "/" && $4 ~ /^ro(,|$)/ { f = 1 } END { exit !f }' \
+    && ok "/ put back read-only" || bad "/ left writable"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "no restart without a positive read-only reading of /"
+# system_ro took "not rw" as read-only, and an unreadable /proc/mounts is not rw
+# either. The restart needs the table to say ro.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_MOUNTS_UNREADABLE=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "claimed success without reading the mount state"
+[[ "$out" == *"Could not read the mount state of / from /proc/mounts"* ]] \
+    && ok "names the unreadable mount state" || bad "no mount-state message: $(echo "$out" | grep -i -e mount -e error | head -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "did not restart the projector" || bad "restarted without ro proof: reboots $(cat "$sb/state/reboots")"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "an interrupted run resumes from the marker instead of starting over"
+
+# The first run is cut off during the restart, then the projector comes up.
+new_sandbox
+unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_NEVER_BOOTS=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes >/dev/null
+reboot_dev "$sb"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "control: the cut-off run left the marker" || bad "control: no launcher_present marker"
+out=$(unlock "$sb" --apply-all --yes)
+
+[[ "$out" == *"Resuming after a restart, from launcher_present"* ]] \
+    && ok "says it is resuming from the saved step" || bad "no resume notice naming launcher_present"
+n=$(echo "$out" | grep -c 'dev_options:')
+[[ "$n" == "0" ]] && ok "steps before the marker are skipped" || bad "dev_options ran again ($n lines)"
+echo "$out" | grep -q 'launcher_present: already done' \
+    && ok "the saved step is checked again and found done" || bad "launcher_present was not rerun"
+echo "$out" | grep -q 'launcher_default: done and verified' \
+    && ok "the step after the marker is applied" || bad "launcher_default was not applied"
+[[ "$out" == *"RC=0"* ]] && ok "the resumed run finishes" || bad "resumed run failed"
+[[ ! -e "$sb/run/.unlock-resume" ]] && ok "marker removed on success" || bad "marker still there"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a resumed step that still needs a restart is not restarted a second time"
+# The marker says a restart already happened for this step. If the launcher
+# still has not registered, another restart will not help; stop and say so.
+
+new_sandbox
+log="$sb/state/invocations.log"
+unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_REBOOT_IGNORED=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes >/dev/null
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "control: the first run left the marker" || bad "control: no launcher_present marker"
+n1=$(grep -c $'^adb\treboot' "$log")
+[[ "$n1" == "1" ]] && ok "control: the first run asked for one restart" || bad "control: first run reboot calls: $n1"
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_REBOOT_IGNORED=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes)
+n2=$(grep -c $'^adb\treboot' "$log")
+[[ "$out" != *"RC=0"* ]] && ok "the second run fails" || bad "claimed success though the launcher never registered"
+[[ "$out" == *"did not register"* ]] \
+    && ok "says the launcher did not register" || bad "no did-not-register message: $(echo "$out" | tail -3)"
+[[ "$n2" == "$n1" ]] && ok "the second run did not restart again" || bad "reboot calls went from $n1 to $n2"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "the projector was never restarted" || bad "reboots: $(cat "$sb/state/reboots")"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker is kept" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "no restart without the uptime that proves it"
+# Only uptime going backwards proves a restart happened. Without the value
+# from before, nothing can be proven, so the projector is not restarted.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_NO_UPTIME=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "carried on without an uptime"
+[[ "$out" == *"Could not read /proc/uptime, so the projector was not restarted"* ]] \
+    && ok "says why it did not restart" || bad "no uptime message: $(echo "$out" | tail -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "did not restart the projector" || bad "restarted without an uptime: reboots $(cat "$sb/state/reboots")"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker names the step" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a failed adb reboot is reported and keeps the place"
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_REBOOT_FAILS=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "carried on after a failed reboot"
+[[ "$out" == *"adb reboot failed"* ]] \
+    && ok "names the failed reboot" || bad "no failed-reboot message: $(echo "$out" | tail -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "the projector was not restarted" || bad "reboots: $(cat "$sb/state/reboots")"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker is kept" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a projector that never comes back is reported, not waited for forever"
+
+new_sandbox
+start=$SECONDS
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_NEVER_BOOTS=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes)
+elapsed=$((SECONDS - start))
+
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "claimed success with a projector that never booted"
+[[ "$out" == *"did not come back"* && "$out" == *".unlock-resume"* ]] \
+    && ok "names the marker that keeps the place" || bad "no marker hint: $(echo "$out" | tail -3)"
+(( elapsed < 30 )) && ok "gave up within the timeout (${elapsed}s)" || bad "took ${elapsed}s"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker names the step that needed the restart" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a marker that cannot be saved stops the run before any restart"
+# Without the marker a restart loses the place, so no marker means no restart.
+
+new_sandbox
+mkdir "$sb/run/.unlock-resume"
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
+
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "carried on without a marker"
+[[ "$out" == *"Could not save"*".unlock-resume"* ]] \
+    && ok "names the marker it could not write" || bad "no marker error: $(echo "$out" | tail -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "did not restart the projector" || bad "restarted without a marker: reboots $(cat "$sb/state/reboots")"
+rmdir "$sb/run/.unlock-resume"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a projector that answers without having restarted is not taken as back"
+# The old adbd can still answer right after `adb reboot`. Only uptime going
+# backwards proves the restart happened.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_REBOOT_IGNORED=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes)
+
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "claimed success without a restart"
+[[ "$out" == *"uptime did not reset"* && "$out" == *"did not restart"* ]] \
+    && ok "says the projector did not restart" || bad "no did-not-restart message: $(echo "$out" | tail -3)"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker still names the step" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
@@ -409,6 +894,41 @@ new_sandbox
 out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR=com.newlink.wtprovision/.MainActivity --repair)
 [[ "$out" == *"Nothing to repair"* ]] && ok "reports a healthy device" || bad "did not report a healthy device"
 [[ "$out" == *"RC=0"* ]] && ok "and succeeds" || bad "failed on a healthy device"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "the emulated device carries wtprovision's launcher cache"
+new_sandbox
+WTPROV_XML=/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml
+f="$sb/state$WTPROV_XML"
+[[ -f "$f" ]] && ok "cache file seeded" || bad "no cache file in the seed"
+grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" && ok "stock pkg" || bad "stock pkg missing"
+out=$(dev "$sb" 'pidof com.newlink.wtprovision'); [[ "$out" =~ ^[0-9]+$ ]] && ok "pidof answers" || bad "pidof: '$out'"
+PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" adb shell "su -c 'sh -c \"cat /data/local/tmp/x.xml > $(echo /data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml)\"'" >/dev/null 2>&1
+
+# A firmware that ignores the cache starts stock, never a stale earlier pick.
+dev "$sb" "cmd package set-home-activity $NOVA/.Launcher" >/dev/null
+[[ "$(dev "$sb" 'dumpsys window')" == *"u0 $NOVA/"* ]] && ok "a non-stock home is selected" || bad "set-home-activity did not take"
+dev "$sb" FAKE_ADB_WTPROV_IGNORES_CACHE=1 'kill -9 2166' >/dev/null
+out=$(dev "$sb" 'dumpsys window')
+[[ "$out" == *"u0 $STOCK/"* ]] && ok "ignored cache restarts stock" || bad "ignored cache kept: $out"
+
+# A failed cache write must reach the toolkit as a nonzero status. Same piped
+# form adb_root_exec sends.
+echo probe > "$sb/state/data/local/tmp/src.xml"
+# dev cannot carry this: it reads any argument holding "=" as an env setting.
+out=$(PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" \
+    adb shell "echo 'sh -c \"cat /data/local/tmp/src.xml > /data/local/tmp\"' | su 2>&1; echo __RC__=\$?" 2>&1 | tr -d '\r')
+[[ "$out" == *"__RC__=1"* ]] && ok "root redirect to a directory fails" || bad "root redirect to a directory: '$out'"
+before=$(cat "$f")
+out=$(PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" \
+    adb shell "sh -c \"cat /data/local/tmp/src.xml > $WTPROV_XML\"; echo __RC__=\$?" 2>&1 | tr -d '\r')
+[[ "$out" == *"__RC__=1"* && "$(cat "$f")" == "$before" ]] \
+    && ok "non-root redirect fails and leaves the cache" || bad "non-root redirect: '$out'"
+
+# An interceptor override set to empty means no interceptor, seed or not.
+out=$(dev "$sb" FAKE_ADB_HOME_INTERCEPTOR= 'cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.SETUP_WIZARD')
+[[ "$out" != *wtprovision* ]] && ok "empty interceptor override wins" || bad "empty override still lists: $out"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

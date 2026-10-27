@@ -43,7 +43,8 @@ add_backup() {
 ui() {
     local sb="$1" script="$2" input="$3"; shift 3
     ( cd "$sb/run" || exit 1
-      PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" "$@" \
+      PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+        env HOME_SETTLE_SECS=0 LAUNCHER_SETTLE_SECS=0 WTPROV_RESTART_TIMEOUT=2 "$@" \
         /bin/bash "$SCRIPTS/$script" <<<"$input" 2>&1 | sed 's/\x1b\[[0-9;]*m//g' )
 }
 home_now() { tr -d '\r\n' < "$1/state/home_activity"; }
@@ -205,6 +206,26 @@ echo "$out" | grep -q 'All steps applied and verified' \
 out=$(ui "$sb" PROJECTOR.sh $'q\n')
 echo "$out" | grep -qi 'launcher .*unlocked' && ok "header shows unlocked" || bad "header still says locked"
 echo "$out" | grep -qi 'already unlocked' && ok "menu stops offering it" || bad "menu still offers the unlock"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "UNLOCK.sh menu apply checks HOME like --apply-all does"
+# Choice 1 said "Everything is already applied" from the step states alone, so a
+# cache that wtprovision never reread left HOME on stock with no restart.
+
+new_sandbox; add_backup "$sb"
+( cd "$sb/run" && PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+    bash "$SCRIPTS/UNLOCK.sh" --apply-all --yes >/dev/null 2>&1 )
+echo "$STOCK/.WizardAciticity" > "$sb/state/home_activity"
+pid1=$(cat "$sb/state/wtprov_pid")
+out=$(ui "$sb" UNLOCK.sh $'1\nq\n' env FAKE_ADB_WTPROV_STALE=1)
+pid2=$(cat "$sb/state/wtprov_pid")
+[[ "$out" == *"HOME shows"* ]] && ok "says HOME disagrees with the cache" || bad "no HOME-shows line"
+[[ "$out" == *"restarting wtprovision"* ]] \
+    && ok "restarts wtprovision from the menu" || bad "no restart: $(echo "$out" | grep -i -e applied -e home | head -3)"
+[[ "$pid2" != "$pid1" ]] && ok "wtprovision pid changed" || bad "pid unchanged: $pid1"
+[[ "$(home_now "$sb")" == "$PROJECTIVY"* ]] \
+    && ok "HOME lands on Projectivy" || bad "home is '$(home_now "$sb")'"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

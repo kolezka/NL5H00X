@@ -119,6 +119,22 @@ EOF
 # Processes. Only the stock launcher is up on a freshly booted device.
 echo "com.newlink.hisilauncher" > "$STATE/running"
 
+# wtprovision owns HOME on this firmware and starts whatever its own
+# SharedPreferences cache names. Same five-line layout as the real file.
+WTPROV_PREFS="$STATE/data/user_de/0/com.newlink.wtprovision/shared_prefs"
+mkdir -p "$WTPROV_PREFS"
+cat > "$WTPROV_PREFS/com.newlink.wtprovision.xml" <<'EOF'
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="home_activity">com.newlink.hisilauncher.WizardAciticity</string>
+    <string name="home_pkg">com.newlink.hisilauncher</string>
+</map>
+EOF
+echo "2166" > "$STATE/wtprov_pid"
+# A file, not only the env knob, so a test can delete it to model a firmware
+# without the interceptor. FAKE_ADB_HOME_INTERCEPTOR still wins when set.
+echo "com.newlink.wtprovision/.MainActivity" > "$STATE/home_interceptor"
+
 # settings: <namespace> <key> <value>
 cat > "$STATE/settings" <<'EOF'
 global development_settings_enabled 0

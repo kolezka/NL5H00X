@@ -21,6 +21,11 @@ SUPPORTED_DEVICES=(NL5H00X NL5H00X_TP)
 ASSUME_YES=0
 MODE=menu
 
+# A step that needs a reboot is saved here, so a run cut short by the reboot
+# can pick up where it stopped. Lives in the working directory.
+RESUME_MARKER=".unlock-resume"
+UNLOCK_BOOT_TIMEOUT="${UNLOCK_BOOT_TIMEOUT:-180}"
+
 # ---------------------------------------------------------------------------
 # preconditions
 # ---------------------------------------------------------------------------
@@ -62,13 +67,51 @@ step_line() {
     printf "  %b %-18s %s\n" "$label" "$step" "$desc"
 }
 
+# The package wtprovision's cache names, when wtprovision intercepts HOME and
+# the cache holds a pair; empty otherwise.
+wtprov_cache_pkg() {
+    local icept pair
+    icept=$(home_interceptor)
+    [[ -n "$icept" ]] && is_wtprov "$icept" || return 0
+    pair=$(wtprov_cache_read)
+    [[ -n "$pair" ]] && echo "${pair%% *}"
+    return 0
+}
+
 show_status() {
     print_section "CURRENT STATE"
-    local step
+    local step cached focus
     for step in "${UNLOCK_STEPS[@]}"; do step_line "$step"; done
     echo
-    printf "  home screen now: %s\n" "$(home_activity)"
+    printf "  home screen now: %s\n" "$(home_owner)"
+    # The cache is only read when wtprovision starts, so the two can disagree.
+    # No HOME press here: --status changes nothing, so only a home screen
+    # already in front counts, not whatever app is open.
+    cached=$(wtprov_cache_pkg)
+    if [[ -n "$cached" ]]; then
+        focus=$(focused_package)
+        if [[ -n "$focus" && "$focus" != "$cached" && -n "$(home_component_of "$focus")" ]]; then
+            print_warning "HOME shows $focus, but wtprovision's cache names $cached; --apply-all restarts wtprovision"
+        fi
+    fi
     echo
+}
+
+# All steps applied: press HOME and make sure it agrees with the cache,
+# restarting wtprovision once if it does not.
+confirm_home_on_launcher() {
+    local shown focus
+    [[ -n "$(wtprov_cache_pkg)" ]] || return 0
+    shown=$(home_focus) || return 1
+    [[ "$shown" == "$LAUNCHER_PKG" ]] && return 0
+    shown="${shown:-nothing}"
+    print_warning "The cache names $LAUNCHER_PKG but HOME shows $shown; restarting wtprovision"
+    if wtprov_restart && focus=$(home_focus) && [[ "$focus" == "$LAUNCHER_PKG" ]]; then
+        print_success "HOME is on $LAUNCHER_NAME after the restart"
+        return 0
+    fi
+    print_error "HOME still shows '${focus:-$shown}', not $LAUNCHER_PKG; revert with: bash scripts/UNLOCK.sh --revert"
+    return 1
 }
 
 all_applied() {
@@ -96,7 +139,11 @@ run_step() {
     esac
 
     print_step "$step: $("${step}_describe")"
-    if ! "${step}_apply"; then
+    local rc=0
+    "${step}_apply" || rc=$?
+    # Not a failure: the caller restarts the projector and moves on.
+    [[ "$rc" -eq "$NEEDS_REBOOT" ]] && return "$NEEDS_REBOOT"
+    if [[ "$rc" -ne 0 ]]; then
         print_error "$step FAILED - stopping, nothing further was changed"
         return 1
     fi
@@ -111,16 +158,75 @@ run_step() {
     return 0
 }
 
+# Save the step, reboot, and wait until the projector has really restarted.
+restart_for_step() {
+    local step="$1" uptime_before rc=0
+    # Read first: without it a restart cannot be proven, so none is attempted.
+    uptime_before=$(device_uptime_s)
+    # No marker, no restart: without it the place is lost.
+    if ! printf '%s\n' "$step" 2>/dev/null > "$RESUME_MARKER" \
+        || [[ "$(cat "$RESUME_MARKER" 2>/dev/null)" != "$step" ]]; then
+        print_error "Could not save the resume marker $RESUME_MARKER, so the projector was not restarted"
+        return 1
+    fi
+    if [[ -z "$uptime_before" ]]; then
+        print_error "Could not read /proc/uptime, so the projector was not restarted. Restart it by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    fi
+    print_status "Restarting the projector to register $step; the unlock continues on its own"
+    if [[ "$ASSUME_YES" != "1" ]] && ! confirm "Restart the projector now?"; then
+        print_warning "Not restarted. Restart the projector, then run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    fi
+    if ! adb reboot >/dev/null 2>&1; then
+        print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    fi
+    wait_for_device_boot "$UNLOCK_BOOT_TIMEOUT" "$uptime_before" || rc=$?
+    if [[ "$rc" -eq 2 ]]; then
+        print_error "The projector did not restart. Restart it by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    elif [[ "$rc" -ne 0 ]]; then
+        print_error "The projector did not come back within $UNLOCK_BOOT_TIMEOUT s. When it is up, run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    fi
+    print_success "The projector is back"
+}
+
 apply_all() {
     print_section "APPLYING UNLOCK"
-    local step
+    local step rc resumed="" skip_to=""
+    if [[ -f "$RESUME_MARKER" ]]; then
+        resumed=$(tr -d ' \r\n' < "$RESUME_MARKER")
+        if [[ " ${UNLOCK_STEPS[*]} " == *" $resumed "* ]]; then
+            print_status "Resuming after a restart, from $resumed"
+            skip_to="$resumed"
+        else
+            print_warning "Ignoring $RESUME_MARKER: '$resumed' is not a step"
+            resumed=""
+        fi
+    fi
     for step in "${UNLOCK_STEPS[@]}"; do
-        run_step "$step" || return 1
+        # The saved step runs again: the restart is not proof it worked.
+        if [[ -n "$skip_to" ]]; then
+            [[ "$step" == "$skip_to" ]] || continue
+            skip_to=""
+        fi
+        rc=0
+        run_step "$step" || rc=$?
+        if [[ "$rc" -eq "$NEEDS_REBOOT" ]]; then
+            if [[ "$step" == "$resumed" ]]; then
+                print_error "$step still needs a restart after the last one; the launcher did not register. Check /system/app on the device."
+                return 1
+            fi
+            restart_for_step "$step" || return 1
+        elif [[ "$rc" -ne 0 ]]; then
+            return 1
+        fi
     done
+    rm -f "$RESUME_MARKER"
     echo
     print_success "All steps applied and verified"
-    echo
-    print_warning "Restart the projector for the new home screen to appear:  adb reboot"
     return 0
 }
 
@@ -128,6 +234,7 @@ revert_all() {
     print_section "REVERTING"
     print_warning "This puts the stock launcher back as the home screen"
     echo
+    rm -f "$RESUME_MARKER"
     # Reverse order: restore the launcher before removing its files.
     local i step failed=0
     for (( i=${#UNLOCK_STEPS[@]}-1; i>=0; i-- )); do
@@ -173,7 +280,12 @@ single_step_menu() {
         print_error "No such step"
         return 0
     fi
-    run_step "${UNLOCK_STEPS[$((n - 1))]}" || true
+    local rc=0
+    run_step "${UNLOCK_STEPS[$((n - 1))]}" || rc=$?
+    if [[ "$rc" -eq "$NEEDS_REBOOT" ]]; then
+        print_warning "Restart the projector (option 5) for this to take effect"
+    fi
+    return 0
 }
 
 interactive() {
@@ -184,7 +296,11 @@ interactive() {
         case "$choice" in
             1)
                 if all_applied; then
-                    print_success "Everything is already applied"
+                    # Same HOME check as --apply-all; on failure it has already said why.
+                    if confirm_home_on_launcher; then
+                        print_success "Everything is already applied"
+                        rm -f "$RESUME_MARKER"
+                    fi
                 elif [[ "$ASSUME_YES" == "1" ]] || confirm "Apply all steps now?"; then
                     apply_all || true
                 fi
@@ -205,7 +321,8 @@ Unlock the launcher on a Newlink NL5H00X projector.
 
   ./UNLOCK.sh              interactive menu (default)
   ./UNLOCK.sh --status     show what is and is not applied, change nothing
-  ./UNLOCK.sh --apply-all  apply every step, then stop
+  ./UNLOCK.sh --apply-all  apply every step, then stop; restarts the projector
+                           once if the launcher can only go into /system/app
   ./UNLOCK.sh --revert     put the stock launcher back
   ./UNLOCK.sh --repair     projector stuck on the vendor logo? diagnose and fix
   ./UNLOCK.sh --yes        do not ask for confirmation (for scripting)
@@ -253,6 +370,8 @@ main() {
         apply)
             show_status
             if all_applied; then
+                confirm_home_on_launcher || exit 1
+                rm -f "$RESUME_MARKER"
                 print_success "Nothing to do - everything is already applied"
                 exit 0
             fi
