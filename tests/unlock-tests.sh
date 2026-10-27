@@ -690,6 +690,22 @@ dev "$sb" 'cat /proc/mounts' | awk '$2 == "/" && $4 ~ /^ro(,|$)/ { f = 1 } END {
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "no restart without a positive read-only reading of /"
+# system_ro took "not rw" as read-only, and an unreadable /proc/mounts is not rw
+# either. The restart needs the table to say ro.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_MOUNTS_UNREADABLE=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "claimed success without reading the mount state"
+[[ "$out" == *"Could not read the mount state of / from /proc/mounts"* ]] \
+    && ok "names the unreadable mount state" || bad "no mount-state message: $(echo "$out" | grep -i -e mount -e error | head -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "did not restart the projector" || bad "restarted without ro proof: reboots $(cat "$sb/state/reboots")"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "an interrupted run resumes from the marker instead of starting over"
 
 # The first run is cut off during the restart, then the projector comes up.

@@ -38,6 +38,9 @@
 #   FAKE_ADB_NO_UPTIME    1 = `cat /proc/uptime` fails with an error and status 1
 #   FAKE_ADB_REBOOT_FAILS 1 = `adb reboot` prints `error: closed`, exits 1 and
 #                         changes nothing
+#   FAKE_ADB_MOUNTS_UNREADABLE
+#                         1 = once / has been remounted read-only, `cat /proc/mounts`
+#                         prints `cat: /proc/mounts: Permission denied` and exits 1
 #
 # /proc/uptime reads $STATE/uptime (default 5000); a reboot resets it to 30.
 #
@@ -381,7 +384,9 @@ run_remote() {
         "mount -o remount,rw /"|"mount -o rw,remount /")
             echo rw > "$STATE/mount_system"; return 0 ;;
         "mount -o remount,ro /"|"mount -o ro,remount /")
-            echo ro > "$STATE/mount_system"; return 0 ;;
+            echo ro > "$STATE/mount_system"
+            [[ "${FAKE_ADB_MOUNTS_UNREADABLE:-0}" == "1" ]] && : > "$STATE/mounts_unreadable"
+            return 0 ;;
         "mount -o remount,rw /system"|"mount -o rw,remount /system"|\
         "mount -o remount,ro /system"|"mount -o ro,remount /system")
             echo "mount: '/system' not in /proc/mounts" >&2; return 1 ;;
@@ -397,6 +402,10 @@ run_remote() {
             echo "$up.00 $up.00"
             return 0 ;;
         "cat /proc/mounts")
+            # Armed by a remount to ro, so system_rw can still verify its own step.
+            if [[ "${FAKE_ADB_MOUNTS_UNREADABLE:-0}" == "1" && -e "$STATE/mounts_unreadable" ]]; then
+                echo "cat: /proc/mounts: Permission denied" >&2; return 1
+            fi
             echo "/dev/root / ext4 $(sget mount_system ro),seclabel,relatime 0 0"
             echo "/dev/block/platform/soc/f9830000.emmc/by-name/userdata /data ext4 rw,seclabel,nosuid 0 0"
             return 0 ;;

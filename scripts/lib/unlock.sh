@@ -507,10 +507,17 @@ system_mountpoint() {
 # /proc/mounts rather than `mount`: the options field is positional there, so
 # "rw" cannot be matched out of a device name or a path that happens to contain
 # it. The old check grepped '/system.*[( ,]rw' against `mount` output.
-system_is_rw() {
-    local mp; mp=$(system_mountpoint)
+# Prints rw, ro, or nothing when the table is unreadable or has no entry.
+system_mount_state() {
+    local mp="${1:-$(system_mountpoint)}"
     adb_root_exec "cat /proc/mounts" 2>/dev/null | tr -d '\r' \
-        | awk -v mp="$mp" '$2 == mp && $4 ~ /^rw(,|$)/ { found = 1 } END { exit !found }'
+        | awk -v mp="$mp" '$2 == mp && $4 ~ /^rw(,|$)/ { s = "rw" }
+                           $2 == mp && $4 ~ /^ro(,|$)/ { s = "ro" }
+                           END { if (s != "") print s }'
+}
+
+system_is_rw() {
+    [[ "$(system_mount_state)" == "rw" ]]
 }
 
 # Remount writable, verifying it actually took. Callers must pair this with
@@ -524,15 +531,17 @@ system_rw() {
     return 1
 }
 
-# Remount read-only and check it took; a / left writable is an error.
+# Remount read-only and check it took; a / left writable or unreadable is an error.
 system_ro() {
     local mp; mp=$(system_mountpoint)
     adb_root_exec "mount -o remount,ro $mp" >/dev/null 2>&1 || true
-    if system_is_rw; then
-        print_error "Could not remount $mp read-only; it is still writable"
-        return 1
-    fi
-    return 0
+    # Only a positive ro reading counts; "not rw" also covers an unreadable table.
+    case "$(system_mount_state "$mp")" in
+        ro) return 0 ;;
+        rw) print_error "Could not remount $mp read-only; it is still writable" ;;
+        *)  print_error "Could not read the mount state of $mp from /proc/mounts; treating / as still writable" ;;
+    esac
+    return 1
 }
 
 # ---------------------------------------------------------------------------
