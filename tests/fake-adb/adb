@@ -28,6 +28,10 @@
 #   FAKE_ADB_WTPROV_IGNORES_CACHE
 #                         1 = wtprovision ignores its launcher cache and starts stock
 #   FAKE_ADB_INPUT_FAILS  1 = `input keyevent HOME` fails with an error and status 1
+#   FAKE_ADB_REBOOT_IGNORED
+#                         1 = `adb reboot` returns 0 and changes nothing
+#
+# /proc/uptime reads $STATE/uptime (default 5000); a reboot resets it to 30.
 #
 # The contract-only knobs above are disabled by default. Unhandled commands keep
 # their legacy failures unless a scoped characterization explicitly enables one.
@@ -363,6 +367,14 @@ run_remote() {
         "mount -o remount,rw /system"|"mount -o rw,remount /system"|\
         "mount -o remount,ro /system"|"mount -o ro,remount /system")
             echo "mount: '/system' not in /proc/mounts" >&2; return 1 ;;
+        "cat /proc/uptime")
+            # Whole seconds since boot. Each read moves it on by one, so a
+            # second reboot still makes it go backwards.
+            local up
+            up=$(sget uptime 5000)
+            echo $((up + 1)) > "$STATE/uptime"
+            echo "$up.00 $up.00"
+            return 0 ;;
         "cat /proc/mounts")
             echo "/dev/root / ext4 $(sget mount_system ro),seclabel,relatime 0 0"
             echo "/dev/block/platform/soc/f9830000.emmc/by-name/userdata /data ext4 rw,seclabel,nosuid 0 0"
@@ -1061,6 +1073,8 @@ case "$subcmd" in
         ;;
 
     reboot)
+        # The old adbd answering after `adb reboot` without a restart, in miniature.
+        [[ "${FAKE_ADB_REBOOT_IGNORED:-0}" == "1" ]] && exit 0
         # CORRECTED 2026-07-30 against hardware. The previous model here was a
         # labelled hypothesis: that the stock launcher re-claims HOME on boot
         # while it is enabled, which is why Nova sat unused since July. It was
@@ -1085,6 +1099,8 @@ case "$subcmd" in
             wtprov_apply_cache
         fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
+        # A unit that never comes back keeps its old uptime.
+        [[ "${FAKE_ADB_NEVER_BOOTS:-0}" == "1" ]] || echo 30 > "$STATE/uptime"
         # The package manager scans /system/app on boot. Only APKs whose identity
         # is known (a .meta sidecar or a known name) register.
         for sys_apk in "$STATE"/system/app/*/*.apk; do

@@ -629,6 +629,39 @@ elapsed=$((SECONDS - start))
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "a marker that cannot be saved stops the run before any restart"
+# Without the marker a restart loses the place, so no marker means no restart.
+
+new_sandbox
+mkdir "$sb/run/.unlock-resume"
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 --apply-all --yes)
+
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "carried on without a marker"
+[[ "$out" == *"Could not save"*".unlock-resume"* ]] \
+    && ok "names the marker it could not write" || bad "no marker error: $(echo "$out" | tail -3)"
+[[ "$(cat "$sb/state/reboots")" == "0" ]] \
+    && ok "did not restart the projector" || bad "restarted without a marker: reboots $(cat "$sb/state/reboots")"
+rmdir "$sb/run/.unlock-resume"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a projector that answers without having restarted is not taken as back"
+# The old adbd can still answer right after `adb reboot`. Only uptime going
+# backwards proves the restart happened.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_REFUSE_INSTALL=1 FAKE_ADB_REBOOT_IGNORED=1 UNLOCK_BOOT_TIMEOUT=3 --apply-all --yes)
+
+[[ "$out" != *"RC=0"* ]] && ok "the run fails" || bad "claimed success without a restart"
+[[ "$out" == *"uptime did not reset"* && "$out" == *"did not restart"* ]] \
+    && ok "says the projector did not restart" || bad "no did-not-restart message: $(echo "$out" | tail -3)"
+[[ "$(cat "$sb/run/.unlock-resume" 2>/dev/null)" == "launcher_present" ]] \
+    && ok "the marker still names the step" || bad "marker: '$(cat "$sb/run/.unlock-resume" 2>/dev/null)'"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "the shipped launcher APK is the one we say it is"
 # This APK is installed as the home screen on a rooted device, so "where did it
 # come from" has to stay answerable. apks/PROVENANCE.md records the hash that

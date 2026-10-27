@@ -120,17 +120,30 @@ run_step() {
     return 0
 }
 
-# Save the step, reboot, and wait for the projector and root to answer again.
+# Save the step, reboot, and wait until the projector has really restarted.
 restart_for_step() {
-    local step="$1"
-    echo "$step" > "$RESUME_MARKER"
+    local step="$1" uptime_before rc=0
+    # No marker, no restart: without it the place is lost.
+    if ! printf '%s\n' "$step" 2>/dev/null > "$RESUME_MARKER" \
+        || [[ "$(cat "$RESUME_MARKER" 2>/dev/null)" != "$step" ]]; then
+        print_error "Could not save the resume marker $RESUME_MARKER, so the projector was not restarted"
+        return 1
+    fi
     print_status "Restarting the projector to register $step; the unlock continues on its own"
     if [[ "$ASSUME_YES" != "1" ]] && ! confirm "Restart the projector now?"; then
         print_warning "Not restarted. Restart the projector, then run the same command again; the marker $RESUME_MARKER keeps the place."
         return 1
     fi
-    adb reboot >/dev/null 2>&1 || true
-    if ! wait_for_device_boot "$UNLOCK_BOOT_TIMEOUT"; then
+    uptime_before=$(device_uptime_s)
+    if ! adb reboot >/dev/null 2>&1; then
+        print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    fi
+    wait_for_device_boot "$UNLOCK_BOOT_TIMEOUT" "$uptime_before" || rc=$?
+    if [[ "$rc" -eq 2 ]]; then
+        print_error "The projector did not restart. Restart it by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
+        return 1
+    elif [[ "$rc" -ne 0 ]]; then
         print_error "The projector did not come back within $UNLOCK_BOOT_TIMEOUT s. When it is up, run the same command again; the marker $RESUME_MARKER keeps the place."
         return 1
     fi
