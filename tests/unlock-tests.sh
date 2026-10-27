@@ -394,6 +394,17 @@ echo "$out" | grep -qE '\[todo\][[:space:]]+launcher_default' \
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "--status keeps its line format"
+
+new_sandbox
+out=$(unlock "$sb" --status)
+echo "$out" | grep -qE '^\s+\[(done|todo|blocked)\]\s+launcher_default\s+' \
+    && ok "step row format" || bad "step row format changed"
+echo "$out" | grep -qE '^\s+home screen now: [a-z]' \
+    && ok "home line format" || bad "home line format changed"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "revert never creates a missing cache file"
 # A file created by a root redirect is owned by root, not by wtprovision, so
 # the revert must refuse rather than recreate it.
