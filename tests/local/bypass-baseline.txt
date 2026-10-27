@@ -31,20 +31,24 @@ scripts/MAKE_BACKUP.sh:359:        adb shell "rm -f /sdcard/full_backup.img" >/d
 scripts/MAKE_BACKUP.sh:367:        adb shell "rm -f /sdcard/full_backup.img" >/dev/null 2>&1
 scripts/MAKE_BACKUP.sh:372:    if ! adb pull /sdcard/full_backup.img full-system-backup.img >/dev/null 2>&1; then
 scripts/MAKE_BACKUP.sh:384:    adb shell "rm -f /sdcard/full_backup.img" >/dev/null 2>&1
+scripts/MAKE_BACKUP.sh:405:# Run a command as root and return its TRUE remote exit status. `adb shell`
 scripts/MAKE_BACKUP.sh:40:    adb shell df /sdcard/ 2>/dev/null | tail -1 | awk '{print $4 * 1024}'
-scripts/MAKE_BACKUP.sh:416:        adb shell cmd package set-home-activity "${HOME:-com.newlink.hisilauncher}"
-scripts/MAKE_BACKUP.sh:420:        [[ -f complete-app-backup.ab ]] && adb restore complete-app-backup.ab || echo "No app backup found"
-scripts/MAKE_BACKUP.sh:425:            adb push system.img /sdcard/
-scripts/MAKE_BACKUP.sh:426:            adb shell "su -c 'dd if=/sdcard/system.img of=/dev/block/mmcblk0p20 bs=1048576'"
-scripts/MAKE_BACKUP.sh:427:            adb shell rm -f /sdcard/system.img
-scripts/MAKE_BACKUP.sh:459:            adb push full-system-backup.img /sdcard/ || {
-scripts/MAKE_BACKUP.sh:461:                cat full-system-backup.img | adb shell "su -c 'dd of=/dev/block/mmcblk0 bs=1048576'"
-scripts/MAKE_BACKUP.sh:463:            adb reboot
-scripts/MAKE_BACKUP.sh:475:adb shell cmd package set-home-activity com.newlink.hisilauncher
-scripts/MAKE_BACKUP.sh:476:adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
+scripts/MAKE_BACKUP.sh:411:    raw=$(adb shell "su -c '$1' 2>&1; echo __RC__=\$?" 2>/dev/null | tr -d '\r')
+scripts/MAKE_BACKUP.sh:442:        out=$(adb shell cmd package set-home-activity "$HOME_COMP" 2>&1 | tr -d '\r')
+scripts/MAKE_BACKUP.sh:451:        if adb restore complete-app-backup.ab; then
+scripts/MAKE_BACKUP.sh:454:            fail "adb restore failed (exit $?)"
+scripts/MAKE_BACKUP.sh:467:        adb push system.img /sdcard/ || fail "Push to /sdcard failed"
+scripts/MAKE_BACKUP.sh:469:            adb shell rm -f /sdcard/system.img
+scripts/MAKE_BACKUP.sh:472:            adb shell rm -f /sdcard/system.img
 scripts/MAKE_BACKUP.sh:47:    adb shell getprop > system-properties.txt
+scripts/MAKE_BACKUP.sh:505:        if adb push full-system-backup.img /sdcard/; then
+scripts/MAKE_BACKUP.sh:507:            adb shell rm -f /sdcard/full-system-backup.img
+scripts/MAKE_BACKUP.sh:510:            cat full-system-backup.img | adb shell "su -c 'dd of=/dev/block/mmcblk0 bs=1048576'; echo __RC__=\$?" > restore-stream.out 2>&1
+scripts/MAKE_BACKUP.sh:516:        adb reboot
 scripts/MAKE_BACKUP.sh:51:    adb shell pm list packages -f > installed-packages.txt
+scripts/MAKE_BACKUP.sh:528:out=$(adb shell cmd package set-home-activity com.newlink.hisilauncher 2>&1 | tr -d '\r')
 scripts/MAKE_BACKUP.sh:52:    adb shell pm list packages -e > enabled-packages.txt
+scripts/MAKE_BACKUP.sh:533:adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
 scripts/MAKE_BACKUP.sh:53:    adb shell pm list packages -d > disabled-packages.txt
 scripts/MAKE_BACKUP.sh:57:    adb shell "su -c 'cat /proc/partitions'" > partition-info.txt 2>/dev/null || \
 scripts/MAKE_BACKUP.sh:58:        adb shell "echo 'cat /proc/partitions' | su" > partition-info.txt 2>/dev/null
@@ -56,61 +60,98 @@ scripts/PROJECTOR.sh:61:        printf "  ${DIM}%s${NC}\n" "connect over USB, or
 scripts/PROJECTOR.sh:92:    command -v adb >/dev/null || return 0
 scripts/PROJECTOR.sh:93:    adb devices 2>/dev/null | grep -q "device$" || return 0
 scripts/PROJECTOR.sh:95:    DEV_MODEL=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-scripts/TOOLS.sh:156:    adb shell getprop | grep -E "ro.product.model|ro.product.manufacturer|ro.build.version.release" | \
-scripts/TOOLS.sh:162:    adb shell df -h /sdcard/ 2>/dev/null | tail -1 | awk '{print "  Total: "$2"  Used: "$3"  Free: "$4}'
-scripts/TOOLS.sh:166:    adb shell cat /proc/meminfo 2>/dev/null | head -3 | sed 's/^/  /'
-scripts/TOOLS.sh:175:    adb shell cat /proc/cpuinfo 2>/dev/null | grep -E "^Hardware|^processor" | head -5 | sed 's/^/  /'
-scripts/TOOLS.sh:179:    adb shell dumpsys display 2>/dev/null | grep -E "mDisplayId=0|mCurrentDisplayRect" | head -2 | sed 's/^/  /'
-scripts/TOOLS.sh:186:    adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | head -30
-scripts/TOOLS.sh:196:        if adb shell ps 2>/dev/null | grep -q "$svc"; then
-scripts/TOOLS.sh:61:    echo -e "${YELLOW}> adb shell $cmd${NC}"
-scripts/TOOLS.sh:64:    out=$(adb shell "$cmd" 2>&1); rc=$?
-scripts/TOOLS.sh:83:    if adb shell "pm list packages -d" 2>/dev/null | grep -q "$STOCK_LAUNCHER_PKG"; then
-scripts/TOOLS.sh:95:    comp=$(adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
-scripts/UNLOCK.sh:123:    print_warning "Restart the projector for the new home screen to appear:  adb reboot"
-scripts/UNLOCK.sh:195:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
-scripts/UNLOCK.sh:213:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
-scripts/UNLOCK.sh:216:leaves the device with no adb at all. Without a device it prints the commands
-scripts/UNLOCK.sh:238:    # in this failure has no adb by definition, and that is exactly when someone
-scripts/UNLOCK.sh:29:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-scripts/UNLOCK.sh:30:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
-scripts/lib/common.sh:125:# Usage: adb_exec "description" "adb shell command"
-scripts/lib/common.sh:144:# `adb shell` cannot be trusted to propagate the far-side status: on older shell
-scripts/lib/common.sh:163:        direct) raw=$(adb shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
-scripts/lib/common.sh:164:        piped)  raw=$(adb shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
-scripts/lib/common.sh:192:#   exec-out, not shell -- `adb shell` runs the far side on a pty on some
-scripts/lib/common.sh:209:        direct) adb exec-out "su -c '$cmd 2>/dev/null'" ;;
-scripts/lib/common.sh:210:        piped)  adb exec-out "echo '$cmd 2>/dev/null' | su" ;;
-scripts/lib/common.sh:275:    out=$(adb shell "ls -l $path" 2>/dev/null | tr -d '\r' | awk 'NR==1 {print $5}')
-scripts/lib/common.sh:298:    if adb shell am start -n "$activity" 2>/dev/null | grep -q "Error"; then
-scripts/lib/common.sh:313:    adb shell am start -a "$action" 2>/dev/null
+scripts/ROOT.sh:139:    print_warning "sud only starts on the next boot. Reboot to bring it up:  adb reboot"
+scripts/ROOT.sh:170:# repair: sud installed but not coming up, or adb unreachable
+scripts/ROOT.sh:176:define -- and print the manual equivalent when adb is not reachable.
+scripts/ROOT.sh:183:  Either the device is not reachable over adb, or adb answers but su does not.
+scripts/ROOT.sh:210:  --- su itself broken (adb answers, su does not): restore it from the
+scripts/ROOT.sh:231:    # and both failures this diagnoses -- no adb at all, or adb up but su not
+scripts/ROOT.sh:233:    if ! adb devices 2>/dev/null | grep -q "device$"; then
+scripts/ROOT.sh:312:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
+scripts/ROOT.sh:334:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+scripts/ROOT.sh:336:--repair is the exception: with adb it diagnoses; without it, it prints the
+scripts/ROOT.sh:337:serial-console equivalent, because a stuck seclabel does not cost adb the way
+scripts/ROOT.sh:34:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
+scripts/ROOT.sh:35:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
+scripts/TOOLS.sh:116:    if adb shell "pm list packages -d" 2>/dev/null | grep -q "$STOCK_LAUNCHER_PKG"; then
+scripts/TOOLS.sh:128:    comp=$(adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
+scripts/TOOLS.sh:189:    adb shell getprop | grep -E "ro.product.model|ro.product.manufacturer|ro.build.version.release" | \
+scripts/TOOLS.sh:195:    adb shell df -h /sdcard/ 2>/dev/null | tail -1 | awk '{print "  Total: "$2"  Used: "$3"  Free: "$4}'
+scripts/TOOLS.sh:199:    adb shell cat /proc/meminfo 2>/dev/null | head -3 | sed 's/^/  /'
+scripts/TOOLS.sh:208:    adb shell cat /proc/cpuinfo 2>/dev/null | grep -E "^Hardware|^processor" | head -5 | sed 's/^/  /'
+scripts/TOOLS.sh:212:    adb shell dumpsys display 2>/dev/null | grep -E "mDisplayId=0|mCurrentDisplayRect" | head -2 | sed 's/^/  /'
+scripts/TOOLS.sh:219:    adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | head -30
+scripts/TOOLS.sh:229:        if adb shell ps 2>/dev/null | grep -q "$svc"; then
+scripts/TOOLS.sh:276:    adb shell "pm list packages" 2>/dev/null | tr -d '\r' | grep -qx "package:$1"
+scripts/TOOLS.sh:484:        print_error "adb is not answering as root after restarting adbd"
+scripts/TOOLS.sh:519:    print_warning "Restarting adbd drops the current adb connection for a moment."
+scripts/TOOLS.sh:536:        echo "  Connect with:  adb connect $ip:5555"
+scripts/TOOLS.sh:538:        echo "  Find the projector's IP in Settings, then:  adb connect <ip>:5555"
+scripts/TOOLS.sh:590:    if adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
+scripts/TOOLS.sh:94:    echo -e "${YELLOW}> adb shell $cmd${NC}"
+scripts/TOOLS.sh:97:    out=$(adb shell "$cmd" 2>&1); rc=$?
+scripts/UNLOCK.sh:138:    if ! adb reboot >/dev/null 2>&1; then
+scripts/UNLOCK.sh:139:        print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
+scripts/UNLOCK.sh:258:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
+scripts/UNLOCK.sh:277:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+scripts/UNLOCK.sh:280:leaves the device with no adb at all. Without a device it prints the commands
+scripts/UNLOCK.sh:302:    # in this failure has no adb by definition, and that is exactly when someone
+scripts/UNLOCK.sh:34:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
+scripts/UNLOCK.sh:35:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
+scripts/lib/common.sh:122:    adb shell "cat /proc/uptime" 2>/dev/null \
+scripts/lib/common.sh:126:# Wait for the device to come back after a reboot: adb sees it, boot has
+scripts/lib/common.sh:138:        [[ "$(adb get-state 2>/dev/null | tr -d '\r\n')" == "device" ]] || continue
+scripts/lib/common.sh:139:        [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')" == "1" ]] || continue
+scripts/lib/common.sh:160:# Usage: adb_exec "description" "adb shell command"
+scripts/lib/common.sh:179:# `adb shell` cannot be trusted to propagate the far-side status: on older shell
+scripts/lib/common.sh:198:        direct) raw=$(adb shell "su -c '$cmd' 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/common.sh:199:        piped)  raw=$(adb shell "echo '$cmd' | su 2>&1; echo __RC__=\$?" 2>/dev/null) ;;
+scripts/lib/common.sh:227:#   exec-out, not shell -- `adb shell` runs the far side on a pty on some
+scripts/lib/common.sh:244:        direct) adb exec-out "su -c '$cmd 2>/dev/null'" ;;
+scripts/lib/common.sh:245:        piped)  adb exec-out "echo '$cmd 2>/dev/null' | su" ;;
+scripts/lib/common.sh:310:    out=$(adb shell "ls -l $path" 2>/dev/null | tr -d '\r' | awk 'NR==1 {print $5}')
+scripts/lib/common.sh:333:    if adb shell am start -n "$activity" 2>/dev/null | grep -q "Error"; then
+scripts/lib/common.sh:348:    adb shell am start -a "$action" 2>/dev/null
 scripts/lib/common.sh:60:    if ! command -v adb &>/dev/null; then
 scripts/lib/common.sh:69:    if ! adb devices 2>/dev/null | grep -q "device$"; then
 scripts/lib/common.sh:86:    result=$(adb shell "su -c 'whoami'" 2>/dev/null | tr -d '\r\n')
 scripts/lib/common.sh:92:    result=$(adb shell "echo 'whoami' | su" 2>/dev/null | tr -d '\r\n')
+scripts/lib/root.sh:126:# adb root itself runs through su. Any edit to the live su risks losing root
+scripts/lib/root.sh:134:    print_error "adb root lost after touching $SU_HYBRID_PATH"
+scripts/lib/root.sh:159:    if ! adb push "$local_path" "$staged" >/dev/null 2>&1; then
+scripts/lib/root.sh:393:# adb root runs through su, so every touch to the live su is followed by
+scripts/lib/root.sh:476:    local out; out=$(adb shell "$SU_NEW_PATH 0 id" 2>/dev/null | tr -d '\r')
+scripts/lib/root.sh:493:    verify_root_after_su_touch    # exits outright if this cost us adb root
+scripts/lib/root.sh:522:    verify_root_after_su_touch    # exits outright if this cost us adb root
 scripts/lib/transport/select.sh:32:                PT_ADB_BIN=$(command -v adb 2>/dev/null) || {
 scripts/lib/transport/select.sh:33:                    printf 'transport: adb not on PATH\n' >&2
 scripts/lib/unlock.sh:14:#   value back off the device. `adb shell ... || true` is how you end up telling
-scripts/lib/unlock.sh:280:# On this projector it does not work. Every install path -- adb install,
-scripts/lib/unlock.sh:301:    out=$(adb install -r "$apk" 2>&1)
-scripts/lib/unlock.sh:307:    # Staged through /data/local/tmp on purpose. `adb push` runs as the shell
-scripts/lib/unlock.sh:310:    # `adb root` is unavailable, which is every Magisk-rooted one.
-scripts/lib/unlock.sh:314:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
-scripts/lib/unlock.sh:568:# The commands that fix it from a serial console, printed when adb is gone.
-scripts/lib/unlock.sh:603:    if ! adb devices 2>/dev/null | grep -q "device$"; then
-MATCHED_LINES 95
+scripts/lib/unlock.sh:249:    if ! adb push "$tmp" "$WTPROV_STAGED_SHA" >/dev/null 2>&1 \
+scripts/lib/unlock.sh:291:            # Outer single quotes: adb shell joins its arguments, so host-side
+scripts/lib/unlock.sh:293:            print_error "  adb shell 'su 0 sh -c \"$aside\"'"
+scripts/lib/unlock.sh:336:    if ! adb push "$tmp/new.xml" "$WTPROV_STAGED" >/dev/null 2>&1 \
+scripts/lib/unlock.sh:544:# On this projector it does not work. Every install path -- adb install,
+scripts/lib/unlock.sh:565:    out=$(adb install -r "$apk" 2>&1)
+scripts/lib/unlock.sh:571:    # Staged through /data/local/tmp on purpose. `adb push` runs as the shell
+scripts/lib/unlock.sh:574:    # `adb root` is unavailable, which is every Magisk-rooted one.
+scripts/lib/unlock.sh:578:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
+scripts/lib/unlock.sh:881:# The commands that fix it from a serial console, printed when adb is gone.
+scripts/lib/unlock.sh:916:    if ! adb devices 2>/dev/null | grep -q "device$"; then
+MATCHED_LINES 134
 
 COMMAND rg -n '/adb|\$\{?ADB|command -v adb|which adb' scripts/
 scripts/PROJECTOR.sh:269:    if ! command -v adb >/dev/null; then
 scripts/PROJECTOR.sh:92:    command -v adb >/dev/null || return 0
 scripts/lib/common.sh:60:    if ! command -v adb &>/dev/null; then
+scripts/lib/root.sh:31:SU_ALLOW_DIR="/data/adb"
+scripts/lib/root.sh:32:SU_ALLOW_FILE="/data/adb/su-allow"
 scripts/lib/transport/select.sh:32:                PT_ADB_BIN=$(command -v adb 2>/dev/null) || {
-MATCHED_LINES 4
+MATCHED_LINES 6
 
 COMMAND rg -n '\beval\b' scripts/
-scripts/TOOLS.sh:107:# every Mac user. eval-based indirection is uglier and works everywhere.
-scripts/TOOLS.sh:109:section_items() { eval "printf '%s\n' \"\${$1[@]}\""; }
-scripts/lib/common.sh:133:    if eval "$cmd" 2>/dev/null; then
+scripts/TOOLS.sh:140:# every Mac user. eval-based indirection is uglier and works everywhere.
+scripts/TOOLS.sh:142:section_items() { eval "printf '%s\n' \"\${$1[@]}\""; }
+scripts/lib/common.sh:168:    if eval "$cmd" 2>/dev/null; then
 MATCHED_LINES 3
 
 COMMAND rg -n '\$\{?PT_ADB_BIN|(^|[[:space:];|&()])/[[:alnum:]_.~+/@:-]*/adb([[:space:];|&()]|$)' scripts/

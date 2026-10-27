@@ -274,8 +274,8 @@ git commit -m "feat(unlock): reboot and resume when the launcher lands in /syste
 
 - [ ] **Step 1: Full suites**
 
-Run: `bash tests/local/run.sh > /tmp/all.log 2>&1; echo rc=$?; grep -E 'SUMMARY|passed:' /tmp/all.log | tail -8` and `bash tests/root-tests.sh | tail -2; bash tests/restore-tests.sh | tail -2`
-Expected: every rc 0.
+Run: `PT_TEST_BASH=/bin/bash bash tests/local/run.sh > /tmp/all.log 2>&1; echo rc=$?; grep -E 'SUMMARY|passed:' /tmp/all.log | tail -8` and `bash tests/root-tests.sh > /tmp/root.log 2>&1; echo rc=$?; bash tests/restore-tests.sh > /tmp/restore.log 2>&1; echo rc=$?`
+Expected: every rc 0. The runner refuses to start without `PT_TEST_BASH` set to an absolute Bash path (tests/local/run.sh:16). If the bypass audit fails on a baseline that was already stale on main, re-record it with `rm tests/local/bypass-baseline.txt && bash tests/local/bypass-audit.sh --record` and list the genuinely new direct adb calls in the commit body.
 
 - [ ] **Step 2: Push and open the PR** `feat(unlock): write wtprovision's cache, reboot and resume on stock units` with the red log paths and suite counts in the body. Request a review from a different model family (project rule: `kolezka-bootstrap:route-gpt-sol` for Claude-written code), paste its findings and what was done about each into the PR.
 
