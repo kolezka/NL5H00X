@@ -124,6 +124,24 @@ out=$(root_sh "$sb" --status)
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "--status keeps the seeded device output byte for byte"
+new_sandbox
+(
+    cd "$sb/run" || exit 1
+    PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" ROOT_ARTIFACT_DIR="$sb/artifacts" \
+        /bin/bash "$SCRIPTS/ROOT.sh" --status </dev/null 2>&1 | strip_ansi
+    exit "${PIPESTATUS[0]}"
+) > "$sb/status.txt"
+status_rc=$?
+if [[ "$status_rc" -eq 0 ]] && cmp -s "$sb/status.txt" "$TEST_DIR/fixtures/root-status.txt"; then
+    ok "--status matches the seeded device fixture byte for byte"
+else
+    bad "--status differs from the seeded device fixture (rc=$status_rc)"
+    diff -u "$TEST_DIR/fixtures/root-status.txt" "$sb/status.txt" || true
+fi
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
 head_ "--with-su installs the hybrid su and keeps the stock one"
 
 new_sandbox

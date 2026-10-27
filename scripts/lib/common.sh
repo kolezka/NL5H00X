@@ -370,17 +370,15 @@ find_incomplete_backup_dir() {
     [[ -n "$newest" ]] && echo "$newest"
 }
 
-# Check if a backup directory exists with a verified-complete backup
+# Prefer the newest verified backup; timestamped names sort in glob order.
 find_backup_dir() {
-    local backup_dir
+    local backup_dir newest=""
     for backup_dir in projector-backup-*; do
         [[ -d "$backup_dir" ]] || continue
-        if verify_backup_dir "$backup_dir"; then
-            echo "$backup_dir"
-            return 0
-        fi
+        if verify_backup_dir "$backup_dir"; then newest="$backup_dir"; fi
     done
-    return 1
+    [[ -n "$newest" ]] || return 1
+    echo "$newest"
 }
 
 # Require a verified backup before proceeding

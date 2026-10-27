@@ -111,6 +111,19 @@ after=$(cat "$sb/state/settings" "$sb/state/home_activity")
 [[ "$out" == *"RC=0"* ]] && ok "--status succeeds without a backup" || bad "--status failed without a backup"
 [[ "$before" == "$after" ]] && ok "--status left the device untouched" || bad "--status modified device state"
 [[ "$out" == *"CURRENT STATE"* ]] && ok "--status reports the state" || bad "no state in output"
+(
+    cd "$sb/run" || exit 1
+    PATH="$FAKE_ADB_DIR:$PATH" FAKE_ADB_STATE="$sb/state" APK_DIR="$sb/apks" \
+        /bin/bash "$SCRIPTS/UNLOCK.sh" --status </dev/null 2>&1 | sed $'s/\033\\[[0-9;]*m//g'
+    exit "${PIPESTATUS[0]}"
+) > "$sb/status.txt"
+status_rc=$?
+if [[ "$status_rc" -eq 0 ]] && cmp -s "$sb/status.txt" "$TEST_DIR/fixtures/unlock-status.txt"; then
+    ok "--status matches the seeded device fixture byte for byte"
+else
+    bad "--status differs from the seeded device fixture (rc=$status_rc)"
+    diff -u "$TEST_DIR/fixtures/unlock-status.txt" "$sb/status.txt" || true
+fi
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------

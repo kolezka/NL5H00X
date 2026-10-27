@@ -3,24 +3,22 @@
 # Historical absolute-path baseline remains in git blob 69abc5299bb94ca102df558f8d4fc1f15ab0a30e.
 # Each result is sorted and recorded with repository-relative filenames.
 COMMAND rg -n '(^|[^-_./[:alnum:]])adb[[:space:]]' scripts/
-scripts/INSTALL_APP.sh:208:    before=$(adb shell 'cat /proc/uptime' 2>/dev/null | awk '{print int($1)}')
-scripts/INSTALL_APP.sh:212:    adb reboot >/dev/null 2>&1 || true
-scripts/INSTALL_APP.sh:216:        [[ "$(adb shell 'getprop sys.boot_completed' 2>/dev/null | tr -d '\r')" == "1" ]] || continue
-scripts/INSTALL_APP.sh:217:        after=$(adb shell 'cat /proc/uptime' 2>/dev/null | awk '{print int($1)}')
-scripts/INSTALL_APP.sh:352:        # </dev/tty because adb shell swallows this script's stdin: a piped
-scripts/INSTALL_APP.sh:362:        dev_abis=$(adb shell 'getprop ro.product.cpu.abilist' 2>/dev/null | tr -d '\r')
-scripts/INSTALL_APP.sh:381:    local out; out=$(adb install -r "$apk" 2>&1 || true)
-scripts/INSTALL_APP.sh:390:    # Staged through $STAGING because `adb push` runs as the shell user, which
-scripts/INSTALL_APP.sh:393:    adb push "$apk" "$remote" >/dev/null || { print_error "Could not upload to $remote"; return 1; }
-scripts/INSTALL_APP.sh:415:        adb shell "mkdir -p $STAGING/applibs" >/dev/null 2>&1 || true
-scripts/INSTALL_APP.sh:416:        adb push "$libtmp/." "$STAGING/applibs/" >/dev/null || {
+scripts/INSTALL_APP.sh:202:    before=$(adb shell 'cat /proc/uptime' 2>/dev/null | awk '{print int($1)}')
+scripts/INSTALL_APP.sh:206:    adb reboot >/dev/null 2>&1 || true
+scripts/INSTALL_APP.sh:210:        [[ "$(adb shell 'getprop sys.boot_completed' 2>/dev/null | tr -d '\r')" == "1" ]] || continue
+scripts/INSTALL_APP.sh:211:        after=$(adb shell 'cat /proc/uptime' 2>/dev/null | awk '{print int($1)}')
+scripts/INSTALL_APP.sh:346:        # </dev/tty because adb shell swallows this script's stdin: a piped
+scripts/INSTALL_APP.sh:356:        dev_abis=$(adb shell 'getprop ro.product.cpu.abilist' 2>/dev/null | tr -d '\r')
+scripts/INSTALL_APP.sh:375:    local out; out=$(adb install -r "$apk" 2>&1 || true)
+scripts/INSTALL_APP.sh:384:    # Staged through $STAGING because `adb push` runs as the shell user, which
+scripts/INSTALL_APP.sh:387:    adb push "$apk" "$remote" >/dev/null || { print_error "Could not upload to $remote"; return 1; }
+scripts/INSTALL_APP.sh:409:        adb shell "mkdir -p $STAGING/applibs" >/dev/null 2>&1 || true
+scripts/INSTALL_APP.sh:410:        adb push "$libtmp/." "$STAGING/applibs/" >/dev/null || {
 scripts/INSTALL_APP.sh:5:# path there is -- adb streamed, session, local file, with -f, and as uid 0 --
-scripts/INSTALL_GATE.sh:100:                echo "It changes /system/build.prop and takes effect after a restart: adb reboot"
-scripts/INSTALL_GATE.sh:107:            echo "takes effect after a restart: adb reboot"
-scripts/INSTALL_GATE.sh:119:            echo "takes effect after a restart: adb reboot"
-scripts/INSTALL_GATE.sh:14:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-scripts/INSTALL_GATE.sh:15:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
-scripts/INSTALL_GATE.sh:72:The change takes effect after a restart: adb reboot
+scripts/INSTALL_GATE.sh:24:The change takes effect after a restart: adb reboot
+scripts/INSTALL_GATE.sh:52:                echo "It changes /system/build.prop and takes effect after a restart: adb reboot"
+scripts/INSTALL_GATE.sh:59:            echo "takes effect after a restart: adb reboot"
+scripts/INSTALL_GATE.sh:71:            echo "takes effect after a restart: adb reboot"
 scripts/MAKE_BACKUP.sh:125:        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
 scripts/MAKE_BACKUP.sh:133:        adb shell "rm -f /sdcard/temp_backup.img" >/dev/null 2>&1
 scripts/MAKE_BACKUP.sh:138:    if ! adb pull /sdcard/temp_backup.img "$output_file" >/dev/null 2>&1; then
@@ -60,18 +58,15 @@ scripts/MAKE_BACKUP.sh:57:    adb shell "su -c 'cat /proc/partitions'" > partiti
 scripts/MAKE_BACKUP.sh:58:        adb shell "echo 'cat /proc/partitions' | su" > partition-info.txt 2>/dev/null
 scripts/MAKE_BACKUP.sh:62:    adb shell cmd package get-home-activity > current-home-activity.txt 2>/dev/null || \
 scripts/MAKE_BACKUP.sh:73:    if adb backup -all -f complete-app-backup.ab 2>/dev/null; then
-scripts/ROOT.sh:139:    print_warning "sud only starts on the next boot. Reboot to bring it up:  adb reboot"
-scripts/ROOT.sh:170:# repair: sud installed but not coming up, or adb unreachable
-scripts/ROOT.sh:175:  Either the device is not reachable over adb, or adb answers but su does not.
-scripts/ROOT.sh:202:  --- su itself broken (adb answers, su does not): restore it from the
-scripts/ROOT.sh:223:    # and both failures this diagnoses -- no adb at all, or adb up but su not
-scripts/ROOT.sh:225:    if ! adb devices 2>/dev/null | grep -q "device$"; then
-scripts/ROOT.sh:304:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
-scripts/ROOT.sh:326:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
-scripts/ROOT.sh:328:--repair is the exception: with adb it diagnoses; without it, it prints the
-scripts/ROOT.sh:329:serial-console equivalent, because a stuck seclabel does not cost adb the way
-scripts/ROOT.sh:34:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-scripts/ROOT.sh:35:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
+scripts/ROOT.sh:102:  --- su itself broken (adb answers, su does not): restore it from the
+scripts/ROOT.sh:123:    # and both failures this diagnoses -- no adb at all, or adb up but su not
+scripts/ROOT.sh:125:    if ! adb devices 2>/dev/null | grep -q "device$"; then
+scripts/ROOT.sh:179:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+scripts/ROOT.sh:181:--repair is the exception: with adb it diagnoses; without it, it prints the
+scripts/ROOT.sh:182:serial-console equivalent, because a stuck seclabel does not cost adb the way
+scripts/ROOT.sh:59:    print_warning "sud only starts on the next boot. Reboot to bring it up:  adb reboot"
+scripts/ROOT.sh:70:# repair: sud installed but not coming up, or adb unreachable
+scripts/ROOT.sh:75:  Either the device is not reachable over adb, or adb answers but su does not.
 scripts/TOOLS.sh:116:    if adb shell "pm list packages -d" 2>/dev/null | grep -q "$STOCK_LAUNCHER_PKG"; then
 scripts/TOOLS.sh:128:    comp=$(adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
 scripts/TOOLS.sh:189:    adb shell getprop | grep -E "ro.product.model|ro.product.manufacturer|ro.build.version.release" | \
@@ -89,14 +84,9 @@ scripts/TOOLS.sh:538:        echo "  Find the projector's IP in Settings, then: 
 scripts/TOOLS.sh:590:    if adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
 scripts/TOOLS.sh:94:    echo -e "${YELLOW}> adb shell $cmd${NC}"
 scripts/TOOLS.sh:97:    out=$(adb shell "$cmd" 2>&1); rc=$?
-scripts/UNLOCK.sh:181:    if ! adb reboot >/dev/null 2>&1; then
-scripts/UNLOCK.sh:182:        print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_MARKER keeps the place."
-scripts/UNLOCK.sh:311:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
-scripts/UNLOCK.sh:330:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
-scripts/UNLOCK.sh:333:leaves the device with no adb at all. Without a device it prints the commands
-scripts/UNLOCK.sh:34:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-scripts/UNLOCK.sh:355:    # in this failure has no adb by definition, and that is exactly when someone
-scripts/UNLOCK.sh:35:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
+scripts/UNLOCK.sh:111:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
+scripts/UNLOCK.sh:114:leaves the device with no adb at all. Without a device it prints the commands
+scripts/UNLOCK.sh:136:    # in this failure has no adb by definition, and that is exactly when someone
 scripts/lib/common.sh:122:    adb shell "cat /proc/uptime" 2>/dev/null \
 scripts/lib/common.sh:126:# Wait for the device to come back after a reboot: adb sees it, boot has
 scripts/lib/common.sh:141:        [[ "$(adb get-state 2>/dev/null | tr -d '\r\n')" == "device" ]] || continue
@@ -127,6 +117,11 @@ scripts/lib/root.sh:393:# adb root runs through su, so every touch to the live s
 scripts/lib/root.sh:476:    local out; out=$(adb shell "$SU_NEW_PATH 0 id" 2>/dev/null | tr -d '\r')
 scripts/lib/root.sh:493:    verify_root_after_su_touch    # exits outright if this cost us adb root
 scripts/lib/root.sh:522:    verify_root_after_su_touch    # exits outright if this cost us adb root
+scripts/lib/steps.sh:227:            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
+scripts/lib/steps.sh:6:    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
+scripts/lib/steps.sh:7:    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
+scripts/lib/steps.sh:98:    if ! adb reboot >/dev/null 2>&1; then
+scripts/lib/steps.sh:99:        print_error "adb reboot failed. Restart the projector by hand, then run the same command again; the marker $RESUME_FILE keeps the place."
 scripts/lib/unlock.sh:1011:# The commands that fix it from a serial console, printed when adb is gone.
 scripts/lib/unlock.sh:1046:    if ! adb devices 2>/dev/null | grep -q "device$"; then
 scripts/lib/unlock.sh:14:#   value back off the device. `adb shell ... || true` is how you end up telling
@@ -141,7 +136,7 @@ scripts/lib/unlock.sh:638:    # `adb root` is unavailable, which is every Magisk
 scripts/lib/unlock.sh:644:    if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
 scripts/lib/unlock.sh:695:        print_error "  adb shell 'su 0 sh -c \"mount -o remount,rw $mp && $undo; mount -o remount,ro $mp\"'"
 scripts/lib/unlock.sh:926:    adb push "$tmp" "$sidecar" >/dev/null 2>&1
-MATCHED_LINES 138
+MATCHED_LINES 133
 
 COMMAND rg -n '/adb|\$\{?ADB|command -v adb|which adb' scripts/
 scripts/lib/common.sh:60:    if ! command -v adb &>/dev/null; then

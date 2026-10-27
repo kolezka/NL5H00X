@@ -81,17 +81,17 @@ draw_header() {
 # ---------------------------------------------------------------------------
 detect_backup_state() {
     BACKUP_DIR="" BACKUP_OK=0 BACKUP_BYTES=0
-    # Backup state, newest first, without needing the device.
-    local d
+    # Keep showing an incomplete newest image even if an older backup verifies.
+    local d verified=""
+    verified=$(cd "$WORK_DIR" && find_backup_dir) || true
     for d in "$WORK_DIR"/projector-backup-*; do
         [[ -d "$d" ]] || continue
         [[ -f "$d/full-system-backup.img" ]] || continue
         BACKUP_DIR="$(basename "$d")"
         BACKUP_BYTES=$(local_size "$d/full-system-backup.img")
     done
-    if [[ -n "$BACKUP_DIR" ]]; then
-        ( cd "$WORK_DIR" && verify_backup_dir "$BACKUP_DIR" >/dev/null 2>&1 ) && BACKUP_OK=1
-    fi
+    [[ -n "$BACKUP_DIR" && "$BACKUP_DIR" == "$verified" ]] && BACKUP_OK=1
+    return 0
 }
 
 backup_status() {

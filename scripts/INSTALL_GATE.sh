@@ -4,61 +4,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/steps.sh"
 source "$SCRIPT_DIR/lib/unlock.sh"
 source "$SCRIPT_DIR/lib/installgate.sh"
 
 SUPPORTED_DEVICES=(NL5H00X NL5H00X_TP)
-
-check_supported_device() {
-    local model device d
-    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
-    for d in "${SUPPORTED_DEVICES[@]}"; do
-        if [[ "$model" == "$d" || "$device" == "$d" ]]; then
-            print_success "Device: $model ($device)"
-            return 0
-        fi
-    done
-    print_error "Unsupported device: model='$model' device='$device'"
-    return 1
-}
-
-step_line() {
-    local step="$1" state label desc
-    state=$("${step}_state")
-    desc=$("${step}_describe")
-    case "$state" in
-        applied)     label="${GREEN}[done]${NC}   " ;;
-        not-applied) label="${YELLOW}[todo]${NC}   " ;;
-        blocked:*)   label="${RED}[blocked]${NC}"; desc="$desc  (${state#blocked:})" ;;
-        *)           label="${RED}[?]${NC}     " ;;
-    esac
-    printf "  %b %-18s %s\n" "$label" "$step" "$desc"
-}
-
-run_step() {
-    local step="$1" state
-    state=$("${step}_state")
-    case "$state" in
-        applied)
-            print_success "$step: already done, nothing to change"
-            return 0 ;;
-        blocked:*)
-            print_error "$step: cannot run - ${state#blocked:}"
-            return 1 ;;
-    esac
-    print_step "$step: $("${step}_describe")"
-    if ! "${step}_apply"; then
-        print_error "$step FAILED - stopping, nothing further was changed"
-        return 1
-    fi
-    state=$("${step}_state")
-    if [[ "$state" != applied ]]; then
-        print_error "$step reported success but the device still says '$state'"
-        return 1
-    fi
-    print_success "$step: done and verified"
-}
+RESUME_FILE=""
+STEP_NAME_WIDTH=18
 
 usage() {
     cat <<'EOF'
@@ -103,7 +55,7 @@ main() {
                     return 0
                 fi
             fi
-            run_step install_gate
+            steps_run install_gate
             echo "takes effect after a restart: adb reboot"
             ;;
         on)

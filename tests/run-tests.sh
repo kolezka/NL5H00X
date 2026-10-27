@@ -136,6 +136,24 @@ check_size 1932525568 "1.93GB"
 check_size 8388608    "8MB"
 
 # ---------------------------------------------------------------------------
+head_ "newest verified backup is selected"
+new_sandbox
+mkdir -p "$sandbox/run/projector-backup-20260101_000000" \
+    "$sandbox/run/projector-backup-20260102_000000"
+for dir in "$sandbox/run"/projector-backup-*; do
+    printf 'x' > "$dir/full-system-backup.img"
+    printf 'device_size=1\n' > "$dir/backup-manifest.txt"
+done
+selected=$(cd "$sandbox/run" && /bin/bash -c \
+    'source "$1/lib/common.sh"; find_backup_dir' _ "$SCRIPTS")
+if [[ "$selected" == "projector-backup-20260102_000000" ]]; then
+    ok "find_backup_dir chooses the latest verified backup"
+else
+    bad "find_backup_dir chose '$selected' instead of the latest verified backup"
+fi
+sandbox_finish "$sandbox"
+
+# ---------------------------------------------------------------------------
 head_ "a resumed run does not re-pull partitions it already has"
 # Every restart used to re-fetch boot.img and the 1.93 GB system.img from
 # scratch -- three minutes each time for files already complete on disk.
