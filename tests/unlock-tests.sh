@@ -251,44 +251,143 @@ dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
-head_ "a firmware that owns HOME is handed back to the user, not fought"
-# The real NL5H00X adds CATEGORY_SETUP_WIZARD to the home intent, so
-# com.newlink.wtprovision/.MainActivity wins HOME outright and then starts the
-# stock launcher by name.
-#
-# The refusal is kept but its reason is now the true one. It is NOT that
-# disabling the stock launcher "would leave none" -- that was the model that
-# bricked a device. It is that no command on API 28 writes a preference covering
-# SETUP_WIZARD, so the CLI simply cannot win that intent. A human can, from the
-# device's own chooser, and the step has to say so instead of trying.
+head_ "on the real firmware the unlock writes wtprovision's cache and HOME lands on the launcher"
+# The real NL5H00X routes HOME through com.newlink.wtprovision/.MainActivity,
+# which starts whatever its own SharedPreferences cache names. No preference
+# reaches it, so the unlock rewrites that cache as root and restarts the
+# process. Nothing gets disabled on the way: that is the bricking pattern.
+
+WTPROV_XML=/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml
+new_sandbox
+f="$sb/state$WTPROV_XML"
+out=$(unlock "$sb" --apply-all --yes)
+
+[[ "$out" == *"RC=0"* ]] && ok "unlock completes on the intercepting firmware" \
+    || { bad "unlock failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+[[ "$out" != *"owns the home intent"* ]] \
+    && ok "no longer refuses the firmware" || bad "still prints the 'owns the home intent' refusal"
+grep -q 'name="home_pkg">com.spocky.projengmenu<' "$f" \
+    && ok "cache names the Projectivy package" || bad "cache home_pkg is not Projectivy"
+grep -q 'name="home_activity">com.spocky.projengmenu.ui.home.MainActivity<' "$f" \
+    && ok "cache names the Projectivy activity" || bad "cache home_activity is not Projectivy"
+pid=$(cat "$sb/state/wtprov_pid" 2>/dev/null)
+[[ -n "$pid" && "$pid" != 2166 ]] && ok "wtprovision was restarted" || bad "wtprovision pid is '$pid'"
+home=$(home_now "$sb")
+[[ "$home" == "$PROJECTIVY"* ]] && ok "HOME lands on Projectivy" || bad "home is '$home'"
+
+bk="$sb/state/data/local/tmp/wtprov_prefs.before.xml"
+[[ -f "$bk" ]] && grep -q hisilauncher "$bk" \
+    && ok "the stock cache was backed up first" || bad "no backup of the stock cache at $bk"
+
+disabled=$(dev "$sb" 'pm list packages -d')
+[[ "$disabled" != *"$STOCK"* ]] \
+    && ok "stock launcher left enabled" || bad "disabled the stock launcher - that is the bricking pattern"
+[[ "$disabled" != *"com.newlink.wtprovision"* ]] \
+    && ok "wtprovision left enabled" || bad "disabled wtprovision - this is what stops the device booting"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "the cache write survives a restart"
+# The cache is what wtprovision reads on boot, so a restart must land on the
+# launcher again with nobody touching anything.
 
 new_sandbox
-ICEPT=com.newlink.wtprovision/.MainActivity
-out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --apply-all --yes)
-
-[[ "$out" == *"owns the home intent on this firmware"* ]] \
-    && ok "names the component that owns HOME" || bad "did not name the interceptor"
-[[ "$out" == *"CATEGORY_SETUP_WIZARD"* ]] \
-    && ok "gives the real reason the CLI cannot win" || bad "did not explain why the CLI cannot do it"
-[[ "$out" == *"press HOME"* && "$out" == *"Always"* ]] \
-    && ok "tells the user how to finish it on the device" || bad "no instruction for the user"
-[[ "$out" != *"RC=0"* ]] && ok "refuses rather than reporting success" || bad "claimed the unlock worked"
-
-dev "$sb" 'pm list packages -d' | grep -q "$STOCK" \
-    && bad "disabled the stock launcher anyway - that is the bricking pattern" \
-    || ok "stock launcher left enabled"
-
-dev "$sb" 'pm list packages -d' | grep -q 'com.newlink.wtprovision' \
-    && bad "disabled the home interceptor - this is what stops the device booting" \
-    || ok "and the home interceptor was never touched"
-
+f="$sb/state$WTPROV_XML"
+unlock "$sb" --apply-all --yes >/dev/null
+reboot_dev "$sb"
 home=$(home_now "$sb")
-[[ "$home" == "$STOCK"* ]] && ok "no stale preference was written" || bad "home changed to '$home'"
+[[ "$home" == "$PROJECTIVY"* ]] && ok "still Projectivy after a restart" || bad "reverted to '$home' after restart"
+grep -q 'name="home_pkg">com.spocky.projengmenu<' "$f" \
+    && ok "the cache still names Projectivy after a restart" || bad "cache lost Projectivy over a restart"
+sandbox_finish "$sb"
 
-# and --status has to say so too, rather than offering a step that cannot work
-out=$(unlock "$sb" FAKE_ADB_HOME_INTERCEPTOR="$ICEPT" --status)
-[[ "$out" == *"owns the home intent on this firmware"* ]] \
-    && ok "--status reports it as blocked" || bad "--status did not flag the interception"
+# ---------------------------------------------------------------------------
+head_ "a cache write that does not take effect is reported as a failure, not success"
+# A firmware build that ignores the cache starts stock after the restart. The
+# file on disk saying Projectivy proves nothing; only the focused window does.
+
+new_sandbox
+out=$(unlock "$sb" FAKE_ADB_WTPROV_IGNORES_CACHE=1 --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock claimed success when HOME stayed stock"
+[[ "$out" == *"did not take effect"* ]] \
+    && ok "says the cache write did not take effect" || bad "did not report the ineffective cache write"
+[[ "$out" != *"All steps applied"* ]] \
+    && ok "does not print the success line" || bad "printed 'All steps applied' anyway"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "revert restores the stock pair and restarts wtprovision"
+# A cache rewrite is only undone once wtprovision rereads it, so the revert
+# has to restart the process too, not just put the file back.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+unlock "$sb" --apply-all --yes >/dev/null
+pid1=$(cat "$sb/state/wtprov_pid" 2>/dev/null)
+out=$(unlock "$sb" --revert --yes)
+pid2=$(cat "$sb/state/wtprov_pid" 2>/dev/null)
+
+[[ "$out" == *"RC=0"* ]] && ok "revert completes" || { bad "revert failed"; echo "$out" | tail -6 | sed 's/^/        /'; }
+[[ -n "$pid1" && "$pid1" != 2166 ]] && ok "the unlock restarted wtprovision" || bad "pid after unlock is '$pid1'"
+[[ -n "$pid2" && "$pid2" != "$pid1" ]] && ok "the revert restarted it again" || bad "pid after revert is '$pid2' (was '$pid1')"
+grep -q 'name="home_pkg">com.newlink.hisilauncher<' "$f" \
+    && grep -q 'name="home_activity">com.newlink.hisilauncher.WizardAciticity<' "$f" \
+    && ok "cache holds the stock pair again" || bad "cache does not hold the stock pair"
+home=$(home_now "$sb")
+[[ "$home" == "$STOCK"* ]] && ok "home screen is the stock launcher again" || bad "home is '$home'"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "--status reads the cache, not the preference"
+# On this firmware the HOME preference is not what decides the home screen;
+# the cache is. A stale preference must not make --status lie.
+
+new_sandbox
+unlock "$sb" --apply-all --yes >/dev/null
+echo "$STOCK/.WizardAciticity" > "$sb/state/home_activity"
+out=$(unlock "$sb" --status)
+[[ "$out" == *"home screen now: $PROJECTIVY"* ]] \
+    && ok "reports Projectivy from the cache" || bad "home screen line does not name Projectivy"
+echo "$out" | grep -qE '\[done\][[:space:]]+launcher_default' \
+    && ok "launcher_default shows [done]" || bad "launcher_default is not [done]: $(echo "$out" | grep launcher_default)"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a missing wtprovision process is an error, not a silent skip"
+# Without a running process there is nothing to restart, so a cache write
+# would sit unread until the next boot. That has to stop the unlock loudly.
+
+new_sandbox
+rm "$sb/state/wtprov_pid"
+out=$(unlock "$sb" --apply-all --yes)
+[[ "$out" != *"RC=0"* ]] && ok "the unlock fails" || bad "unlock claimed success with no wtprovision process"
+[[ "$out" == *"wtprovision is not running"* ]] \
+    && ok "says wtprovision is not running" || bad "did not report the missing process"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
+head_ "a half-written cache is not reported as applied"
+# wtprovision needs both keys to agree. An activity that names Projectivy
+# while the package still names the stock launcher is not an applied step.
+# The full unlock runs first so the launcher is installed and the only thing
+# wrong is the cache pair.
+
+new_sandbox
+f="$sb/state$WTPROV_XML"
+unlock "$sb" --apply-all --yes >/dev/null
+out=$(unlock "$sb" --status)
+echo "$out" | grep -qE '\[done\][[:space:]]+launcher_default' \
+    && ok "control: a full cache shows [done]" || bad "control: launcher_default is not [done] after the unlock"
+cat > "$f" <<'EOF'
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="home_activity">com.spocky.projengmenu.ui.home.MainActivity</string>
+    <string name="home_pkg">com.newlink.hisilauncher</string>
+</map>
+EOF
+out=$(unlock "$sb" --status)
+echo "$out" | grep -qE '\[todo\][[:space:]]+launcher_default' \
+    && ok "launcher_default shows [todo]" || bad "half-written cache: $(echo "$out" | grep launcher_default)"
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
