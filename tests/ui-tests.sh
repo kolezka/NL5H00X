@@ -346,6 +346,65 @@ grep -qx 'com.apkpure.aegon' "$sb/state/packages_disabled" \
 sandbox_finish "$sb"
 
 # ---------------------------------------------------------------------------
+head_ "TOOLS.sh blocks the vendor servers and removes the block byte for byte"
+# The block lives in /system/etc/hosts next to whatever else is there. Turning
+# it off has to give back the exact original file, including lines and blank
+# lines the toolkit did not write, and /system has to end read-only either way.
+
+VENDOR_HOSTS=(www.newlinksz.com cdn.newlink-sz.com whois.pconline.com.cn)
+hosts_file() { echo "$1/state/system/etc/hosts"; }
+blocked_count() {
+    local n=0 h
+    for h in "${VENDOR_HOSTS[@]}"; do
+        grep -qx "0.0.0.0 $h" "$(hosts_file "$1")" && n=$((n + 1))
+    done
+    echo "$n"
+}
+
+new_sandbox
+printf '\n10.0.0.5 nas.home\n\n' >> "$(hosts_file "$sb")"
+cp "$(hosts_file "$sb")" "$sb/hosts.before"
+
+out=$(ui "$sb" TOOLS.sh $'28\nn\n\nq\n')
+cmp -s "$sb/hosts.before" "$(hosts_file "$sb")" \
+    && ok "declining leaves the file alone" || bad "declining changed the file"
+
+out=$(ui "$sb" TOOLS.sh $'28\ny\n\nq\n')
+[[ "$(blocked_count "$sb")" == "3" ]] \
+    && ok "all three vendor names point at 0.0.0.0" \
+    || bad "only $(blocked_count "$sb") of 3 vendor names blocked: $(echo "$out" | grep -E 'ERROR|WARN' | head -1)"
+grep -qx '10.0.0.5 nas.home' "$(hosts_file "$sb")" \
+    && ok "keeps the entries it did not write" || bad "lost an existing entry"
+[[ "$(cat "$sb/state/mount_system" 2>/dev/null)" == "ro" ]] \
+    && ok "/system is read-only again" || bad "/system left read-write"
+echo "$out" | grep -q 'Vendor servers are blocked' \
+    && ok "says the block is on" || bad "no confirmation that the block is on"
+ls -d "$sb/run"/projector-backup-hosts-*/hosts.orig >/dev/null 2>&1 \
+    && ok "keeps a local copy of the original" || bad "no local copy of the original"
+
+out=$(ui "$sb" TOOLS.sh $'28\ny\n\nq\n')
+echo "$out" | grep -q 'On now' \
+    && ok "sees the block it wrote" || bad "does not recognise its own block"
+cmp -s "$sb/hosts.before" "$(hosts_file "$sb")" \
+    && ok "removing it restores the original byte for byte" \
+    || bad "file differs from the original after removing the block"
+[[ "$(cat "$sb/state/mount_system" 2>/dev/null)" == "ro" ]] \
+    && ok "/system is read-only after removing it" || bad "/system left read-write after removal"
+sandbox_finish "$sb"
+
+# The file a hand edit on the real projector left on 2026-10-31, before this
+# entry existed. The entry has to recognise it and undo it to stock.
+new_sandbox
+cp "$(hosts_file "$sb")" "$sb/hosts.stock"
+printf '\n%s\n0.0.0.0 www.newlinksz.com\n0.0.0.0 cdn.newlink-sz.com\n0.0.0.0 whois.pconline.com.cn\n' \
+    '# Block vendor OTA and telemetry (see docs/VENDOR_TELEMETRY.md)' >> "$(hosts_file "$sb")"
+out=$(ui "$sb" TOOLS.sh $'28\ny\n\nq\n')
+cmp -s "$sb/hosts.stock" "$(hosts_file "$sb")" \
+    && ok "undoes the hand-made block to the stock file" \
+    || bad "the hand-made block did not come off cleanly"
+sandbox_finish "$sb"
+
+# ---------------------------------------------------------------------------
 echo
 echo "======================================"
 echo "  passed: $PASS   failed: $FAIL"

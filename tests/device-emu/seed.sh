@@ -24,6 +24,10 @@ mkdir -p "$STATE"/{sdcard,system/app,system/priv-app,system/xbin,system/etc/init
 # carries, so live-verify can actually distinguish the two.
 printf 'STOCK-SU stock su placeholder\n' > "$STATE/system/xbin/su"
 
+# Stock /system/etc/hosts, byte for byte as pulled 2026-10-31 (56 bytes,
+# sha256 425c3e71...). The spacing is the vendor's.
+printf '127.0.0.1       localhost\n::1             ip6-localhost\n' > "$STATE/system/etc/hosts"
+
 # ---------------------------------------------------------------------------
 # Properties (verbatim from system/build.prop in the pulled image)
 # ---------------------------------------------------------------------------
