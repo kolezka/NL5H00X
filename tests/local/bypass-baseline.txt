@@ -67,23 +67,23 @@ scripts/ROOT.sh:182:serial-console equivalent, because a stuck seclabel does not
 scripts/ROOT.sh:59:    print_warning "sud only starts on the next boot. Reboot to bring it up:  adb reboot"
 scripts/ROOT.sh:70:# repair: sud installed but not coming up, or adb unreachable
 scripts/ROOT.sh:75:  Either the device is not reachable over adb, or adb answers but su does not.
-scripts/TOOLS.sh:116:    if adb shell "pm list packages -d" 2>/dev/null | grep -q "$STOCK_LAUNCHER_PKG"; then
-scripts/TOOLS.sh:128:    comp=$(adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
-scripts/TOOLS.sh:189:    adb shell getprop | grep -E "ro.product.model|ro.product.manufacturer|ro.build.version.release" | \
-scripts/TOOLS.sh:195:    adb shell df -h /sdcard/ 2>/dev/null | tail -1 | awk '{print "  Total: "$2"  Used: "$3"  Free: "$4}'
-scripts/TOOLS.sh:199:    adb shell cat /proc/meminfo 2>/dev/null | head -3 | sed 's/^/  /'
-scripts/TOOLS.sh:208:    adb shell cat /proc/cpuinfo 2>/dev/null | grep -E "^Hardware|^processor" | head -5 | sed 's/^/  /'
-scripts/TOOLS.sh:212:    adb shell dumpsys display 2>/dev/null | grep -E "mDisplayId=0|mCurrentDisplayRect" | head -2 | sed 's/^/  /'
-scripts/TOOLS.sh:219:    adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | head -30
-scripts/TOOLS.sh:229:        if adb shell ps 2>/dev/null | grep -q "$svc"; then
-scripts/TOOLS.sh:276:    adb shell "pm list packages" 2>/dev/null | tr -d '\r' | grep -qx "package:$1"
-scripts/TOOLS.sh:484:        print_error "adb is not answering as root after restarting adbd"
-scripts/TOOLS.sh:519:    print_warning "Restarting adbd drops the current adb connection for a moment."
-scripts/TOOLS.sh:536:        echo "  Connect with:  adb connect $ip:5555"
-scripts/TOOLS.sh:538:        echo "  Find the projector's IP in Settings, then:  adb connect <ip>:5555"
-scripts/TOOLS.sh:590:    if adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
-scripts/TOOLS.sh:94:    echo -e "${YELLOW}> adb shell $cmd${NC}"
-scripts/TOOLS.sh:97:    out=$(adb shell "$cmd" 2>&1); rc=$?
+scripts/TOOLS.sh:104:    echo -e "${YELLOW}> adb shell $cmd${NC}"
+scripts/TOOLS.sh:107:    out=$(adb shell "$cmd" 2>&1); rc=$?
+scripts/TOOLS.sh:126:    if adb shell "pm list packages -d" 2>/dev/null | grep -q "$STOCK_LAUNCHER_PKG"; then
+scripts/TOOLS.sh:138:    comp=$(adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
+scripts/TOOLS.sh:199:    adb shell getprop | grep -E "ro.product.model|ro.product.manufacturer|ro.build.version.release" | \
+scripts/TOOLS.sh:205:    adb shell df -h /sdcard/ 2>/dev/null | tail -1 | awk '{print "  Total: "$2"  Used: "$3"  Free: "$4}'
+scripts/TOOLS.sh:209:    adb shell cat /proc/meminfo 2>/dev/null | head -3 | sed 's/^/  /'
+scripts/TOOLS.sh:218:    adb shell cat /proc/cpuinfo 2>/dev/null | grep -E "^Hardware|^processor" | head -5 | sed 's/^/  /'
+scripts/TOOLS.sh:222:    adb shell dumpsys display 2>/dev/null | grep -E "mDisplayId=0|mCurrentDisplayRect" | head -2 | sed 's/^/  /'
+scripts/TOOLS.sh:229:    adb shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>/dev/null | head -30
+scripts/TOOLS.sh:239:        if adb shell ps 2>/dev/null | grep -q "$svc"; then
+scripts/TOOLS.sh:286:    adb shell "pm list packages" 2>/dev/null | tr -d '\r' | grep -qx "package:$1"
+scripts/TOOLS.sh:494:        print_error "adb is not answering as root after restarting adbd"
+scripts/TOOLS.sh:529:    print_warning "Restarting adbd drops the current adb connection for a moment."
+scripts/TOOLS.sh:546:        echo "  Connect with:  adb connect $ip:5555"
+scripts/TOOLS.sh:548:        echo "  Find the projector's IP in Settings, then:  adb connect <ip>:5555"
+scripts/TOOLS.sh:600:    if adb shell "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME" 2>/dev/null \
 scripts/UNLOCK.sh:111:Requires a rooted NL5H00X on adb and a verified backup from MAKE_BACKUP.sh.
 scripts/UNLOCK.sh:114:leaves the device with no adb at all. Without a device it prints the commands
 scripts/UNLOCK.sh:136:    # in this failure has no adb by definition, and that is exactly when someone
@@ -147,8 +147,8 @@ scripts/lib/root.sh:32:SU_ALLOW_FILE="/data/adb/su-allow"
 MATCHED_LINES 5
 
 COMMAND rg -n '\beval\b' scripts/
-scripts/TOOLS.sh:140:# every Mac user. eval-based indirection is uglier and works everywhere.
-scripts/TOOLS.sh:142:section_items() { eval "printf '%s\n' \"\${$1[@]}\""; }
+scripts/TOOLS.sh:150:# every Mac user. eval-based indirection is uglier and works everywhere.
+scripts/TOOLS.sh:152:section_items() { eval "printf '%s\n' \"\${$1[@]}\""; }
 MATCHED_LINES 2
 
 COMMAND rg -n '(^|[[:space:];|&()])/[[:alnum:]_.~+/@:-]*/adb([[:space:];|&()]|$)' scripts/

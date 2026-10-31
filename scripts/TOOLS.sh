@@ -11,6 +11,8 @@ source "$SCRIPT_DIR/lib/common.sh"
 # ROOT.sh installs with, rather than restating them. Sourcing this file only
 # defines functions and paths; the steps themselves run nothing here.
 source "$SCRIPT_DIR/lib/root.sh"
+# system_rw / system_ro, for the one ROOT entry that writes /system.
+source "$SCRIPT_DIR/lib/unlock.sh"
 
 # ============================================================================
 # MENU DEFINITIONS
@@ -65,6 +67,7 @@ declare -a MENU_ROOT=(
     "@root-pull|Copy a root-only file off the device"
     "@root-adb-wifi|ADB over Wi-Fi, on or off"
     "@root-freeze|Freeze or unfreeze an app  (changes what runs at boot)"
+    "@root-vendor-block|Block vendor updates and telemetry, on or off  (edits /system/etc/hosts)"
 )
 
 # Sections, in menu order. get_menu_entry and count_menu_items both read this,
@@ -81,6 +84,13 @@ ROOT_PROTECTED_PKGS=(
     com.android.systemui
     android
 )
+
+# Vendor hosts blocked by @root-vendor-block. The OTA manifest and the reporting
+# share the first name, the update packages come from the second, and the third
+# is the geo-IP lookup the reporting uses. See docs/VENDOR_TELEMETRY.md.
+HOSTS_PATH="/system/etc/hosts"
+VENDOR_BLOCK_HOSTS=(www.newlinksz.com cdn.newlink-sz.com whois.pconline.com.cn)
+VENDOR_BLOCK_MARKER="# Block vendor OTA and telemetry (see docs/VENDOR_TELEMETRY.md)"
 
 # ============================================================================
 # FUNCTIONS
@@ -601,6 +611,94 @@ root_freeze() {
     print_success "$pkg is frozen. Unfreeze it from this same entry."
 }
 
+# A hosts file on stdin, minus this menu's block: the marker, the one blank line
+# in front of it, and 0.0.0.0 lines for the blocked names. Anything else the
+# file holds comes through untouched, so removing the block restores the
+# original byte for byte.
+hosts_without_vendor_block() {
+    awk -v marker="$VENDOR_BLOCK_MARKER" -v names="${VENDOR_BLOCK_HOSTS[*]}" '
+        BEGIN { n = split(names, a, " "); for (i = 1; i <= n; i++) blocked[a[i]] = 1 }
+        $0 == marker { held = 0; next }
+        $1 == "0.0.0.0" && NF == 2 && ($2 in blocked) { next }
+        {
+            if (held) { print ""; held = 0 }
+            if ($0 == "") { held = 1; next }
+            print
+        }
+        END { if (held) print "" }'
+}
+
+# True only when every vendor name is blocked. A partial block counts as off, so
+# turning it on rewrites it whole.
+vendor_block_active() {
+    local file="$1" h
+    for h in "${VENDOR_BLOCK_HOSTS[@]}"; do
+        awk -v h="$h" '$1 == "0.0.0.0" && $2 == h && NF == 2 { f = 1 } END { exit !f }' "$file" || return 1
+    done
+}
+
+root_vendor_block() {
+    echo
+    print_status "Block vendor updates and telemetry"
+    echo "  Points the vendor's update and reporting servers at 0.0.0.0 in"
+    echo "  $HOSTS_PATH. The update screen then finds nothing and the projector"
+    echo "  stops reporting home. Nothing is disabled, so boot is not touched."
+    echo
+
+    local work rh algo digest orig new rc=0
+    work="./projector-backup-hosts-$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$work"
+    orig="$work/hosts.orig"
+    new="$work/hosts.new"
+
+    # The original is pulled whole, not through $(...), which would drop
+    # trailing newlines and make "removed" differ from what was there.
+    adb_root_stream "cat $HOSTS_PATH" > "$orig" || true
+    if [[ ! -s "$orig" ]] || ! rh=$(remote_hash "$HOSTS_PATH"); then
+        print_error "Could not read $HOSTS_PATH off the device"
+        return 1
+    fi
+    algo="${rh%%:*}"; digest="${rh#*:}"
+    if [[ "$(local_hash "$orig" "$algo")" != "$digest" ]]; then
+        print_error "The copy of $HOSTS_PATH does not match the device -- not writing anything"
+        return 1
+    fi
+    print_success "Backup: $orig  ($algo matches the device)"
+    echo
+
+    if vendor_block_active "$orig"; then
+        echo "  On now: ${VENDOR_BLOCK_HOSTS[*]}"
+        confirm "Remove the block?" || { print_status "Cancelled"; return 0; }
+        hosts_without_vendor_block < "$orig" > "$new"
+    else
+        echo "  Off now. Will block: ${VENDOR_BLOCK_HOSTS[*]}"
+        confirm "Block them?" || { print_status "Cancelled"; return 0; }
+        {
+            hosts_without_vendor_block < "$orig"
+            printf '\n%s\n' "$VENDOR_BLOCK_MARKER"
+            printf '0.0.0.0 %s\n' "${VENDOR_BLOCK_HOSTS[@]}"
+        } > "$new"
+    fi
+
+    system_rw || return 1
+    stage_and_install "$new" "$HOSTS_PATH" 644 || rc=1
+    # system_ro checks the remount itself and has already said what went wrong.
+    if ! system_ro; then
+        print_warning "Reboot to get / read-only again, or: mount -o remount,ro /"
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        print_error "$HOSTS_PATH was not written as intended. The original is in $orig"
+        return 1
+    fi
+
+    if vendor_block_active "$new"; then
+        print_success "Vendor servers are blocked. $HOSTS_PATH matches what was written."
+    else
+        print_success "Block removed. $HOSTS_PATH matches what was written."
+    fi
+    echo "  Run this entry again to switch it back. The original stays in $orig"
+}
+
 root_action() {
     local action="$1"
     ensure_root || return 1
@@ -613,6 +711,7 @@ root_action() {
         @root-pull)     root_pull_file ;;
         @root-adb-wifi) root_adb_wifi ;;
         @root-freeze)   root_freeze ;;
+        @root-vendor-block) root_vendor_block ;;
         *) print_error "Unknown root action: $action"; return 1 ;;
     esac
 }

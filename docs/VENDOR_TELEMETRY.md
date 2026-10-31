@@ -190,6 +190,14 @@ stage it in `/data/local/tmp`, write with `su 0 sh -c "cat staged > target"` and
 confirm with `sha256sum` (the `adb push` trap in [BOOT_BRANDING.md](BOOT_BRANDING.md)
 applies to `/system` as well). The router is the simpler and reversible choice.
 
+`TOOLS.sh` does the hosts edit for you: ROOT, "Block vendor updates and
+telemetry". It points the three names above at `0.0.0.0`, keeps a hash-checked
+copy of the original in `./projector-backup-hosts-<timestamp>/`, verifies the
+written file by hash and remounts `/` read-only. Run the same entry again to
+take the block off; that gives back the original file byte for byte. Applied
+to the reference unit on 2026-10-31: the three names resolve locally and
+`www.google.com` still resolves normally.
+
 ## 6. Reproducing the audit
 
 Read-only. Replace the address with the projector's.
