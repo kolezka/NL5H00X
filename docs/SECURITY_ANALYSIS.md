@@ -1,244 +1,155 @@
-# NL5H00X Android Projector Security Analysis: Installation Restrictions and Backup Requirements
+# Security and recovery limits
 
-## Executive Summary
+Last updated: 2026-10-24.
 
-This document analyzes the security restrictions found on a Newlink/Hisilicon Android projector (NL5H00X) that prevent standard APK installation, requiring extensive backup procedures before system modifications.
+This page separates observed access from untested recovery claims. The
+[device audit](DEVICE_AUDIT_2026-10-24.md) is the current evidence record for the
+owner's modified NL5H00X_TP. Earlier claims of maximum SELinux enforcement,
+manufacturer intent and guaranteed recovery were stronger than the evidence.
+Since the audit, booting stock recovery has been verified on that unit
+(2026-10-25, one boot): see [RECOVERY.md](RECOVERY.md). Restoring from recovery
+has not.
 
-## Device Overview
+## Root is available, but it does not bypass every policy
 
-**Device Information:**
-- Model: NL5H00X (Newlink projector)
-- Android Version: 9 (API level 28)
-- Architecture: ARM (armeabi-v7a)
-- Storage: 7.65GB total
-- Manufacturer: Chinese OEM with Hisilicon chipset
+Verified on the inspected unit:
 
-## Core Security Problems
+- `adb root` followed by `id` returned UID 0. ADB returned to shell after the
+  owner's power cycle.
+- The Android UART console runs as shell. The existing
+  `/system/xbin/su_hybrid 0 id` returned UID 0; ordinary `su 0 id` failed.
+- `sud` runs as root under init. Controlled app-UID probes with `NO_NEW_PRIVS`
+  demonstrated both successful root execution and explicit allow-list refusal.
+- SELinux is **Permissive**. An `avc: denied` line does not by itself show that
+  the kernel blocked the operation; inspect its context and `permissive` field.
+- `ro.secure=1` is present. It does not establish the cause of an APK install
+  failure, bootloader lock, or a general "maximum security" mode.
 
-### 1. Locked-Down Installation System
+Root provides broad access to files and services, including destructive access.
+It does not make vendor PackageManager behavior disappear, supply a compatible
+new kernel, or establish a working rescue channel.
 
-#### Primary Issue: `INSTALL_FAILED_INVALID_INSTALL_LOCATION`
-The device implements strict installation location policies that prevent APK installation through normal methods.
+### Existing root policy needs review
 
-**Root Cause:**
-- Device has `ro.secure=1` enabling maximum security enforcement
-- Manufacturer-implemented installation restrictions beyond standard Android
-- Install location policies locked to prevent sideloading
+The audit found multiple installed root clients and two different `sud` binaries.
+The selected init service uses `/system/xbin/sud`. The version installed during the
+audit handled requests serially, so one long-lived shell held every later client,
+and it ignored a failed `setuid`, which ran the command as root. Both are fixed in
+the daemon merged as PR #15 and covered by `tests/sud-tests.sh`: a failed uid switch
+now exits 1, and a caller with a full stderr pipe can no longer hold the session
+slots it does not own. A long-lived root command still occupies its own slot while
+it runs, which is a documented limit. The live observations and test limits are
+recorded in the audit.
 
-#### Secondary Issues:
-- **SELinux Enforcement**: Strict SELinux policies block package manager file access
-- **Permission Denials**: Package installer activities restricted from ADB access
-- **Unknown Sources Ineffective**: Setting has no effect on ADB installations
+The allow-list is a grant of administrative access, not a list of harmless apps.
+Review package identities carefully: the inspected list's `org.fdroid.froid`
+differs from the installed `org.fdroid.fdroid`, which was explicitly refused.
+Do not replace root clients or edit policy as an incidental cleanup.
 
-### 2. Manufacturer Security Model
+## Installation restriction: vendor whitelist gate
 
-#### Enterprise/Kiosk Design Philosophy
-The projector firmware is designed with a **commercial appliance mindset**:
+Earlier device tests recorded `INSTALL_FAILED_INVALID_INSTALL_LOCATION` across
+normal install attempts, including root. The dated matrix and system-app
+workaround are in [INSTALL_LOCKED.md](INSTALL_LOCKED.md).
 
-```
-┌─────────────────────────────────────────┐
-│           Security Layers               │
-├─────────────────────────────────────────┤
-│ 1. Custom Launcher (com.newlink.hisilauncher) │
-│ 2. Install Location Restrictions       │
-│ 3. SELinux Policy Enforcement          │
-│ 4. Package Manager Permissions         │
-│ 5. ADB Installation Blocks             │
-└─────────────────────────────────────────┘
-```
+Follow-up VDEX/ODEX analysis identified a vendor whitelist gate. The empty
+`zyzys.install.whitelist` property and zero-byte configuration file selected a
+branch that returned `-19` before copying. On 2026-10-25, a controlled
+fail-succeed-fail install test on this unit verified that setting the property
+to `0` opens normal installs. The change was saved in `/system/build.prop` and
+read back after one reboot. See [the gate evidence and hardware test](INSTALL_LOCKED.md#hardware-test-2026-10-25).
+This branch does not require a SELinux denial or a volume-resolution exception.
 
-**Design Goals:**
-- **Appliance Operation**: Device should "just work" without user modifications
-- **Kiosk Mode**: Prevent installation of unauthorized software
-- **Digital Signage Ready**: Commercial deployment without admin worries
-- **Locked Ecosystem**: Force users to use only pre-installed applications
+## Platform signature and exposed administration
 
-### 3. Technical Implementation Details
+The current Settings APK's verified certificate matches the AOSP test-platform
+fingerprint documented in [DEV_OPTIONS_CRASH.md](DEV_OPTIONS_CRASH.md). This can
+make a correctly re-signed system APK patch feasible, but signing compatibility
+is not runtime compatibility or safety.
 
-#### Installation Flow Breakdown
+Network ADB and the ESP console are administrative interfaces. Keep them on a
+trusted, restricted network. The ESP console uses plaintext TCP; browser firmware
+upload uses HTTP authentication, not end-to-end encryption. Do not publish
+credentials, private app data, raw device dumps or OTA secrets in this public
+repository. A root-capable Wi-Fi bridge is not a security boundary for the
+projector.
 
-**Normal Android Installation:**
-```
-APK → Package Manager → Install Location Check → SELinux Check → Install
-```
+## Backup requirements
 
-**Projector's Blocked Flow:**
-```
-APK → Package Manager → ❌ INSTALL_LOCATION_INVALID
-                     → ❌ SELinux Denial  
-                     → ❌ Permission Denial
-                     → ❌ INSTALLATION FAILED
-```
+A backup must be validated against its actual source and intended restore target.
+A byte count or transfer-success message is not validation.
 
-#### Command Compatibility Issues
+| Target | Observed mapping / size | Why it matters |
+|---|---|---|
+| Bootloader | `mmcblk0p1`, 8 MiB, named `fastboot` | Not the Android boot image |
+| Android boot | `mmcblk0p9`, 40 MiB | Kernel image |
+| Recovery | `mmcblk0p5`, 40 MiB | Boots via a `boot-recovery` BCB in `misc` (`mmcblk0p15`); root busybox console on UART. Verified 2026-10-25, one unit. See [RECOVERY.md](RECOVERY.md) |
+| System | `mmcblk0p20`, 1843 MiB | ext4 root mounted at `/` |
+| Userdata | `mmcblk0p25` | Private data and settings; size from live partition inventory |
+| eMMC user area | 7,650,410,496 bytes | Not automatically a copy of separate eMMC boot areas or external device state |
 
-**Standard dd Syntax:**
-```bash
-dd if=/dev/block/mmcblk0 of=/sdcard/backup.img bs=1M
-# ❌ Fails: "illegal number"
-```
+The [complete map](DEVICE_AUDIT_2026-10-24.md#partition-and-boot-evidence) also
+identifies environment, secure-world and panel-calibration partitions.
 
-**Required Legacy Syntax:**
-```bash
-dd if=/dev/block/mmcblk0 of=/sdcard/backup.img bs=1048576
-# ✅ Works: Uses byte values instead of unit suffixes
-```
+Before any planned write:
 
-## Why Backup is Critical
+- Identify the exact block device by its current map, not an old filename.
+- Check exact byte lengths; never accept a percentage-size threshold.
+- Compare checksums against the source and parse structures used by the restore.
+- Keep another copy on a separate medium or machine. One local file is not the
+  only copy you should depend on.
+- Establish how to reach the device if the change prevents Android from booting.
+- Verify the restore algorithm with isolated fixtures before considering hardware.
+- Inspect generated restore scripts rather than trusting their success messages.
 
-### 1. Circumventing Security Requires System-Level Changes
+The earlier full-device stream used host-side blocks to avoid filling the same
+flash being imaged. Historical transfer rates and free-space readings are not
+promises for the next backup. Use current measurements and the toolkit's checks.
 
-To install custom launchers, we must:
-- **Bypass package manager restrictions** → Direct file system manipulation
-- **Avoid install location policies** → Install to `/system/app/` as system app
-- **Circumvent SELinux user restrictions** → Operate with root privileges
+## Recovery safety HOLD
 
-### 2. Risk Assessment
+[Recorded fake-device traces](../tests/contracts/observations/recovery-hazards.md)
+used to show restore hazards: a partition path accepting a tiny image,
+misleading success reporting, and a whole-device path that rebooted without
+writing. Fixed 2026-10-26 in the generated `RESTORE.sh` and `reset-launcher.sh`
+(`tests/restore-tests.sh` locks the contract; the characterization baselines
+record the new behaviour). These are fake-device results, not a successful
+hardware restore. The
+[design's safety HOLD](superpowers/specs/2026-09-12-system-flow-refactor-design.md#recovery-safety-hold)
+requires separate verification before hardware use.
 
-| Modification Level | Risk Level | Backup Requirement |
-|-------------------|------------|-------------------|
-| Launcher change via settings | Low | App backup sufficient |
-| Root APK installation | **High** | **Complete system backup required** |
-| System partition modification | **Critical** | **Forensic-level backup mandatory** |
+What changed on 2026-10-25: recovery itself now boots on demand (one unit, one
+boot, [RECOVERY.md](RECOVERY.md)). Its menu was reached and left with
+`busybox reboot -f`, and nothing was written from it. The HOLD still covers
+hardware restore: the scripts now refuse and report failures, but none of
+their write paths has run against the unit, and a reachable recovery does not
+endorse them.
 
-### 3. Device Recovery Scenarios
+A checksum-verified backup cannot guarantee recovery, zero downtime, or access to
+a nonbooting device. A UART Android shell helps with an Android-level boot stall;
+it does not establish bootloader access or the ability to restore damaged flash.
 
-#### Without Proper Backup:
-- **Bootloop**: Device fails to start
-- **Brick**: Complete system failure
-- **Power Management Failure**: Device overheats or won't power on
-- **Hardware Control Loss**: Projector functions stop working
+No raw restore, recovery boot, environment write or bootloader interruption was
+performed in the October 24 audit. A recovery boot was done the next day; the
+rest still has not been. In particular, knowing the environment's CRC and
+`bootdelay=0` does not make changing it safe.
 
-#### With Complete Backup:
-- **100% Recovery**: Exact restoration to working state
-- **Power Management Preserved**: All thermal/power services intact
-- **Hardware Functions Intact**: Projector-specific drivers restored
-- **Zero Downtime**: Quick restoration to known-good state
+## Electrical limits of the ESP bridge
 
-## Backup Strategy Requirements
+The bridge's GPIO-level power heuristic is not isolation and does not guarantee
+against back-feeding. It cannot substitute for verifying the actual circuit,
+supply capacity, reset behavior and power sequencing. A functioning TCP console
+only verifies that the system worked during that observation.
 
-### 1. Complete System Image Needed
+## Recommended change order
 
-**Why Individual Partition Backups Aren't Sufficient:**
+1. Preserve working ADB/UART root access and document the actual installed clients.
+2. Fix root-daemon behavior with offline regression tests before deployment.
+3. Use [the verified vendor gate fix](INSTALL_LOCKED.md#the-fix-for-people-who-only-want-the-fix)
+   only after a checked backup; it changes install policy for every app.
+4. Review and test recovery tooling; retain the HOLD until the relevant checks pass.
+5. Consider a narrowly scoped system change only with a verified original and a
+   usable restore channel. Keep projector power, display and provisioning services.
 
-| Partition | Size | Critical Services | Backup Priority |
-|-----------|------|------------------|-----------------|
-| boot (mmcblk0p1) | 8MB | Bootloader, kernel | High |
-| system (mmcblk0p20) | 1.8GB | Android OS, system apps | Critical |
-| userdata (mmcblk0p25) | 4.6GB | User apps, settings | High |
-| **Full Device** | **7.65GB** | **Everything + unknown partitions** | **Mandatory** |
-
-**Critical Services at Risk:**
-```
-com.zhiying.powerservice     → Power management
-com.hisilicon.tv.service     → Display/projector control  
-com.newlink.service          → Factory tool + telemetry (see VENDOR_TELEMETRY.md)
-com.hisilicon.miracast       → Wireless display
-com.hisilicon.tvinput.external → HDMI input handling
-```
-
-### 2. Why the image is not staged on the device
-
-**Problem:** the device holds 7,650,410,496 bytes (7.65 GB) but `/sdcard` has
-only about 3.7 GB free — and `/sdcard` lives on the very flash being imaged, so
-staging a copy there competes for space with the thing being copied.
-
-**Solution:** stream the image straight to the host with `adb exec-out`, which
-needs no device-side space at all. The whole device moves in roughly 13 minutes
-over Wi-Fi at the measured 10.4 MB/s.
-
-The transfer runs in 256 MB blocks rather than one long read. A single 7.65 GB
-`dd` has to survive 13 minutes, and on this hardware it does not: the remote
-process gets reaped part-way and the stream simply stops. Blocks bound that
-exposure — each `dd` lives about 25 seconds, a killed one is retried, and a run
-that dies anyway resumes from the last completed block. Three such kills during
-one successful run is normal here.
-
-**Fallback:** if `adb exec-out` is unavailable, the older staged path still
-works, pulling `CHUNK_SIZE_MB` slices through `/sdcard` and joining them
-host-side. At the default 3000 MiB that is:
-
-```
-Block 1: 0          → 3,145,728,000   (3000 MiB)
-Block 2: 3,145,728,000 → 6,291,456,000 (3000 MiB)
-Block 3: 6,291,456,000 → 7,650,410,496 (1,296 MiB, short by design)
-Combined: 7,650,410,496 bytes, asserted exactly before the parts are deleted
-```
-
-Earlier revisions of this document quoted 3,072 MiB blocks and a 1,506 MiB
-tail. Neither matched the code, and the two did not add up to the device size
-either.
-
-### 3. Verification Requirements
-
-**Backup Validation Checklist:**
-- [ ] Boot partition: ~8MB
-- [ ] System partition: ~1.8GB  
-- [ ] Full device image: ~7.65GB
-- [ ] Size verification: Backup ≥ 95% of device size
-- [ ] Critical services: Power management services identified
-- [ ] Restore scripts: Emergency restoration procedures
-
-## Manufacturer Motivations
-
-### Why These Restrictions Exist
-
-1. **Support Reduction**: Fewer "broken" devices from user modifications
-2. **Warranty Protection**: Prevent warranty claims from software issues  
-3. **Ecosystem Control**: Force users into approved app channels
-4. **Enterprise Sales**: Market as "tamper-resistant" for businesses
-5. **Liability Reduction**: Avoid issues from unauthorized software
-
-### Business Model Impact
-
-```
-Restrictive Firmware → Appliance-like Operation → Enterprise Sales
-                   → Reduced Support Costs → Higher Profit Margins
-                   → Controlled User Experience → Brand Protection
-```
-
-## Root Access as Solution
-
-### Why Root Bypasses All Restrictions
-
-1. **Operating Context**: Root operates outside normal Android security model
-2. **Direct File Access**: Can write directly to any partition
-3. **System App Installation**: Treats custom apps as system components
-4. **SELinux Override**: Root context bypasses user-space restrictions
-5. **Policy Circumvention**: Ignores package manager limitations
-
-### Root Installation Process
-
-```bash
-# Mount system as writable
-mount -o remount,rw /system
-
-# Install APK as system app
-cp nova-launcher.apk /system/app/NovaLauncher.apk
-chmod 644 /system/app/NovaLauncher.apk
-chown root:root /system/app/NovaLauncher.apk
-
-# Install through package manager
-pm install -r -t /system/app/NovaLauncher.apk
-
-# Remount read-only for security
-mount -o remount,ro /system
-```
-
-## Conclusion
-
-The Newlink projector implements **multiple layers of security restrictions** that go far beyond standard Android protections. These restrictions are **intentional design decisions** by the manufacturer to create an appliance-like device that resists user modifications.
-
-**Key Takeaways:**
-
-1. **Installation failures are by design**, not bugs
-2. **Root access is the only viable bypass method**  
-3. **Complete system backup is mandatory** before any modifications
-4. **Device firmware prioritizes commercial/enterprise use cases**
-5. **Standard Android sideloading methods will not work**
-
-The comprehensive backup strategy detailed in this analysis provides **100% protection** against device failure during the root installation process, ensuring the projector can always be restored to its original working state.
-
----
-
-*This analysis was created during the process of installing Nova Launcher on a restricted Android projector device. The backup procedures described are essential for safe system modification.*
+This is a staged investigation plan, not authorization to flash or modify the
+only physical unit.

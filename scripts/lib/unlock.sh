@@ -47,7 +47,10 @@ LAUNCHER_NAME="${LAUNCHER_NAME:-Projectivy}"
 LAUNCHER_APK_GLOB="${LAUNCHER_APK_GLOB:-projectivy*.apk}"
 LAUNCHER_SYSTEM_DIR="${LAUNCHER_SYSTEM_DIR:-/system/app/Projectivy}"
 
-UNLOCK_STEPS=(dev_options launcher_present launcher_default cleanup_leftovers)
+UNLOCK_STEPS=(dev_options launcher_present launcher_default)
+
+# A step returns this when its change only takes effect after a reboot.
+NEEDS_REBOOT=3
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -132,13 +135,323 @@ launcher_component() { home_component_of "$LAUNCHER_PKG"; }
 # device_provisioned=1 and user_setup_complete=1, so it is a vendor patch.
 # Whatever declares that category therefore wins HOME every time and
 # set-home-activity is never consulted. Measured 2026-07-29: HOME goes to
-# com.newlink.wtprovision/.MainActivity, which then starts the stock launcher
-# by explicit component name.
+# com.newlink.wtprovision/.MainActivity.
+#
+# What wtprovision starts next is its own decision. Decoded from its bytecode
+# 2026-10-26: it starts the component cached in its own SharedPreferences
+# (/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml,
+# keys home_pkg and home_activity), filled once from the first plain MAIN+HOME
+# candidate that is not itself or tv.settings, so the stock launcher on a fresh
+# unit. It never reads the preferred-activities table or the chooser's answer.
+# Rewriting those two keys as root and killing the process (kill -9; it is
+# persistent, so `am force-stop` returns 0 and changes nothing) is what moves
+# HOME to another launcher. Verified across a reboot 2026-10-26.
 #
 # Empty on a device that resolves HOME normally.
 home_interceptor() {
     adb_root_exec "cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME -c android.intent.category.SETUP_WIZARD" 2>/dev/null \
         | tr -d '\r' | grep -oE '[a-z][A-Za-z0-9_.]*/[A-Za-z0-9_.$]+' | head -1
+}
+
+# ---------------------------------------------------------------------------
+# wtprovision's launcher cache
+# ---------------------------------------------------------------------------
+WTPROV_BACKUP="/data/local/tmp/wtprov_prefs.before.xml"
+# The backup's sha256, recorded when it is taken. Only a backup that still
+# matches it is restored.
+WTPROV_BACKUP_SHA="/data/local/tmp/wtprov_prefs.before.sha256"
+WTPROV_STAGED="/data/local/tmp/wtprov_prefs.new.xml"
+WTPROV_STAGED_SHA="/data/local/tmp/wtprov_prefs.before.sha256.new"
+
+wtprov_cache_path() {
+    echo "/data/user_de/0/$HOME_DISPATCHER_PKG/shared_prefs/$HOME_DISPATCHER_PKG.xml"
+}
+
+# True when the given interceptor component belongs to wtprovision.
+is_wtprov() { [[ "${1%%/*}" == "$HOME_DISPATCHER_PKG" ]]; }
+
+# sha256 of a device file, empty when it is missing or unreadable.
+remote_sha256() {
+    adb_root_exec "sha256sum $1" 2>/dev/null | tr -d '\r' \
+        | awk 'NR == 1 && $1 ~ /^[0-9a-f]+$/ && length($1) == 64 { print $1 }'
+}
+
+local_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+# Why a host file is not usable XML, or nothing when it parses. sed can read the
+# pair out of a broken file, so only a real parse proves wtprovision can read it.
+xml_problem() {
+    local out
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "python3 is needed to validate the cache XML"; return
+    fi
+    out=$(python3 -I -c 'import sys, xml.etree.ElementTree as E; E.parse(sys.argv[1])' "$1" 2>&1) && return
+    echo "it is not valid XML ($(printf '%s\n' "$out" | tail -1))"
+}
+
+# xml_problem for a device file, read as root.
+remote_xml_problem() {
+    local tmp problem
+    tmp=$(mktemp) || { echo "could not make a temporary file"; return; }
+    if ! adb_root_exec "cat $1" > "$tmp" 2>/dev/null; then
+        rm -f "$tmp"; echo "it could not be read"; return
+    fi
+    problem=$(xml_problem "$tmp")
+    rm -f "$tmp"
+    [[ -n "$problem" ]] && echo "$problem"
+    return 0
+}
+
+# The value of one <string name="KEY"> entry in a prefs XML read from stdin.
+prefs_value() {
+    sed -n "s|.*<string name=\"$1\">\([^<]*\)</string>.*|\1|p" | head -1
+}
+
+# "pkg activity" from the device cache, empty when the file or a key is missing.
+wtprov_cache_read() {
+    local xml pkg act
+    xml=$(adb_root_exec "cat $(wtprov_cache_path)" 2>/dev/null) || return 0
+    pkg=$(printf '%s\n' "$xml" | prefs_value home_pkg)
+    act=$(printf '%s\n' "$xml" | prefs_value home_activity)
+    [[ -n "$pkg" && -n "$act" ]] && echo "$pkg $act"
+    return 0
+}
+
+# Print the cache's sha256, or fail when the file is not there. Nothing may
+# create it: a file made by a root redirect is owned by root, not wtprovision.
+wtprov_cache_require() {
+    local cache sha
+    cache=$(wtprov_cache_path)
+    sha=$(remote_sha256 "$cache")
+    if [[ -z "$sha" ]]; then
+        print_error "wtprovision's cache is not on the device ($cache); nothing was written"
+        return 1
+    fi
+    echo "$sha"
+}
+
+# Why the backup cannot be trusted, or nothing when it can: it must match the
+# sha256 recorded when it was taken and hold both keys.
+wtprov_backup_problem() {
+    local bk rec
+    bk=$(remote_sha256 "$WTPROV_BACKUP")
+    if [[ -z "$bk" ]]; then
+        echo "there is no backup at $WTPROV_BACKUP"; return
+    fi
+    if ! rec=$(adb_root_exec "cat $WTPROV_BACKUP_SHA" 2>/dev/null); then
+        echo "no sha256 was recorded for it at $WTPROV_BACKUP_SHA"; return
+    fi
+    rec=$(printf '%s' "$rec" | tr -d '\r\n ')
+    if [[ "$rec" != "$bk" ]]; then
+        echo "its sha256 $bk does not match the recorded ${rec:-empty} value"; return
+    fi
+    local xp; xp=$(remote_xml_problem "$WTPROV_BACKUP")
+    if [[ -n "$xp" ]]; then
+        echo "$xp"; return
+    fi
+    if ! wtprov_backup_has_pair; then
+        echo "it has no home_pkg/home_activity pair"; return
+    fi
+}
+
+# Does the file at WTPROV_BACKUP hold both home keys?
+wtprov_backup_has_pair() {
+    local xml
+    xml=$(adb_root_exec "cat $WTPROV_BACKUP" 2>/dev/null) || return 1
+    [[ -n "$(printf '%s\n' "$xml" | prefs_value home_pkg)" \
+        && -n "$(printf '%s\n' "$xml" | prefs_value home_activity)" ]]
+}
+
+# Record the backup's sha256 in WTPROV_BACKUP_SHA: staged, written as root by
+# redirect, then read back.
+wtprov_backup_record() {
+    local sha="$1" tmp
+    tmp=$(mktemp) || return 1
+    echo "$sha" > "$tmp"
+    if ! adb push "$tmp" "$WTPROV_STAGED_SHA" >/dev/null 2>&1 \
+        || [[ "$(remote_sha256 "$WTPROV_STAGED_SHA")" != "$(local_sha256 "$tmp")" ]]; then
+        rm -f "$tmp"
+        print_error "Could not stage the backup's sha256 at $WTPROV_STAGED_SHA; nothing was written"
+        return 1
+    fi
+    rm -f "$tmp"
+    adb_root_exec "sh -c \"cat $WTPROV_STAGED_SHA > $WTPROV_BACKUP_SHA\"" >/dev/null 2>&1
+    if [[ "$(adb_root_exec "cat $WTPROV_BACKUP_SHA" 2>/dev/null | tr -d '\r\n ')" != "$sha" ]]; then
+        print_error "Could not record the backup's sha256 at $WTPROV_BACKUP_SHA; nothing was written"
+        return 1
+    fi
+    return 0
+}
+
+# Copy the cache to WTPROV_BACKUP once and record its sha256. Returns 0 only
+# with a trusted backup; an untrusted file that differs from the cache is a refusal.
+wtprov_cache_backup() {
+    local before bk problem aside stamp
+    before=$(wtprov_cache_require) || return 1
+    # Checked before the backup is taken, so a broken cache leaves no sidecar.
+    problem=$(remote_xml_problem "$(wtprov_cache_path)")
+    if [[ -n "$problem" ]]; then
+        print_error "wtprovision's cache $(wtprov_cache_path): $problem; nothing was written"
+        return 1
+    fi
+    bk=$(remote_sha256 "$WTPROV_BACKUP")
+    if [[ "$bk" == "$before" ]]; then
+        if [[ -n "$(wtprov_backup_problem)" ]]; then
+            if ! wtprov_backup_has_pair; then
+                print_error "wtprovision's cache has no home_pkg/home_activity pair; nothing was written"
+                return 1
+            fi
+            # Same bytes as the live cache, so recording its hash is truthful.
+            wtprov_backup_record "$bk" || return 1
+        fi
+        print_status "Backup of wtprovision's cache already at $WTPROV_BACKUP"
+    elif [[ -n "$bk" ]]; then
+        problem=$(wtprov_backup_problem)
+        if [[ -n "$problem" ]]; then
+            # The pid keeps two runs apart even within one second.
+            stamp="$(date +%Y%m%d_%H%M%S).$$"
+            aside="mv $WTPROV_BACKUP $WTPROV_BACKUP.old.$stamp"
+            if adb_root_exec "cat $WTPROV_BACKUP_SHA" >/dev/null 2>&1; then
+                aside="$aside; mv $WTPROV_BACKUP_SHA $WTPROV_BACKUP_SHA.old.$stamp"
+            fi
+            print_error "The file at $WTPROV_BACKUP (sha256 $bk) differs from the cache and is not a trusted backup: $problem"
+            print_error "Nothing was written. Set it aside, then run again:"
+            # Outer single quotes: adb shell joins its arguments, so host-side
+            # double quotes would not reach the device.
+            print_error "  adb shell 'su 0 sh -c \"$aside\"'"
+            return 1
+        fi
+        print_warning "Keeping the existing backup at $WTPROV_BACKUP: it differs from the current cache, so it is the older original"
+    else
+        adb_root_exec "sh -c \"cat $(wtprov_cache_path) > $WTPROV_BACKUP\"" >/dev/null 2>&1
+        if [[ "$(remote_sha256 "$WTPROV_BACKUP")" != "$before" ]]; then
+            print_error "Could not back up wtprovision's cache to $WTPROV_BACKUP; nothing was written"
+            return 1
+        fi
+        wtprov_backup_record "$before" || return 1
+        print_status "Backed up wtprovision's cache to $WTPROV_BACKUP"
+    fi
+    return 0
+}
+
+# Write the pair into the device cache. The new file is SRC (a device path)
+# with the two values replaced and every other line kept, built on the host,
+# staged in /data/local/tmp and written as root by redirect, which keeps the
+# inode, mode and SELinux label. The cache itself must already exist.
+wtprov_cache_put() {
+    local pkg="$1" act="$2" src="$3" cache tmp before after staged problem
+    cache=$(wtprov_cache_path)
+    before=$(wtprov_cache_require) || return 1
+    tmp=$(mktemp -d) || return 1
+
+    if ! adb_root_exec "cat $src" > "$tmp/source.xml" 2>/dev/null \
+        || [[ -z "$(prefs_value home_pkg < "$tmp/source.xml")" ]] \
+        || [[ -z "$(prefs_value home_activity < "$tmp/source.xml")" ]]; then
+        print_error "$src is missing or has no home_pkg/home_activity pair; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+    problem=$(xml_problem "$tmp/source.xml")
+    if [[ -n "$problem" ]]; then
+        print_error "$src: $problem; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+
+    sed -e "s|\(<string name=\"home_pkg\">\)[^<]*\(</string>\)|\1$pkg\2|" \
+        -e "s|\(<string name=\"home_activity\">\)[^<]*\(</string>\)|\1$act\2|" \
+        "$tmp/source.xml" > "$tmp/new.xml"
+    if [[ "$(prefs_value home_pkg < "$tmp/new.xml")" != "$pkg" \
+        || "$(prefs_value home_activity < "$tmp/new.xml")" != "$act" ]]; then
+        print_error "Could not build the new cache file; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+    problem=$(xml_problem "$tmp/new.xml")
+    if [[ -n "$problem" ]]; then
+        print_error "The new cache file: $problem; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+
+    staged=$(local_sha256 "$tmp/new.xml")
+    if ! adb push "$tmp/new.xml" "$WTPROV_STAGED" >/dev/null 2>&1 \
+        || [[ "$(remote_sha256 "$WTPROV_STAGED")" != "$staged" ]]; then
+        print_error "Could not stage the new cache at $WTPROV_STAGED; nothing was written"
+        rm -rf "$tmp"; return 1
+    fi
+    rm -rf "$tmp"
+
+    adb_root_exec "sh -c \"cat $WTPROV_STAGED > $cache\"" >/dev/null 2>&1
+    after=$(remote_sha256 "$cache")
+    print_status "wtprovision cache sha256 before: ${before:-unknown}"
+    print_status "wtprovision cache sha256 after:  ${after:-unknown}"
+    if [[ "$after" != "$staged" ]]; then
+        print_error "The cache write did not land (expected sha256 $staged)"
+        print_warning "Restore it with: bash scripts/UNLOCK.sh --revert"
+        return 1
+    fi
+    return 0
+}
+
+# Back up once, then write the pair built from the trusted backup. Without a
+# trusted backup nothing is written.
+wtprov_cache_write() {
+    wtprov_cache_backup || return 1
+    wtprov_cache_put "$1" "$2" "$WTPROV_BACKUP"
+}
+
+# wtprovision's pid(s), space separated, empty when it is not running.
+wtprov_pids() {
+    adb_root_exec "pidof $HOME_DISPATCHER_PKG" 2>/dev/null | tr -d '\r' \
+        | tr -s ' \n' '  ' | sed 's/^ *//; s/ *$//' | grep -E '^[0-9]+( [0-9]+)*$'
+}
+
+# Kill wtprovision so the system restarts it and it rereads the cache. It is
+# persistent, so `am force-stop` returns 0 and changes nothing.
+wtprov_restart() {
+    local pids new i
+    pids=$(wtprov_pids)
+    if [[ -z "$pids" ]]; then
+        print_error "wtprovision is not running"
+        return 1
+    fi
+    if ! adb_root_exec "kill -9 $pids" >/dev/null 2>&1; then
+        print_error "Could not kill wtprovision (pid $pids)"
+        return 1
+    fi
+    for (( i = 0; i < ${WTPROV_RESTART_TIMEOUT:-10}; i++ )); do
+        new=$(wtprov_pids)
+        [[ -n "$new" && "$new" != "$pids" ]] && return 0
+        sleep 1
+    done
+    print_error "wtprovision did not come back within ${WTPROV_RESTART_TIMEOUT:-10} s of kill -9"
+    return 1
+}
+
+# Press HOME and print the package that has window focus afterwards. A failed
+# press prints nothing and returns 1: the old focus would prove nothing.
+home_focus() {
+    if ! adb_root_exec "input keyevent HOME" >/dev/null 2>&1; then
+        print_error "Could not press HOME: input keyevent HOME failed"
+        return 1
+    fi
+    sleep "${HOME_SETTLE_SECS:-2}"
+    focused_package
+}
+
+# The package whose window has focus now, without pressing anything.
+focused_package() {
+    adb_root_exec "dumpsys window" 2>/dev/null | tr -d '\r' \
+        | sed -n 's|.*mCurrentFocus=Window{[^ ]* [^ ]* \([^/ ]*\)/.*|\1|p' | head -1
+}
+
+# Expand a component's class to its full name: com.a/.b.C becomes com.a.b.C.
+full_component() {
+    local pkg="$1" cls="${2#*/}"
+    if [[ "$cls" == .* ]]; then echo "$pkg$cls"; else echo "$cls"; fi
 }
 
 # Prove the replacement launcher works before anything relies on it.
@@ -194,10 +507,17 @@ system_mountpoint() {
 # /proc/mounts rather than `mount`: the options field is positional there, so
 # "rw" cannot be matched out of a device name or a path that happens to contain
 # it. The old check grepped '/system.*[( ,]rw' against `mount` output.
-system_is_rw() {
-    local mp; mp=$(system_mountpoint)
+# Prints rw, ro, or nothing when the table is unreadable or has no entry.
+system_mount_state() {
+    local mp="${1:-$(system_mountpoint)}"
     adb_root_exec "cat /proc/mounts" 2>/dev/null | tr -d '\r' \
-        | awk -v mp="$mp" '$2 == mp && $4 ~ /^rw(,|$)/ { found = 1 } END { exit !found }'
+        | awk -v mp="$mp" '$2 == mp && $4 ~ /^rw(,|$)/ { s = "rw" }
+                           $2 == mp && $4 ~ /^ro(,|$)/ { s = "ro" }
+                           END { if (s != "") print s }'
+}
+
+system_is_rw() {
+    [[ "$(system_mount_state)" == "rw" ]]
 }
 
 # Remount writable, verifying it actually took. Callers must pair this with
@@ -211,9 +531,17 @@ system_rw() {
     return 1
 }
 
+# Remount read-only and check it took; a / left writable or unreadable is an error.
 system_ro() {
     local mp; mp=$(system_mountpoint)
     adb_root_exec "mount -o remount,ro $mp" >/dev/null 2>&1 || true
+    # Only a positive ro reading counts; "not rw" also covers an unreadable table.
+    case "$(system_mount_state "$mp")" in
+        ro) return 0 ;;
+        rw) print_error "Could not remount $mp read-only; it is still writable" ;;
+        *)  print_error "Could not read the mount state of $mp from /proc/mounts; treating / as still writable" ;;
+    esac
+    return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -288,7 +616,7 @@ launcher_present_state() {
 #
 # So: prefer the clean path, and drop to /system/app when the device refuses.
 # The cost of the fallback is that the package only registers on the next boot,
-# which is why this reports needs-restart rather than pretending to be done.
+# which is why this returns NEEDS_REBOOT rather than pretending to be done.
 launcher_present_apply() {
     if package_installed "$LAUNCHER_PKG"; then return 0; fi
 
@@ -310,26 +638,70 @@ launcher_present_apply() {
     # `adb root` is unavailable, which is every Magisk-rooted one.
     local staged="/data/local/tmp/$(basename "$apk")"
     local dest="$LAUNCHER_SYSTEM_DIR/$(basename "$LAUNCHER_SYSTEM_DIR").apk"
+    local mp want got aside="" aside_sha stamp undo
 
+    want=$(local_sha256 "$apk")
     if ! adb push "$apk" "$staged" >/dev/null 2>&1; then
         print_error "Could not stage the launcher to $staged"
         return 1
     fi
-
-    system_rw || { adb_root_exec "rm -f $staged" >/dev/null 2>&1; return 1; }
-    adb_root_exec "mkdir -p $LAUNCHER_SYSTEM_DIR" >/dev/null || true
-    adb_root_exec "cp $staged $dest" >/dev/null || true
-    adb_root_exec "chmod 644 $dest" >/dev/null || true
-    system_ro
-    adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
-
-    if ! adb_root_exec "ls -d $dest" >/dev/null 2>&1; then
-        print_error "Could not copy the launcher into $LAUNCHER_SYSTEM_DIR"
+    got=$(remote_sha256 "$staged")
+    if [[ "$got" != "$want" ]]; then
+        print_error "The staged copy at $staged has sha256 ${got:-unreadable}, which does not match the APK's $want; nothing was written to /system"
+        adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
         return 1
     fi
 
-    print_warning "$LAUNCHER_NAME will only register after a restart - rerun this afterwards"
-    return 1
+    system_rw || { adb_root_exec "rm -f $staged" >/dev/null 2>&1; return 1; }
+    mp=$(system_mountpoint)
+
+    # An APK already at dest is kept aside first, so a bad write can be undone.
+    if adb_root_exec "ls -d $dest" >/dev/null 2>&1; then
+        stamp="$(date +%Y%m%d_%H%M%S).$$"
+        aside="/data/local/tmp/$(basename "$dest").before.$stamp"
+        adb_root_exec "cp $dest $aside" >/dev/null 2>&1 || true
+        aside_sha=$(remote_sha256 "$aside")
+        if [[ -z "$aside_sha" || "$aside_sha" != "$(remote_sha256 "$dest")" ]]; then
+            print_error "Could not keep a copy of the existing $dest at $aside; nothing was written to /system"
+            system_ro
+            adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
+            return 1
+        fi
+        print_status "Kept the existing $dest at $aside (sha256 $aside_sha)"
+        undo="cat $aside > $dest"
+    else
+        undo="rm -f $dest"
+    fi
+
+    # Root redirect, not cp: same write path as the cache, and its status is checked.
+    if ! adb_root_exec "mkdir -p $LAUNCHER_SYSTEM_DIR" >/dev/null 2>&1 \
+        || ! adb_root_exec "sh -c \"cat $staged > $dest\"" >/dev/null 2>&1; then
+        print_error "Could not write the launcher to $dest"
+    elif ! adb_root_exec "chmod 644 $dest" >/dev/null 2>&1; then
+        print_error "Could not chmod 644 $dest"
+    else
+        got=$(remote_sha256 "$dest")
+        if [[ "$got" == "$want" ]]; then
+            undo=""
+        else
+            print_error "$dest has sha256 ${got:-unreadable}, which does not match the APK's $want"
+        fi
+    fi
+
+    adb_root_exec "rm -f $staged" >/dev/null 2>&1 || true
+    if [[ -n "$undo" ]]; then
+        system_ro
+        print_error "The projector was not restarted. To undo the write:"
+        print_error "  adb shell 'su 0 sh -c \"mount -o remount,rw $mp && $undo; mount -o remount,ro $mp\"'"
+        return 1
+    fi
+    if ! system_ro; then
+        print_error "The launcher is in $dest, but $mp is still writable, so the projector was not restarted"
+        return 1
+    fi
+
+    print_warning "$LAUNCHER_NAME only registers after a restart"
+    return "$NEEDS_REBOOT"
 }
 
 launcher_present_revert() {
@@ -363,32 +735,31 @@ launcher_present_revert() {
 # ---------------------------------------------------------------------------
 # step: launcher_default
 #
-# The one that matters. Setting the home activity on its own does not survive a
-# restart while the stock launcher is still enabled -- which is why an earlier
-# attempt left Nova sitting in /system/app since July and the projector still
-# came up on the stock launcher. Disabling the stock launcher is what makes it
-# stick, so this step does both and treats either half failing as failure.
+# The one that matters. On this firmware wtprovision owns the home intent and
+# starts whatever its own SharedPreferences cache names, so the step rewrites
+# that cache as root, restarts wtprovision and checks which window HOME lands
+# on. Nothing is disabled: disabling wtprovision is what stops the device
+# booting (docs/BOOT_DEADLOCK.md).
 #
-# Disabling it is also the only moment in the unlock that can leave someone
-# staring at a projector with no home screen, so it happens last and only after
-# the replacement has been seen to actually run.
+# On a device without an interceptor the old route still applies: record the
+# home preference with set-home-activity.
 # ---------------------------------------------------------------------------
 launcher_default_describe() {
-    echo "Make $LAUNCHER_NAME the home screen (preference only -- nothing is disabled)"
+    echo "Make $LAUNCHER_NAME the home screen (rewrites wtprovision's launcher cache; nothing is disabled)"
 }
 
-# Who actually wins the intent the firmware dispatches at boot.
+# Who the next HOME press lands on.
 #
-# CORRECTED 2026-07-30. This used to be answered with home_activity(), which
-# reads the recorded preference. That is a different question. This firmware
-# adds CATEGORY_SETUP_WIZARD to the home intent, and a preference recorded
-# without that category loses to whatever declares it -- so the preference can
-# read back perfectly while the next boot ignores it. Ask the resolver instead.
-#
-# Empty interceptor means a device that resolves HOME normally; there the
-# recorded preference is the answer.
+# With wtprovision intercepting, that is the pair in its cache, which neither
+# the resolver nor the preference table can show. Any other interceptor owns
+# HOME outright. With none, the recorded preference is the answer.
 home_owner() {
-    local icept; icept=$(home_interceptor)
+    local icept pair
+    icept=$(home_interceptor)
+    if [[ -n "$icept" ]] && is_wtprov "$icept"; then
+        pair=$(wtprov_cache_read)
+        [[ -n "$pair" ]] && { echo "${pair%% *}/${pair#* }"; return; }
+    fi
     [[ -n "$icept" ]] && { echo "$icept"; return; }
     home_activity
 }
@@ -396,25 +767,27 @@ home_owner() {
 launcher_default_state() {
     package_installed "$LAUNCHER_PKG" || { echo "blocked:install the launcher first"; return; }
 
-    local owner; owner=$(home_owner)
-    if [[ "$owner" == "$LAUNCHER_PKG"* ]]; then
-        echo applied
-        return
-    fi
-
-    # An interceptor owning the vendor intent is no longer a hazard -- nothing
-    # is disabled now, so it is the fallback that keeps the device booting. It
-    # is still a blocker for the *automated* step, for a different and honest
-    # reason: no command on API 28 writes a preference covering
-    # CATEGORY_SETUP_WIZARD, so the CLI cannot win that intent. A human can, from
-    # the device's own chooser.
     local icept; icept=$(home_interceptor)
-    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
-        echo "blocked:$icept owns the home intent on this firmware (it declares CATEGORY_SETUP_WIZARD); no command on API 28 writes a preference covering that, so no CLI can override it -- press HOME on the device, pick $LAUNCHER_NAME, confirm 'Always'"
+    if [[ -z "$icept" ]]; then
+        [[ "$(home_activity)" == "$LAUNCHER_PKG"* ]] && echo applied || echo not-applied
         return
     fi
 
-    echo not-applied
+    # Only wtprovision's cache is understood; any other owner blocks the step.
+    if ! is_wtprov "$icept"; then
+        echo "blocked:$icept owns the home intent and is not wtprovision"
+        return
+    fi
+
+    # wtprovision needs both keys to name the launcher.
+    local pair pkg act
+    pair=$(wtprov_cache_read)
+    pkg="${pair%% *}"; act="${pair#* }"
+    if [[ -n "$pair" && "$pkg" == "$LAUNCHER_PKG" && "$act" == "$LAUNCHER_PKG".* ]]; then
+        echo applied
+    else
+        echo not-applied
+    fi
 }
 
 launcher_default_apply() {
@@ -423,18 +796,9 @@ launcher_default_apply() {
         return 1
     fi
 
-    # Refuse before writing anything. Setting a preference the vendor intent
-    # will ignore does not hand the home screen over -- it just leaves a stale
-    # record, and a stale record is what started the incident this whole file
-    # now carries scars from.
     local icept; icept=$(home_interceptor)
-    if [[ -n "$icept" && "$icept" != "$LAUNCHER_PKG"/* ]]; then
-        print_error "'$icept' owns the home intent on this firmware"
-        print_warning "No command on API 28 writes a preference covering CATEGORY_SETUP_WIZARD,"
-        print_warning "so the CLI cannot win it. Nothing was changed."
-        print_status "Finish it on the device: press HOME, choose $LAUNCHER_NAME, confirm 'Always'."
-        print_status "Nothing is disabled, so the projector keeps booting to the stock launcher"
-        print_status "until you do -- and still would if the preference ever went stale."
+    if [[ -n "$icept" ]] && ! is_wtprov "$icept"; then
+        print_error "'$icept' owns the home intent and is not wtprovision; nothing was changed"
         return 1
     fi
 
@@ -453,23 +817,15 @@ launcher_default_apply() {
         return 1
     fi
 
-    # NOTHING IS DISABLED HERE, AND THAT IS THE POINT.
-    #
-    # This step used to run `pm disable-user` on the stock launcher first, on
-    # the premise that it would otherwise win the home race on the next boot.
-    # It never competes. The firmware dispatches home as MAIN + HOME +
-    # CATEGORY_SETUP_WIZARD; whatever declares SETUP_WIZARD wins and then starts
-    # the stock launcher by explicit component name. Disabling that interceptor
-    # leaves the intent with zero candidates and the device stops booting --
-    # three days and a soldered UART console to undo. See docs/BOOT_DEADLOCK.md.
-    #
-    # Leaving both enabled is what makes this safe to get wrong: a preference
-    # that goes stale degrades to "boots to the stock launcher" rather than
-    # "does not boot".
+    if [[ -n "$icept" ]] && is_wtprov "$icept"; then
+        launcher_default_apply_wtprov "$comp"
+        return
+    fi
+
+    # No interceptor: the recorded preference decides HOME.
     adb_root_exec "cmd package set-home-activity $comp" >/dev/null || true
 
-    # Read back the question that decides the next boot, not the one that is
-    # convenient to ask. set-home-activity reports Success either way.
+    # set-home-activity reports Success either way, so read it back.
     local owner; owner=$(home_owner)
     if [[ "$owner" == "$LAUNCHER_PKG"* ]]; then
         return 0
@@ -481,13 +837,59 @@ launcher_default_apply() {
     return 1
 }
 
+# NOTHING IS DISABLED HERE, AND THAT IS THE POINT. Disabling wtprovision leaves
+# the home intent with no candidate and the device stops booting; three days
+# and a soldered UART console to undo. See docs/BOOT_DEADLOCK.md.
+#
+# Known cost: a launcher in /data/app cannot be resolved until user 0 unlocks
+# at boot, and wtprovision retries its dispatch recursively until then (1531
+# retries in 9.5 s on this unit, no crash). A much slower boot could overflow
+# that stack; the system restarts the persistent process and home arrives
+# late. Not a brick.
+launcher_default_apply_wtprov() {
+    local comp="$1" full focus
+
+    # Checked before writing, so a missing process changes nothing.
+    if [[ -z "$(wtprov_pids)" ]]; then
+        print_error "wtprovision is not running; nothing was changed"
+        return 1
+    fi
+
+    full=$(full_component "$LAUNCHER_PKG" "$comp")
+    print_status "Writing $LAUNCHER_PKG / $full into wtprovision's cache"
+    wtprov_cache_write "$LAUNCHER_PKG" "$full" || return 1
+
+    if ! wtprov_restart; then
+        print_warning "The cache was written; revert with: bash scripts/UNLOCK.sh --revert"
+        return 1
+    fi
+
+    # The file saying Projectivy proves nothing; the focused window does.
+    if ! focus=$(home_focus); then
+        print_warning "The cache was written; revert with: bash scripts/UNLOCK.sh --revert"
+        return 1
+    fi
+    if [[ "$focus" != "$LAUNCHER_PKG" ]]; then
+        print_error "the cache was written but HOME did not take effect; revert with: bash scripts/UNLOCK.sh --revert"
+        print_warning "HOME landed on '${focus:-nothing}'"
+        return 1
+    fi
+    return 0
+}
+
 launcher_default_revert() {
-    # Re-enable first: a disabled package registers no activities, so the
-    # component lookup below would come back empty.
+    # Re-enable first: a disabled package registers no activities, and an
+    # older version of this script did disable it.
     adb_root_exec "pm enable $STOCK_LAUNCHER" >/dev/null || true
     if package_disabled "$STOCK_LAUNCHER"; then
         print_error "Could not re-enable $STOCK_LAUNCHER"
         return 1
+    fi
+
+    local icept; icept=$(home_interceptor)
+    if [[ -n "$icept" ]] && is_wtprov "$icept"; then
+        launcher_default_revert_wtprov
+        return
     fi
 
     local comp; comp=$(home_component_of "$STOCK_LAUNCHER")
@@ -505,37 +907,85 @@ launcher_default_revert() {
     return 0
 }
 
-# ---------------------------------------------------------------------------
-# step: cleanup_leftovers
-# ---------------------------------------------------------------------------
-LEFTOVERS=(/system/app/APKPurev32051ap /system/app/NovaLauncher_old)
-
-cleanup_leftovers_describe() {
-    echo "Remove empty and duplicated folders left by earlier unlock attempts"
-}
-
-cleanup_leftovers_state() {
-    local d
-    for d in "${LEFTOVERS[@]}"; do
-        adb_root_exec "ls -d $d" >/dev/null 2>&1 && { echo not-applied; return; }
-    done
-    echo applied
-}
-
-cleanup_leftovers_apply() {
-    system_rw || return 1
-    local d
-    for d in "${LEFTOVERS[@]}"; do
-        adb_root_exec "rm -rf $d" >/dev/null 2>&1 || true
-    done
-    system_ro
+# Copy the live cache to /data/local/tmp/wtprov_prefs.live.<stamp>.xml as root
+# and record its sha256 next to it. Fails unless both read back.
+wtprov_cache_keep_live() {
+    local cache live sidecar sha tmp
+    cache=$(wtprov_cache_path)
+    # The pid keeps two runs apart even within one second.
+    live="/data/local/tmp/wtprov_prefs.live.$(date +%Y%m%d_%H%M%S).$$.xml"
+    sidecar="${live%.xml}.sha256"
+    sha=$(remote_sha256 "$cache")
+    adb_root_exec "sh -c \"cat $cache > $live\"" >/dev/null 2>&1
+    if [[ -z "$sha" || "$(remote_sha256 "$live")" != "$sha" ]]; then
+        print_error "Could not keep a copy of the live cache at $live; nothing was written"
+        return 1
+    fi
+    tmp=$(mktemp) || return 1
+    echo "$sha" > "$tmp"
+    adb push "$tmp" "$sidecar" >/dev/null 2>&1
+    rm -f "$tmp"
+    if [[ "$(adb_root_exec "cat $sidecar" 2>/dev/null | tr -d '\r\n ')" != "$sha" ]]; then
+        print_error "Could not record the live cache's sha256 at $sidecar; nothing was written"
+        return 1
+    fi
+    print_status "Kept the live cache at $live (sha256 $sha)"
+    print_status "Its sha256 is recorded at $sidecar"
     return 0
 }
 
-cleanup_leftovers_revert() {
-    # Deliberately not reversible: these are duplicates of files that remain
-    # elsewhere on the device. Saying so is better than pretending.
-    print_warning "cleanup_leftovers cannot be undone (the duplicates are gone)"
+# Put the cache back from a trusted backup that names the stock launcher, else
+# write the stock pair, then restart wtprovision so it rereads it.
+launcher_default_revert_wtprov() {
+    local cache bk bkpkg problem focus
+    cache=$(wtprov_cache_path)
+
+    if [[ -z "$(wtprov_pids)" ]]; then
+        print_error "wtprovision is not running; nothing was changed"
+        return 1
+    fi
+    wtprov_cache_require >/dev/null || return 1
+
+    problem=$(wtprov_backup_problem)
+    if [[ -n "$problem" ]]; then
+        if [[ -n "$(remote_sha256 "$WTPROV_BACKUP")" ]]; then
+            print_warning "The backup at $WTPROV_BACKUP is not trusted: $problem"
+        fi
+        print_status "Not restoring a backup ($problem); writing the stock pair"
+    else
+        # Revert exists to restore stock, so a backup naming another launcher is not used.
+        bkpkg=$(adb_root_exec "cat $WTPROV_BACKUP" 2>/dev/null | prefs_value home_pkg)
+        if [[ "$bkpkg" != "$STOCK_LAUNCHER" ]]; then
+            problem="names $bkpkg"
+            print_warning "The backup at $WTPROV_BACKUP names $bkpkg, not the stock launcher; writing the stock pair instead"
+        fi
+    fi
+
+    if [[ -z "$problem" ]]; then
+        bk=$(remote_sha256 "$WTPROV_BACKUP")
+        adb_root_exec "sh -c \"cat $WTPROV_BACKUP > $cache\"" >/dev/null 2>&1
+        if [[ -z "$bk" || "$(remote_sha256 "$cache")" != "$bk" ]]; then
+            print_error "Could not restore wtprovision's cache from $WTPROV_BACKUP"
+            return 1
+        fi
+        print_status "Restored wtprovision's cache from $WTPROV_BACKUP (sha256 $bk)"
+    else
+        # No usable backup, so the live cache is the only copy of what is there.
+        # Keep it, with its hash, before overwriting it.
+        wtprov_cache_keep_live || return 1
+        # Vendor spelling, not a typo.
+        wtprov_cache_put "$STOCK_LAUNCHER" "$STOCK_LAUNCHER.WizardAciticity" "$cache" || return 1
+    fi
+
+    wtprov_restart || return 1
+
+    if ! focus=$(home_focus); then
+        return 1
+    fi
+    if [[ "$focus" != "$STOCK_LAUNCHER" ]]; then
+        print_error "The cache was restored but HOME landed on '${focus:-nothing}', not $STOCK_LAUNCHER"
+        return 1
+    fi
     return 0
 }
 
@@ -556,13 +1006,6 @@ component_disabled() {
     adb_root_exec "dumpsys package $pkg" 2>/dev/null \
         | awk '/disabledComponents:/{f=1;next} /^ *[a-zA-Z]+:/{f=0} f' \
         | grep -q "${comp#.}" 
-}
-
-repair_describe() {
-    cat <<EOF
-Diagnose a projector that stops at the vendor logo and never finishes booting,
-and re-enable the home dispatcher if that is what is wrong.
-EOF
 }
 
 # The commands that fix it from a serial console, printed when adb is gone.

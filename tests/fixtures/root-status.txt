@@ -1,0 +1,18 @@
+
+==================================================
+                  PROJECTOR ROOT
+==================================================
+
+[INFO] Checking root access...
+[OK] Root access confirmed
+[OK] Device: NL5H00X_TP (NL5H00X)
+
+=== CURRENT STATE ===
+
+  [todo]    daemon_binary    Install the root daemon (sud) to /system/xbin/sud
+  [todo]    daemon_service   Install the init service for sud at /system/etc/init/sud.rc (seclabel u:r:su:s0)
+  [todo]    allow_list       Create the su allow-list at /data/adb/su-allow (fail closed: empty means nobody)
+  [todo]    su_hybrid        Install the hybrid su at /system/xbin/su, keeping the stock su as /system/xbin/su_orig
+
+  sud daemon: not running
+

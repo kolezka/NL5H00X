@@ -1,3 +1,2 @@
-exit=0
-Error: package com.newlink.hisilauncher is disabled
-Launcher reset to default
+exit=1
+Launcher reset failed: Error: package com.newlink.hisilauncher is disabled

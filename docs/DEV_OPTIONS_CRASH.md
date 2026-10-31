@@ -55,6 +55,11 @@ device-mode API unconditionally, on a device that cannot support it.
 signature or the package stops being registered — which would cost you the entire
 Settings app.
 
+**2026-10-24 recheck:** the current APK was pulled and its SHA-256 matched the
+source. `apksigner verify --print-certs` exited 0 and returned the same certificate
+digest below. This revalidates signing identity, not patch behavior or deployment.
+See [the device audit](DEVICE_AUDIT_2026-10-24.md#framework-and-signing-evidence).
+
 The signing certificate's DN is `android@android.com`, which *suggests* AOSP test
 keys but does not prove them: a vendor can generate its own key and keep the
 default subject. The decisive check is the digest.
@@ -122,9 +127,17 @@ apksigner sign --key platform.pk8 --cert platform.x509.pem \
 Confirm the signed result reports the same `c8a2e9bc…` digest before going near
 `/system`, and keep a byte-verified copy of the original APK first.
 
-**Status: built and verified up to signing; not yet deployed or confirmed on the
-device.** Deployment additionally needs `/system` remounted read-write and a
-reboot so PackageManager rescans. The USB configuration item stays visible but
+**Status: deployed 2026-10-26 and confirmed on the device.** The patched APK
+(sha256 `3d099528…`, built from the pulled original `7229037b…` with the two
+edits above, signed v1+v2+v3 with the published key, cert digest `c8a2e9bc…`)
+was written over `/system/priv-app/TvSettings/TvSettings.apk` by root redirect
+with `/` remounted read-write, the stale `oat/arm/TvSettings.{odex,vdex}` removed,
+`/` remounted read-only, then a reboot. After the reboot `dumpsys package` shows
+the same signature record as before, Developer options opens and stays open
+(`DevelopmentActivity` focused, no entry in the crash buffer, process alive
+through D-pad navigation), and HOME still lands on Projectivy. Originals are
+kept with hashes at `/data/local/tmp/tvs-backup/` on the device; revert is the
+same redirect write of the original APK and a reboot. The USB configuration item stays visible but
 inert — removing it from the list means touching resources, which this approach
 deliberately avoids.
 
@@ -139,5 +152,6 @@ adb shell settings put global window_animation_scale 0.5
 `WRITE_SECURE_SETTINGS` has protection level `signature|privileged|development`,
 and the `development` flag means an ordinary app can be granted it from the
 shell (`pm grant`) — so a replacement UI is possible without the platform key at
-all. Note that installing that app still lands in `/system/app`, because normal
-installs fail on this device; see [INSTALL_LOCKED.md](INSTALL_LOCKED.md).
+all. Normal installs now work on this unit after the vendor gate was disabled;
+`/system/app` remains a fallback if the gate is on. See
+[INSTALL_LOCKED.md](INSTALL_LOCKED.md).

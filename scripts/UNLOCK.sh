@@ -10,6 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/steps.sh"
 
 APK_DIR="${APK_DIR:-$SCRIPT_DIR/../apks}"
 source "$SCRIPT_DIR/lib/unlock.sh"
@@ -21,183 +22,79 @@ SUPPORTED_DEVICES=(NL5H00X NL5H00X_TP)
 ASSUME_YES=0
 MODE=menu
 
-# ---------------------------------------------------------------------------
-# preconditions
-# ---------------------------------------------------------------------------
-check_supported_device() {
-    local model device d
-    model=$(adb shell getprop ro.product.model 2>/dev/null | tr -d ' \r\n')
-    device=$(adb shell getprop ro.product.device 2>/dev/null | tr -d ' \r\n')
-
-    for d in "${SUPPORTED_DEVICES[@]}"; do
-        if [[ "$model" == "$d" || "$device" == "$d" ]]; then
-            print_success "Device: $model ($device)"
-            return 0
-        fi
-    done
-
-    print_error "Unsupported device: model='$model' device='$device'"
-    echo
-    echo "This tool is written for the Newlink NL5H00X projector and makes"
-    echo "changes specific to its stock launcher and /system layout."
-    echo "Running it elsewhere could leave you without a home screen."
-    echo
-    echo "Supported: ${SUPPORTED_DEVICES[*]}"
-    exit 1
-}
+# A step that needs a reboot is saved here, so a run cut short by the reboot
+# can pick up where it stopped. Lives in the working directory.
+RESUME_MARKER=".unlock-resume"
+RESUME_FILE="$RESUME_MARKER"
+STEP_NAME_WIDTH=18
+UNSUPPORTED_DEVICE_TEXT="This tool is written for the Newlink NL5H00X projector and makes
+changes specific to its stock launcher and /system layout.
+Running it elsewhere could leave you without a home screen."
+UNLOCK_BOOT_TIMEOUT="${UNLOCK_BOOT_TIMEOUT:-180}"
 
 # ---------------------------------------------------------------------------
 # state reporting
 # ---------------------------------------------------------------------------
-step_line() {
-    local step="$1" state label desc
-    state=$("${step}_state")
-    desc=$("${step}_describe")
-    case "$state" in
-        applied)     label="${GREEN}[done]${NC}   " ;;
-        not-applied) label="${YELLOW}[todo]${NC}   " ;;
-        blocked:*)   label="${RED}[blocked]${NC}"; desc="$desc  (${state#blocked:})" ;;
-        *)           label="${RED}[?]${NC}     " ;;
-    esac
-    printf "  %b %-18s %s\n" "$label" "$step" "$desc"
+# The package wtprovision's cache names, when wtprovision intercepts HOME and
+# the cache holds a pair; empty otherwise.
+wtprov_cache_pkg() {
+    local icept pair
+    icept=$(home_interceptor)
+    [[ -n "$icept" ]] && is_wtprov "$icept" || return 0
+    pair=$(wtprov_cache_read)
+    [[ -n "$pair" ]] && echo "${pair%% *}"
+    return 0
 }
 
 show_status() {
-    print_section "CURRENT STATE"
-    local step
-    for step in "${UNLOCK_STEPS[@]}"; do step_line "$step"; done
-    echo
-    printf "  home screen now: %s\n" "$(home_activity)"
-    echo
-}
-
-all_applied() {
-    local step
-    for step in "${UNLOCK_STEPS[@]}"; do
-        [[ "$("${step}_state")" == "applied" ]] || return 1
-    done
-    return 0
-}
-
-# ---------------------------------------------------------------------------
-# running steps
-# ---------------------------------------------------------------------------
-run_step() {
-    local step="$1" state
-    state=$("${step}_state")
-
-    case "$state" in
-        applied)
-            print_success "$step: already done, nothing to change"
-            return 0 ;;
-        blocked:*)
-            print_error "$step: cannot run - ${state#blocked:}"
-            return 1 ;;
-    esac
-
-    print_step "$step: $("${step}_describe")"
-    if ! "${step}_apply"; then
-        print_error "$step FAILED - stopping, nothing further was changed"
-        return 1
+    steps_show_status ${UNLOCK_STEPS[@]+"${UNLOCK_STEPS[@]}"}
+    local cached focus
+    printf "  home screen now: %s\n" "$(home_owner)"
+    # The cache is only read when wtprovision starts, so the two can disagree.
+    # No HOME press here: --status changes nothing, so only a home screen
+    # already in front counts, not whatever app is open.
+    cached=$(wtprov_cache_pkg)
+    if [[ -n "$cached" ]]; then
+        focus=$(focused_package)
+        if [[ -n "$focus" && "$focus" != "$cached" && -n "$(home_component_of "$focus")" ]]; then
+            print_warning "HOME shows $focus, but wtprovision's cache names $cached; --apply-all restarts wtprovision"
+        fi
     fi
+    echo
+}
 
-    # Trust the read-back, not the return code.
-    state=$("${step}_state")
-    if [[ "$state" != "applied" ]]; then
-        print_error "$step reported success but the device still says '$state'"
-        return 1
+# All steps applied: press HOME and make sure it agrees with the cache,
+# restarting wtprovision once if it does not.
+confirm_home_on_launcher() {
+    local shown focus
+    [[ -n "$(wtprov_cache_pkg)" ]] || return 0
+    shown=$(home_focus) || return 1
+    [[ "$shown" == "$LAUNCHER_PKG" ]] && return 0
+    shown="${shown:-nothing}"
+    print_warning "The cache names $LAUNCHER_PKG but HOME shows $shown; restarting wtprovision"
+    if wtprov_restart && focus=$(home_focus) && [[ "$focus" == "$LAUNCHER_PKG" ]]; then
+        print_success "HOME is on $LAUNCHER_NAME after the restart"
+        return 0
     fi
-    print_success "$step: done and verified"
-    return 0
+    print_error "HOME still shows '${focus:-$shown}', not $LAUNCHER_PKG; revert with: bash scripts/UNLOCK.sh --revert"
+    return 1
 }
 
-apply_all() {
-    print_section "APPLYING UNLOCK"
-    local step
-    for step in "${UNLOCK_STEPS[@]}"; do
-        run_step "$step" || return 1
-    done
-    echo
-    print_success "All steps applied and verified"
-    echo
-    print_warning "Restart the projector for the new home screen to appear:  adb reboot"
-    return 0
-}
-
+all_applied() { steps_all_applied ${UNLOCK_STEPS[@]+"${UNLOCK_STEPS[@]}"}; }
+apply_all() { steps_apply_all "APPLYING UNLOCK" ${UNLOCK_STEPS[@]+"${UNLOCK_STEPS[@]}"}; }
 revert_all() {
-    print_section "REVERTING"
-    print_warning "This puts the stock launcher back as the home screen"
-    echo
-    # Reverse order: restore the launcher before removing its files.
-    local i step failed=0
-    for (( i=${#UNLOCK_STEPS[@]}-1; i>=0; i-- )); do
-        step="${UNLOCK_STEPS[$i]}"
-        print_step "reverting $step"
-        "${step}_revert" || { print_error "$step: revert failed"; failed=1; }
-    done
-    echo
-    if [[ "$failed" -eq 0 ]]; then
-        print_success "Reverted"
-    else
-        print_error "Revert finished with errors - check the state below"
-    fi
-    show_status
-    return "$failed"
+    steps_revert_all "This puts the stock launcher back as the home screen" \
+        ${UNLOCK_STEPS[@]+"${UNLOCK_STEPS[@]}"}
 }
 
 # ---------------------------------------------------------------------------
 # menu
 # ---------------------------------------------------------------------------
 show_menu() {
-    echo
-    echo "  1) Apply the whole unlock"
-    echo "  2) Run a single step"
-    echo "  3) Show current state"
-    echo "  4) Undo everything (restore the stock launcher)"
-    echo "  5) Restart the projector"
-    echo "  q) Quit"
-    echo
+    steps_show_menu "Apply the whole unlock" "Undo everything (restore the stock launcher)"
 }
-
-single_step_menu() {
-    local i n
-    echo
-    for i in "${!UNLOCK_STEPS[@]}"; do
-        printf "  %d)" "$((i + 1))"
-        step_line "${UNLOCK_STEPS[$i]}"
-    done
-    echo
-    read -r -p "Which step? (Enter to go back): " n
-    [[ -z "$n" ]] && return 0
-    if ! [[ "$n" =~ ^[0-9]+$ ]] || (( n < 1 || n > ${#UNLOCK_STEPS[@]} )); then
-        print_error "No such step"
-        return 0
-    fi
-    run_step "${UNLOCK_STEPS[$((n - 1))]}" || true
-}
-
-interactive() {
-    local choice
-    while true; do
-        show_menu
-        read -r -p "Choice: " choice || return 0
-        case "$choice" in
-            1)
-                if all_applied; then
-                    print_success "Everything is already applied"
-                elif [[ "$ASSUME_YES" == "1" ]] || confirm "Apply all steps now?"; then
-                    apply_all || true
-                fi
-                ;;
-            2) single_step_menu ;;
-            3) show_status ;;
-            4) confirm "Undo all changes and restore the stock launcher?" && { revert_all || true; } ;;
-            5) confirm "Restart the projector now?" && { adb reboot; print_status "Restarting..."; } ;;
-            q|Q) echo "Bye"; return 0 ;;
-            *) print_error "Unknown choice: $choice" ;;
-        esac
-    done
-}
+single_step_menu() { steps_single_step_menu ${UNLOCK_STEPS[@]+"${UNLOCK_STEPS[@]}"}; }
+interactive() { steps_interactive "Undo all changes and restore the stock launcher?"; }
 
 usage() {
     cat <<'EOF'
@@ -205,7 +102,8 @@ Unlock the launcher on a Newlink NL5H00X projector.
 
   ./UNLOCK.sh              interactive menu (default)
   ./UNLOCK.sh --status     show what is and is not applied, change nothing
-  ./UNLOCK.sh --apply-all  apply every step, then stop
+  ./UNLOCK.sh --apply-all  apply every step, then stop; restarts the projector
+                           once if the launcher can only go into /system/app
   ./UNLOCK.sh --revert     put the stock launcher back
   ./UNLOCK.sh --repair     projector stuck on the vendor logo? diagnose and fix
   ./UNLOCK.sh --yes        do not ask for confirmation (for scripting)
@@ -253,6 +151,8 @@ main() {
         apply)
             show_status
             if all_applied; then
+                confirm_home_on_launcher || exit 1
+                rm -f "$RESUME_MARKER"
                 print_success "Nothing to do - everything is already applied"
                 exit 0
             fi

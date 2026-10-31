@@ -12,3 +12,7 @@ root/sud
 root/suc
 root/privtest
 root/su
+root/sudcheck
+root/sudprobe
+firmware/include/secrets.h
+firmware/.pio/

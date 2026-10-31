@@ -392,11 +392,33 @@ create_restore_scripts() {
     cat > RESTORE.sh << 'RESTORE_EOF'
 #!/bin/bash
 # Emergency Restore Script
+#
+# Every step either verifies its own result or fails loudly. A success line is
+# printed only after the device reported success; a non-zero exit means the
+# device is NOT in the state the option promised.
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+# Run a command as root and return its TRUE remote exit status. `adb shell`
+# does not reliably propagate it and `su -c` may swallow it, so the status is
+# smuggled back on stdout and parsed here. Without this, a failed dd looks
+# exactly like a successful one.
+root_exec() {
+    local raw status
+    raw=$(adb shell "su -c '$1' 2>&1; echo __RC__=\$?" 2>/dev/null | tr -d '\r')
+    [[ "$raw" == *__RC__=* ]] || { echo "no exit status from device for: $1" >&2; return 125; }
+    status="${raw##*__RC__=}"; status="${status%%[!0-9]*}"
+    printf '%s' "${raw%__RC__=*}"
+    return "${status:-125}"
+}
+
+# Byte size of a local file, portable across macOS and GNU stat.
+local_size() { stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null; }
+
+fail() { echo -e "${RED}$1${NC}" >&2; exit 1; }
 
 echo -e "${YELLOW}=== EMERGENCY RESTORE ===${NC}"
 echo
@@ -412,22 +434,43 @@ read -p "Select option: " choice
 case "$choice" in
     1)
         echo "Resetting launcher..."
-        HOME=$(cat current-home-activity.txt 2>/dev/null | tr -d '\r\n')
-        adb shell cmd package set-home-activity "${HOME:-com.newlink.hisilauncher}"
-        echo -e "${GREEN}Launcher reset${NC}"
+        HOME_COMP=$(cat current-home-activity.txt 2>/dev/null | tr -d '\r\n')
+        # The saved file can hold a diagnostic instead of a component (an old
+        # MAKE_BACKUP recorded "Unknown command: ..." there). Only pkg/Activity
+        # is a component; anything else falls back to the stock launcher.
+        [[ "$HOME_COMP" == */* && "$HOME_COMP" != *" "* ]] || HOME_COMP=com.newlink.hisilauncher
+        out=$(adb shell cmd package set-home-activity "$HOME_COMP" 2>&1 | tr -d '\r')
+        if [[ "$out" == *Success* ]]; then
+            echo -e "${GREEN}Launcher reset${NC}"
+        else
+            fail "Launcher reset failed: ${out:-no response}"
+        fi
         ;;
     2)
-        [[ -f complete-app-backup.ab ]] && adb restore complete-app-backup.ab || echo "No app backup found"
+        [[ -f complete-app-backup.ab ]] || fail "No app backup found"
+        if adb restore complete-app-backup.ab; then
+            echo -e "${GREEN}App data restored${NC}"
+        else
+            fail "adb restore failed (exit $?)"
+        fi
         ;;
     3)
-        if [[ -f system.img ]]; then
-            echo "Restoring system partition..."
-            adb push system.img /sdcard/
-            adb shell "su -c 'dd if=/sdcard/system.img of=/dev/block/mmcblk0p20 bs=1048576'"
+        [[ -f system.img ]] || fail "No system backup found"
+        echo "Restoring system partition..."
+        # Refuse an image that is not exactly the partition's size. A short
+        # image written with dd leaves the tail of the partition as whatever
+        # was there before, which is the one restore that looks fine and is not.
+        expected=$(root_exec "blockdev --getsize64 /dev/block/mmcblk0p20" | tr -d ' \n')
+        [[ "$expected" =~ ^[0-9]+$ && "$expected" -gt 0 ]] || fail "Could not read the system partition size from the device"
+        actual=$(local_size system.img)
+        [[ "$actual" == "$expected" ]] || fail "system.img is $actual bytes, partition is $expected - refusing to write a short or oversized image"
+        adb push system.img /sdcard/ || fail "Push to /sdcard failed"
+        if root_exec "dd if=/sdcard/system.img of=/dev/block/mmcblk0p20 bs=1048576" >/dev/null; then
             adb shell rm -f /sdcard/system.img
             echo -e "${GREEN}System partition restored${NC}"
         else
-            echo "No system backup found"
+            adb shell rm -f /sdcard/system.img
+            fail "dd to the system partition FAILED - the partition may be partially written. Do not reboot; retry or restore the full image."
         fi
         ;;
     4)
@@ -440,7 +483,7 @@ case "$choice" in
             exit 1
         fi
         expected=$(grep '^device_size=' backup-manifest.txt 2>/dev/null | cut -d= -f2)
-        actual=$(stat -f%z full-system-backup.img 2>/dev/null || stat -c%s full-system-backup.img 2>/dev/null)
+        actual=$(local_size full-system-backup.img)
         if [[ -z "$expected" ]]; then
             echo -e "${RED}No backup-manifest.txt - cannot confirm this image is complete.${NC}"
             echo "Refusing to restore. Verify the image by hand first."
@@ -454,14 +497,23 @@ case "$choice" in
         echo -e "${GREEN}Image verified: $actual bytes${NC}"
 
         read -p "Type RESTORE to confirm: " confirm
-        if [[ "$confirm" == "RESTORE" ]]; then
-            echo "Starting full restore..."
-            adb push full-system-backup.img /sdcard/ || {
-                echo "Streaming restore..."
-                cat full-system-backup.img | adb shell "su -c 'dd of=/dev/block/mmcblk0 bs=1048576'"
-            }
-            adb reboot
+        [[ "$confirm" == "RESTORE" ]] || { echo "Not confirmed, nothing written."; exit 1; }
+        echo "Starting full restore..."
+        # The image is larger than /sdcard on this device, so the push is
+        # expected to fail and the streamed path is the normal one. Either
+        # way the write is the dd, and only its status decides what happens.
+        if adb push full-system-backup.img /sdcard/; then
+            written=$(root_exec "dd if=/sdcard/full-system-backup.img of=/dev/block/mmcblk0 bs=1048576" >/dev/null; echo $?)
+            adb shell rm -f /sdcard/full-system-backup.img
+        else
+            echo "Streaming restore..."
+            cat full-system-backup.img | adb shell "su -c 'dd of=/dev/block/mmcblk0 bs=1048576'; echo __RC__=\$?" > restore-stream.out 2>&1
+            written=$(tr -d '\r' < restore-stream.out | grep -o '__RC__=[0-9]*' | tail -1 | cut -d= -f2)
+            written="${written:-125}"
         fi
+        [[ "$written" == 0 ]] || fail "Full restore dd FAILED (status $written). Do not reboot; the device may be partially written. Retry before power-cycling."
+        echo -e "${GREEN}Full image written${NC}"
+        adb reboot
         ;;
 esac
 RESTORE_EOF
@@ -472,7 +524,12 @@ RESTORE_EOF
     # Quick launcher reset script
     cat > reset-launcher.sh << 'EOF'
 #!/bin/bash
-adb shell cmd package set-home-activity com.newlink.hisilauncher
+# Put the stock launcher back as home. Fails loudly if the device refuses.
+out=$(adb shell cmd package set-home-activity com.newlink.hisilauncher 2>&1 | tr -d '\r')
+if [[ "$out" != *Success* ]]; then
+    echo "Launcher reset failed: ${out:-no response}" >&2
+    exit 1
+fi
 adb shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
 echo "Launcher reset to default"
 EOF

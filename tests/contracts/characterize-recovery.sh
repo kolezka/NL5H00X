@@ -196,31 +196,43 @@ want_call() {
 expected_trace() {
     case "$case_name" in
         1-success) want_call shell cmd package set-home-activity com.newlink.hisilauncher/.WizardAciticity ;;
-        1-failure) want_call shell cmd package set-home-activity 'Unknown command: get-home-activity' ;;
+        1-diagnostic) want_call shell cmd package set-home-activity com.newlink.hisilauncher ;;
+        1-failure) want_call shell cmd package set-home-activity com.newlink.hisilauncher/.WizardAciticity ;;
         2-success|2-failure) want_call restore complete-app-backup.ab ;;
         2-missing|4-failure|q) : ;;
+        3-short)
+            want_call shell "su -c 'blockdev --getsize64 /dev/block/mmcblk0p20' 2>&1; echo __RC__=\$?"
+            ;;
         3-success|3-failure)
+            want_call shell "su -c 'blockdev --getsize64 /dev/block/mmcblk0p20' 2>&1; echo __RC__=\$?"
             want_call push system.img /sdcard/
-            want_call shell "su -c 'dd if=/sdcard/system.img of=/dev/block/mmcblk0p20 bs=1048576'"
+            want_call shell "su -c 'dd if=/sdcard/system.img of=/dev/block/mmcblk0p20 bs=1048576' 2>&1; echo __RC__=\$?"
             want_call shell rm -f /sdcard/system.img
             ;;
         4-success)
             want_call push full-system-backup.img /sdcard/
+            want_call shell "su -c 'dd if=/sdcard/full-system-backup.img of=/dev/block/mmcblk0 bs=1048576' 2>&1; echo __RC__=\$?"
+            want_call shell rm -f /sdcard/full-system-backup.img
             want_call reboot
             ;;
         4-fallback)
             want_call push full-system-backup.img /sdcard/
-            want_call shell "su -c 'dd of=/dev/block/mmcblk0 bs=1048576'"
+            want_call shell "su -c 'dd of=/dev/block/mmcblk0 bs=1048576'; echo __RC__=\$?"
             want_call reboot
             ;;
-        reset-success|reset-failure)
+        4-ddfail)
+            want_call push full-system-backup.img /sdcard/
+            want_call shell "su -c 'dd of=/dev/block/mmcblk0 bs=1048576'; echo __RC__=\$?"
+            ;;
+        reset-success)
             want_call shell cmd package set-home-activity com.newlink.hisilauncher
             want_call shell am start -a android.intent.action.MAIN -c android.intent.category.HOME
             ;;
+        reset-failure) want_call shell cmd package set-home-activity com.newlink.hisilauncher ;;
     esac
 }
 
-for case_name in 1-success 1-failure 2-success 2-failure 2-missing 3-success 3-failure 4-success 4-failure 4-fallback q reset-success reset-failure; do
+for case_name in 1-success 1-diagnostic 1-failure 2-success 2-failure 2-missing 3-short 3-success 3-failure 4-success 4-failure 4-fallback 4-ddfail q reset-success reset-failure; do
     for location in in-place relocated; do
         new_state "$case_name-$location"
         export FAKE_ADB_SU_MODE=direct FAKE_ADB_PROPAGATE_RC=1 FAKE_ADB_NO_DEVICE=0
@@ -237,22 +249,35 @@ for case_name in 1-success 1-failure 2-success 2-failure 2-missing 3-success 3-f
         cp -R "$SANDBOX/pristine/." "$BACKUP_DIR/" || exit 2
         case "$case_name" in
             1-success) printf 'com.newlink.hisilauncher/.WizardAciticity\n' > "$BACKUP_DIR/current-home-activity.txt" ;;
+            1-diagnostic) printf 'Unknown command: get-home-activity\n' > "$BACKUP_DIR/current-home-activity.txt" ;;
+            1-failure)
+                printf 'com.newlink.hisilauncher/.WizardAciticity\n' > "$BACKUP_DIR/current-home-activity.txt"
+                printf 'com.newlink.hisilauncher\n' > "$FAKE_ADB_STATE/packages_disabled"
+                ;;
             2-success) export FAKE_ADB_RESTORE_RC=0 ;;
             2-failure) export FAKE_ADB_RESTORE_RC=7 ;;
             2-missing) rm "$BACKUP_DIR/complete-app-backup.ab" ;;
-            3-success)
+            3-short)
+                # A 4096-byte image: the fake partition is the whole fixture.
                 head -c 4096 "$SANDBOX/fixture/full-system-backup.img" > "$BACKUP_DIR/system.img"
-                rm "$BACKUP_DIR/backup-manifest.txt"
+                export FAKE_ADB_INTERCEPT_BLOCK_DD=1 FAKE_ADB_INTERCEPT_DD_RC=0
+                ;;
+            3-success)
+                cp "$SANDBOX/fixture/full-system-backup.img" "$BACKUP_DIR/system.img"
                 export FAKE_ADB_INTERCEPT_BLOCK_DD=1 FAKE_ADB_INTERCEPT_DD_RC=0
                 ;;
             3-failure)
-                head -c 4096 "$SANDBOX/fixture/full-system-backup.img" > "$BACKUP_DIR/system.img"
-                rm "$BACKUP_DIR/backup-manifest.txt"
+                cp "$SANDBOX/fixture/full-system-backup.img" "$BACKUP_DIR/system.img"
                 export FAKE_ADB_INTERCEPT_BLOCK_DD=1 FAKE_ADB_INTERCEPT_DD_RC=23
                 ;;
+            4-success) export FAKE_ADB_INTERCEPT_BLOCK_DD=1 FAKE_ADB_INTERCEPT_DD_RC=0 ;;
             4-failure) rm "$BACKUP_DIR/full-system-backup.img" ;;
             4-fallback)
                 export FAKE_ADB_INTERCEPT_BLOCK_DD=1 FAKE_ADB_INTERCEPT_DD_RC=0
+                export FAKE_ADB_PUSH_FAIL_TARGET=/sdcard/ FAKE_ADB_PUSH_FAIL_RC=19
+                ;;
+            4-ddfail)
+                export FAKE_ADB_INTERCEPT_BLOCK_DD=1 FAKE_ADB_INTERCEPT_DD_RC=5
                 export FAKE_ADB_PUSH_FAIL_TARGET=/sdcard/ FAKE_ADB_PUSH_FAIL_RC=19
                 ;;
             reset-failure) printf 'com.newlink.hisilauncher\n' > "$FAKE_ADB_STATE/packages_disabled" ;;
@@ -282,16 +307,20 @@ PY
         fi
         check "$case_name $location exact command trace" cmp -s "$SANDBOX/expected-trace" "$SANDBOX/trace"
         expected_rc=0
-        [[ "$case_name" != 4-failure ]] || expected_rc=1
+        case "$case_name" in 1-failure|2-failure|2-missing|3-short|3-failure|4-failure|4-ddfail|reset-failure) expected_rc=1 ;; esac
         check "$case_name $location exit $expected_rc" test "$RC" = "$expected_rc"
         check "$case_name $location fake source block hash unchanged" test "$block_hash_before" = "$(file_sha256 "$FAKE_ADB_STATE/blockdev")"
         check "$case_name $location whole-device target hash unchanged" test "$whole_target_hash_before" = "$(file_sha256 "$FAKE_ADB_STATE/dev/block/mmcblk0")"
         check "$case_name $location partition target hash unchanged" test "$partition_target_hash_before" = "$(file_sha256 "$FAKE_ADB_STATE/dev/block/mmcblk0p20")"
         case "$case_name" in
-            1-success) check "$case_name $location accepted launcher" grep -Fxq 'Success' "$SANDBOX/output" ;;
+            1-success) check "$case_name $location reports reset" grep -Fxq 'Launcher reset' "$SANDBOX/output" ;;
+            1-diagnostic)
+                check "$case_name $location diagnostic text never sent" test "$(grep -Fc 'get-home-activity' "$SANDBOX/trace")" = 0
+                check "$case_name $location falls back to stock launcher" grep -Fxq 'Launcher reset' "$SANDBOX/output"
+                ;;
             1-failure)
-                check "$case_name $location saved diagnostic reaches fake" grep -Fxq 'Error: component get-home-activity not found' "$SANDBOX/output"
-                check "$case_name $location still claims success" grep -Fxq 'Launcher reset' "$SANDBOX/output"
+                check "$case_name $location device error visible" grep -Fq 'Launcher reset failed' "$SANDBOX/output"
+                check "$case_name $location no success line" test "$(grep -Fxc 'Launcher reset' "$SANDBOX/output")" = 0
                 ;;
             2-success)
                 check "$case_name $location restore succeeds" grep -Fxq 'restore completed' "$SANDBOX/output"
@@ -300,23 +329,34 @@ PY
                 ;;
             2-failure)
                 check "$case_name $location configured restore failure visible" grep -Fxq 'adb: restore failed with configured rc 7' "$SANDBOX/output"
-                check "$case_name $location production masks failure as missing" grep -Fxq 'No app backup found' "$SANDBOX/output"
+                check "$case_name $location failure not masked as missing" test "$(grep -Fc 'No app backup found' "$SANDBOX/output")" = 0
+                check "$case_name $location reports the failure" grep -Fxq 'adb restore failed (exit 7)' "$SANDBOX/output"
                 ;;
             2-missing)
                 check "$case_name $location missing app backup" grep -Fxq 'No app backup found' "$SANDBOX/output"
                 check "$case_name $location makes no restore call" test ! -s "$SANDBOX/trace"
                 ;;
+            3-short)
+                check "$case_name $location short image refused" grep -Fq 'refusing to write a short or oversized image' "$SANDBOX/output"
+                check "$case_name $location no block dd issued" test ! -e "$FAKE_ADB_STATE/block-dd.log"
+                ;;
             3-success)
                 check "$case_name $location block dd argv captured" grep -Fxq "dd if=/sdcard/system.img of=/dev/block/mmcblk0p20 bs=1048576" "$FAKE_ADB_STATE/block-dd.log"
                 check "$case_name $location no stdin payload" test ! -e "$FAKE_ADB_STATE/block-dd.stdin"
+                check "$case_name $location reports restored" grep -Fxq 'System partition restored' "$SANDBOX/output"
                 ;;
             3-failure)
-                check "$case_name $location configured dd failure visible" grep -Fxq 'fake-adb: intercepted block dd failed with configured rc 23' "$SANDBOX/output"
-                check "$case_name $location still claims restored" grep -Fxq 'System partition restored' "$SANDBOX/output"
+                check "$case_name $location dd failure reported" grep -Fq 'dd to the system partition FAILED' "$SANDBOX/output"
+                check "$case_name $location no success line" test "$(grep -Fxc 'System partition restored' "$SANDBOX/output")" = 0
                 ;;
             4-success)
+                check "$case_name $location block dd argv captured" grep -Fxq "dd if=/sdcard/full-system-backup.img of=/dev/block/mmcblk0 bs=1048576" "$FAKE_ADB_STATE/block-dd.log"
+                check "$case_name $location reports written before reboot" grep -Fxq 'Full image written' "$SANDBOX/output"
                 check "$case_name $location fake reboot recorded" grep -Fxq '1' "$FAKE_ADB_STATE/reboots"
-                check "$case_name $location no restore write issued" test ! -e "$FAKE_ADB_STATE/block-dd.log"
+                ;;
+            4-ddfail)
+                check "$case_name $location dd failure reported" grep -Fq 'Full restore dd FAILED (status 5)' "$SANDBOX/output"
+                check "$case_name $location no reboot" grep -Fxq '0' "$FAKE_ADB_STATE/reboots"
                 ;;
             4-failure) check "$case_name $location missing whole image" grep -Fxq 'No full-system-backup.img here' "$SANDBOX/output" ;;
             4-fallback)
@@ -328,11 +368,11 @@ PY
                 source_hash=$(file_sha256 "$run_dir/full-system-backup.img")
                 check "$case_name $location captured payload byte count" test "$payload_bytes" = 4194304
                 check "$case_name $location captured payload digest" test "$payload_hash" = "$source_hash"
-                check "$case_name $location current reboot still occurs" grep -Fxq '1' "$FAKE_ADB_STATE/reboots"
+                check "$case_name $location reboot after successful write" grep -Fxq '1' "$FAKE_ADB_STATE/reboots"
                 ;;
             reset-failure)
-                check "$case_name $location disabled launcher refused" grep -Fxq 'Error: package com.newlink.hisilauncher is disabled' "$SANDBOX/output"
-                check "$case_name $location still claims default" grep -Fxq 'Launcher reset to default' "$SANDBOX/output"
+                check "$case_name $location disabled launcher refused" grep -Fxq 'Launcher reset failed: Error: package com.newlink.hisilauncher is disabled' "$SANDBOX/output"
+                check "$case_name $location no success line" test "$(grep -Fxc 'Launcher reset to default' "$SANDBOX/output")" = 0
                 ;;
         esac
         if [[ "$location" == in-place ]]; then
@@ -351,13 +391,13 @@ cat > "$ACTUAL/recovery-hazards.md" <<'EOF'
 
 These traces describe fake execution, not proof of a working hardware restore. Every block-target `dd` was intercepted before a write, and each scenario kept the source block plus both exact mapped target hashes unchanged. The generated directory was run in place and from a copied fresh path.
 
-- Option 1 forwards the saved launcher text without validation. A saved `Unknown command: get-home-activity` diagnostic reaches `set-home-activity`; the command fails, but the script prints `Launcher reset` and exits zero.
-- Option 2 invokes `adb restore` when the file exists. A configured restore failure is masked as `No app backup found` and exits zero. A missing file makes no restore call.
-- Option 3 accepts a 4096-byte `system.img` without a manifest or typed confirmation. It issues a block-target `dd`; a configured nonzero `dd` result is ignored, then the script prints `System partition restored` and exits zero.
-- Option 4 verifies only image length. A successful push is followed by reboot without any restore write. A configured failed push reaches the stdin whole-device `dd` fallback; the fake consumed all 4194304 bytes with a matching digest, performed no block write, and the script still rebooted.
-- Quit has no failing action, so it has one trace only. `reset-launcher.sh` runs both commands and reports success even when the launcher reset command fails.
+- Option 1 sends only a `pkg/Activity` component to `set-home-activity`; a saved diagnostic falls back to the stock launcher. A device error is reported as `Launcher reset failed` with exit 1, never as `Launcher reset`.
+- Option 2 reports a missing file as `No app backup found` with exit 1 and makes no restore call. A failed `adb restore` is reported with its exit status, never as a missing file.
+- Option 3 reads the partition size from the device and refuses an image of any other length before pushing anything. A nonzero `dd` is reported as `dd to the system partition FAILED` with exit 1; `System partition restored` is printed only after a zero `dd` status.
+- Option 4 verifies the image length against the manifest, then issues a whole-device `dd` whose true status is read back through a sentinel. A nonzero status prints `Full restore dd FAILED`, exits 1 and does not reboot. The streamed fallback captured all 4194304 bytes with a matching digest.
+- Quit has no failing action, so it has one trace only. `reset-launcher.sh` exits 1 and prints no success line when the launcher reset command fails.
 
-The recovery HOLD remains open. These are characterization results, not endorsements of the production algorithm.
+The recovery HOLD on hardware restore stays until a restore is exercised on the unit. These are fake-device results; they show the scripts now fail loudly, not that a restore has ever succeeded on hardware.
 EOF
 
 compare_fixture recovery-hazards.md "$ACTUAL/recovery-hazards.md" 'recovery hazards'

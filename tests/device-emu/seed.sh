@@ -22,7 +22,12 @@ mkdir -p "$STATE"/{sdcard,system/app,system/priv-app,system/xbin,system/etc/init
 # STOCK-SU marker is what fake-adb's su_binary_ok reads to answer `su <uid>
 # id` -- distinct from the HYBRID-SU marker root-tests.sh's dummy artifact
 # carries, so live-verify can actually distinguish the two.
+#
+# 4750 root:shell, not 0755: that is what this firmware ships, and the mode is
+# load-bearing. Without the setuid bit a root shell cannot be reached at all,
+# which is the failure the device was actually in on 2026-10-25.
 printf 'STOCK-SU stock su placeholder\n' > "$STATE/system/xbin/su"
+chmod 4750 "$STATE/system/xbin/su" 2>/dev/null || true
 
 # Stock /system/etc/hosts, byte for byte as pulled 2026-10-31 (56 bytes,
 # sha256 425c3e71...). The spacing is the vendor's.
@@ -68,7 +73,8 @@ mkapk "$STATE/system/app/Magiskv290/Magiskv290.apk"                    11801932
 mkapk "$STATE/system/app/APKPurev32051ap/APKPurev32051ap.apk"          20878645
 mkapk "$STATE/system/app/APKPurev32051apkpure/APKPurev32051apkpure.apk" 20878645
 # NovaLauncher/ exists but is empty -- a failed earlier attempt, kept on purpose
-head -c 3052 /dev/zero > "$STATE/system/build.prop"
+printf '# begin build properties\n' > "$STATE/system/build.prop"
+cat "$STATE/props" >> "$STATE/system/build.prop"
 
 # ---------------------------------------------------------------------------
 # Package database: path=package, mirroring `pm list packages -f`
@@ -117,6 +123,22 @@ EOF
 
 # Processes. Only the stock launcher is up on a freshly booted device.
 echo "com.newlink.hisilauncher" > "$STATE/running"
+
+# wtprovision owns HOME on this firmware and starts whatever its own
+# SharedPreferences cache names. Same five-line layout as the real file.
+WTPROV_PREFS="$STATE/data/user_de/0/com.newlink.wtprovision/shared_prefs"
+mkdir -p "$WTPROV_PREFS"
+cat > "$WTPROV_PREFS/com.newlink.wtprovision.xml" <<'EOF'
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <string name="home_activity">com.newlink.hisilauncher.WizardAciticity</string>
+    <string name="home_pkg">com.newlink.hisilauncher</string>
+</map>
+EOF
+echo "2166" > "$STATE/wtprov_pid"
+# A file, not only the env knob, so a test can delete it to model a firmware
+# without the interceptor. FAKE_ADB_HOME_INTERCEPTOR still wins when set.
+echo "com.newlink.wtprovision/.MainActivity" > "$STATE/home_interceptor"
 
 # settings: <namespace> <key> <value>
 cat > "$STATE/settings" <<'EOF'

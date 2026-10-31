@@ -1,0 +1,17 @@
+
+==================================================
+                 PROJECTOR UNLOCK
+==================================================
+
+[INFO] Checking root access...
+[OK] Root access confirmed
+[OK] Device: NL5H00X_TP (NL5H00X)
+
+=== CURRENT STATE ===
+
+  [todo]    dev_options        Enable developer options and allow installing apps from outside the store
+  [todo]    launcher_present   Make sure the replacement launcher (Projectivy) exists on the device
+  [blocked] launcher_default   Make Projectivy the home screen (rewrites wtprovision's launcher cache; nothing is disabled)  (install the launcher first)
+
+  home screen now: com.newlink.hisilauncher/com.newlink.hisilauncher.WizardAciticity
+

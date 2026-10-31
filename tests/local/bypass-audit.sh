@@ -11,14 +11,14 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 printf '%s\n' \
     '# Format: repository-relative-v1' \
-    '# Scope: all of scripts/, including scripts/lib/transport/.' \
+    '# Scope: all of scripts/.' \
     '# Historical absolute-path baseline remains in git blob 69abc5299bb94ca102df558f8d4fc1f15ab0a30e.' \
     '# Each result is sorted and recorded with repository-relative filenames.' > "$control/current"
 for pattern in \
     '(^|[^-_./[:alnum:]])adb[[:space:]]' \
     '/adb|\$\{?ADB|command -v adb|which adb' \
     '\beval\b' \
-    '\$\{?PT_ADB_BIN|(^|[[:space:];|&()])/[[:alnum:]_.~+/@:-]*/adb([[:space:];|&()]|$)'; do
+    '(^|[[:space:];|&()])/[[:alnum:]_.~+/@:-]*/adb([[:space:];|&()]|$)'; do
     (
         cd "$WT" || exit 2
         "$RG" -n "$pattern" scripts/

@@ -1,7 +1,7 @@
 Where the APKs in this directory came from, and what was checked before they
 were trusted enough to install as a system launcher.
 
-Last updated: 2026-07-29
+Last updated: 2026-09-20
 
 ## projectivy-launcher-4.71.apk
 

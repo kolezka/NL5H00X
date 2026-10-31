@@ -9,8 +9,13 @@ process with `NO_NEW_PRIVS` set gets root through it, and an unlisted app is
 refused. It is now also wired into boot by an init service, and there is an
 opt-in hybrid `su` that keeps the shell/root fast path the rest of the toolkit
 depends on. Installing all of that is [`scripts/ROOT.sh`](../scripts/ROOT.sh),
-covered below. The install path is green against the emulator; **the boot itself
-has not been watched on hardware yet.**
+covered below. **2026-10-24 update:** the current owner's unit has an init-started
+`sud`; controlled allowed/refused app-UID probes passed after an approved
+Projectivy stop. A long-lived root shell had blocked a later request, consistent
+with this daemon's serialized handling. A concurrency fix remains follow-up work.
+See [the dated audit](../docs/DEVICE_AUDIT_2026-10-24.md) for the installed client
+inventory, test limits and the root command verified over UART. The audit did not
+rerun this installer or deploy a new daemon.
 
 ## Why a setuid `su` cannot work here
 
@@ -33,19 +38,24 @@ $ su 2000 privtest nnp   su 0 id   ->  su: setgid failed
 `PR_SET_NO_NEW_PRIVS`, then execs whatever you give it. It is why we know the
 setuid route is a dead end rather than a bug to chase — and it is the reason
 every real root solution (Magisk, SuperSU, KernelSU) uses a daemon rather than a
-setuid binary. Magisk itself cannot run here for an unrelated reason: both the
-boot and the recovery image carry `ramdisk=0` in their Android headers, so
-`magiskboot unpack` finds no cpio to inject into.
+setuid binary. Standard Magisk ramdisk patching is not a validated installation
+path here: both image headers report `ramdisk=0`, but recovery has an embedded
+initramfs as described below. That is a tooling and rescue-path constraint, not
+proof that every possible Magisk integration is impossible.
 
-That header field is not the whole story, and the difference matters if anyone
-picks this up again. `boot` genuinely has no ramdisk — its built-in initramfs is
-the stock 462-byte empty cpio, and the kernel mounts `system` directly via
-`root=/dev/mmcblk0p20`. `recovery` is the opposite: its ramdisk is real and
-complete (20,690,944 B, 245 entries, with `init`, `sepolicy` and the UI images),
-compiled into the kernel as a gzip blob rather than appended to the image. So
-the recovery ramdisk exists — it is simply somewhere `magiskboot` does not look,
-and replacing it means editing inside the zImage while preserving the region's
-byte length.
+That header field is not the whole story. Offline re-analysis on 2026-10-24 of
+the owner's 2026-09-13 user-area image found embedded gzip/CPIO archives in both
+kernels: boot has 3,153,408 bytes and 57 entries, including `init` and `init.rc`;
+recovery has 20,690,944 bytes and 245 entries. The older statement that boot
+contains only a 462-byte empty archive was wrong for this inspected image.
+
+The live boot environment includes `skip_initramfs` and `root=/dev/mmcblk0p20`,
+so the presence of the embedded archive does not mean normal boot uses it.
+Recovery's archive defines a root BusyBox console, but successful recovery boot
+and access to that console remain untested. Both archives are inside the kernel,
+not an external ramdisk understood by ordinary Android-image patching. Modifying
+them would require a validated repacking method and rescue path. See the
+[offline image checks](../docs/DEVICE_AUDIT_2026-10-24.md#offline-recovery-image-check).
 
 ## How the daemon works
 
@@ -132,6 +142,10 @@ SELinux Permissive does not bypass it. `u:r:su:s0` is used because this firmware
 is userdebug and Permissive, where the `su` domain exists. Name a domain the
 device's policy does not define and init logs an error, the service never
 starts, and boot continues normally. The failure mode is a missing daemon.
+If `sud` does not start after the restart, run `./scripts/ROOT.sh --repair`
+from the repository root. It checks the daemon and prints serial-console
+steps if adb is unavailable. Do not infer a working daemon from a completed
+boot.
 
 The service is deliberately not `oneshot`, so init restarts `sud` about five
 seconds after a crash.
@@ -161,7 +175,15 @@ NDK=/path/to/android-ndk ./build.sh
 
 The hybrid `su` is opt-in because it replaces the channel the rest of the
 toolkit runs on. `ROOT.sh` stages it to a separate path, proves `su 0 id` still
-returns uid 0 through that path, and only then promotes it.
+returns uid 0 through that path, and only then promotes it. It preserves the
+stock binary as `su_orig`; `--revert` restores it and checks the hashes.
+
+From the repository root, use `./nl5h00x root install` for the daemon and
+allow-list, then restart the projector so init starts `sud`. Check with
+`./nl5h00x root status`. Use `./nl5h00x root allow PKG` and `deny PKG` to
+change which apps can ask for root; use `./nl5h00x root revert` to remove the
+setup. The installer refuses another device or an unverified backup, verifies
+its changes on the device and treats already applied steps as no-ops.
 
 `bash ../tests/root-tests.sh` exercises all of this against the emulator,
 including a hybrid that fails live-verify and must leave the live `su` alone.
@@ -170,10 +192,11 @@ including a hybrid that fails live-verify and must leave the live `su` alone.
 
 Two different things are called "root" here, and they are worth keeping apart.
 
-**Shell root** is what `su 0 <command>` in an adb shell gives you. It exists on
-the stock firmware — the daemon does not create it, and everything in this
-section works before `ROOT.sh` has ever run. Note the form: this device takes
-`su <uid> <command>`, not `su -c`. `su -c 'id'` answers `invalid option -- c`.
+**Shell root** must be checked against the installed client. On this unit,
+`su 0 id` works and must print `uid=0` before you run these examples. The
+vendor `su` uses `su 0 <cmd>` and does not support `su -c`. Older observations
+of a failed plain `su 0 id` describe a different installed-client state. The
+UART console itself remains `user shell`, not root.
 
 **App root** is what `sud` adds: an app you put on the allow-list can run one
 command as uid 0 through the socket. Nothing else changes for that app.
@@ -211,7 +234,8 @@ su 0 pm enable com.apkpure.aegon
 
 **Do not freeze `com.newlink.wtprovision`.** It is the only package that owns
 MAIN + HOME + SETUP_WIZARD on this firmware, and freezing it stops the boot
-before adb and Wi-Fi come up. Recovery is a USB job. `TOOLS.sh` refuses that
+before adb and Wi-Fi come up. The documented repair used UART after Android
+started; USB-device ADB is not a validated rescue path. `TOOLS.sh` refuses that
 package outright, along with the launcher, TV settings, SystemUI and `android`.
 
 ### Set properties, and get ADB over Wi-Fi
@@ -278,14 +302,17 @@ booting.
 
 ### What root does not get you
 
-- **Normal installs still fail.** `pm install` and the package installer are
-  locked by the vendor and root does not lift it. Apps go to `/system/app`. See
+- **Root alone does not switch off the install gate.** Normal installs work on
+  this modified unit because the gate was turned off in `/system/build.prop`.
+  Other units may still need that change or the `/system/app` fallback. See
   [docs/INSTALL_LOCKED.md](../docs/INSTALL_LOCKED.md).
-- **No Magisk, no modules, no systemless anything.** Both boot and recovery carry
-  `ramdisk=0`; see above and [docs/BOOT_DEADLOCK.md](../docs/BOOT_DEADLOCK.md).
-- **The stock launcher still wins the boot intent** unless the home preference is
-  set the way [`scripts/UNLOCK.sh`](../scripts/UNLOCK.sh) sets it. That is an
-  intent-resolution problem, not a permission one.
+- **No validated standard Magisk installation path.** The unusual image layout
+  and unverified recovery path remain blockers. Header `ramdisk=0` alone does
+  not rule out an embedded initramfs or every possible systemless integration.
+  See [the audit](../docs/DEVICE_AUDIT_2026-10-24.md).
+- **Root alone does not change HOME.** `wtprovision` wins the vendor home intent
+  and starts the component in its own cache. [`scripts/UNLOCK.sh`](../scripts/UNLOCK.sh)
+  writes the cache and checks the focused window. It does not disable anything.
 
 ## Files
 

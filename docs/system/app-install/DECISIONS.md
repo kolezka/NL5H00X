@@ -9,23 +9,31 @@ verified_on: 2026-09-12
 
 ## Write into /system/app instead of fixing the package manager
 
-Every normal install on this device fails with
-`INSTALL_FAILED_INVALID_INSTALL_LOCATION` regardless of transfer method, flags or
-uid, and the failure is inside the vendor's patched `PackageManagerService` during
-install-location resolution; that conclusion and the hypotheses ruled out to reach
-it are in `docs/INSTALL_LOCKED.md::INSTALL_FAILED_INVALID_INSTALL_LOCATION` and
-were not re-measured here [assumption]. The script
-therefore does not try to make a normal install work; it tries one, then copies
-the app into `/system/app` [verified].
+At this source pin, `docs/INSTALL_LOCKED.md::INSTALL_FAILED_INVALID_INSTALL_LOCATION`
+recorded failed normal installs and attributed them to install-location resolution;
+those hardware premises were not re-measured for this block [assumption]. The
+script tries a normal install, then copies the app into `/system/app`, as described
+by `scripts/INSTALL_APP.sh::install_app()` [verified].
 
-### Rejected alternative: patch services.jar
+The [2026-10-24 audit](../../DEVICE_AUDIT_2026-10-24.md) and
+[whitelist analysis](../../INSTALL_LOCKED.md#verified-vendor-whitelist-branch)
+withdraw the volume-exception inference and identify a gate that denies installs
+under the currently read inputs, without establishing which branch caused every
+historical failure or changing this block's code pin
+[historical: 2026-10-24, docs/DEVICE_AUDIT_2026-10-24.md].
 
-A real fix lives in the framework jar loaded by the system server at boot, on a
-device whose recovery partition does not work, so a bad replacement leaves a unit
-that cannot boot and cannot be rescued except over serial, per
-`docs/INSTALL_LOCKED.md::"no working recovery partition"` [assumption]. Weighed against a
-workaround that already works, that trade lost [verified]. Boot recovery belongs
-to [unlock](../unlock/README.md).
+### Rejected alternative: patch the framework
+
+At `f04ee86`, `docs/INSTALL_LOCKED.md::"no working recovery partition"` referred
+to an attempted recovery boot falling through to normal Android, not an absent
+partition [historical: f04ee86, docs/INSTALL_LOCKED.md]. The current audit confirms
+a readable recovery header but does not validate recovery boot, pre-kernel UART
+rescue or raw restore [historical: 2026-10-24, docs/DEVICE_AUDIT_2026-10-24.md].
+The [framework modification limits](../../INSTALL_LOCKED.md#framework-modification-and-recovery-limits)
+still require an understood failure, a reversible change and resolution of the
+recovery safety HOLD before replacement
+[historical: 2026-10-24, docs/INSTALL_LOCKED.md]. Boot recovery belongs to
+[unlock](../unlock/README.md).
 
 ## Parse the binary manifest in the script
 

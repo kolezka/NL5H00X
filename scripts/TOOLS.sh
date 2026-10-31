@@ -682,9 +682,9 @@ root_vendor_block() {
 
     system_rw || return 1
     stage_and_install "$new" "$HOSTS_PATH" 644 || rc=1
-    system_ro
-    if system_is_rw; then
-        print_warning "/ is still mounted read-write. Reboot, or: mount -o remount,ro /"
+    # system_ro checks the remount itself and has already said what went wrong.
+    if ! system_ro; then
+        print_warning "Reboot to get / read-only again, or: mount -o remount,ro /"
     fi
     if [[ "$rc" -ne 0 ]]; then
         print_error "$HOSTS_PATH was not written as intended. The original is in $orig"

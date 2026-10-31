@@ -23,6 +23,26 @@
 #   FAKE_ADB_RESTORE_RC   enable intercept-only adb restore with this status
 #   FAKE_ADB_INTERCEPT_BLOCK_DD
 #                         1 = record block-target dd without writing its target
+#   FAKE_ADB_HOME_INTERCEPTOR
+#                         component that owns HOME; overrides $STATE/home_interceptor
+#   FAKE_ADB_WTPROV_IGNORES_CACHE
+#                         1 = wtprovision ignores its launcher cache and starts stock
+#   FAKE_ADB_INPUT_FAILS  1 = `input keyevent HOME` fails with an error and status 1
+#   FAKE_ADB_REBOOT_IGNORED
+#                         1 = `adb reboot` returns 0 and changes nothing
+#   FAKE_ADB_SYSTEM_CP_CORRUPTS
+#                         1 = a root `cp` or `cat X > Y` into /system drops the
+#                         last byte, so the copy's sha256 differs from its source
+#   FAKE_ADB_WTPROV_STALE 1 = a HOME press does not reread wtprovision's cache;
+#                         only a restart (kill -9 or reboot) does, as on the device
+#   FAKE_ADB_NO_UPTIME    1 = `cat /proc/uptime` fails with an error and status 1
+#   FAKE_ADB_REBOOT_FAILS 1 = `adb reboot` prints `error: closed`, exits 1 and
+#                         changes nothing
+#   FAKE_ADB_MOUNTS_UNREADABLE
+#                         1 = once / has been remounted read-only, `cat /proc/mounts`
+#                         prints `cat: /proc/mounts: Permission denied` and exits 1
+#
+# /proc/uptime reads $STATE/uptime (default 5000); a reboot resets it to 30.
 #
 # The contract-only knobs above are disabled by default. Unhandled commands keep
 # their legacy failures unless a scoped characterization explicitly enables one.
@@ -37,6 +57,15 @@ STATE="${FAKE_ADB_STATE:?FAKE_ADB_STATE not set}"
 SU_MODE="${FAKE_ADB_SU_MODE:-piped}"
 PROPAGATE_RC="${FAKE_ADB_PROPAGATE_RC:-0}"
 FREE_KB="${FAKE_ADB_FREE_KB:-1024}"
+# Whether root escalation works at all, as the kernel decides it. `su 0 ...`
+# into a root shell needs the client binary to be setuid-root AND the caller to
+# be exempt from NO_NEW_PRIVS. A shell caller is; a probe that sets the flag is
+# not. Modelled because the real device has been in exactly the failure the
+# second rule describes: /system/xbin/su at 0755 answers `setgid failed`.
+# unset: derive from the mode, which is what the old model always assumed.
+FAKE_SU_CAN_ELEVATE="${FAKE_SU_CAN_ELEVATE:-}"
+# Set when the caller has run privtest with NO_NEW_PRIVS, like an app process.
+FAKE_SU_NO_NEW_PRIVS="${FAKE_SU_NO_NEW_PRIVS:-0}"
 
 file_md5() {
     if [[ -x /sbin/md5 ]]; then
@@ -123,6 +152,15 @@ finish() {
 # ---------------------------------------------------------------------------
 # Remote command dispatch
 # ---------------------------------------------------------------------------
+# FAKE_ADB_SYSTEM_CP_CORRUPTS=1: a write into /system loses its last byte.
+system_cp_corrupt() {
+    local f="${STATE}$1" size
+    [[ "${FAKE_ADB_SYSTEM_CP_CORRUPTS:-0}" == "1" && "$1" == /system/* && -f "$f" ]] || return 0
+    size=$(wc -c < "$f" | tr -d ' ')
+    (( size > 0 )) || return 0
+    head -c $((size - 1)) "$f" > "$f.cut" && mv "$f.cut" "$f"
+}
+
 # Filesystem operations against the modelled device tree.
 #
 # The refusal is the point: /system starts read-only, and a write to it fails
@@ -154,6 +192,9 @@ fs_op() {
             [[ -e "${STATE}${src}" ]] || { echo "cp: '$src': No such file or directory" >&2; return 1; }
             mkdir -p "$(dirname "${STATE}${target}")"
             cp -R "${STATE}${src}" "${STATE}${target}"
+            # The .meta sidecar stands in for the manifest, so it travels with the APK.
+            [[ -f "${STATE}${src}.meta" ]] && cp "${STATE}${src}.meta" "${STATE}${target}.meta"
+            system_cp_corrupt "$target"
             ;;
     esac
     return 0
@@ -163,6 +204,36 @@ fs_op() {
 # Files under $STATE; absent files mean "this profile does not model it", so
 # the backup-only seeds keep working without carrying unlock state around.
 sget() { [[ -f "$STATE/$1" ]] && cat "$STATE/$1" || echo "$2"; }
+
+# The component that intercepts the firmware's home intent, or empty. The env
+# knob wins so a test can force one; otherwise the seeded state file decides.
+home_interceptor_comp() {
+    # Set-ness, not emptiness: an explicit empty value means "no interceptor".
+    if [[ -n "${FAKE_ADB_HOME_INTERCEPTOR+x}" ]]; then
+        [[ -n "$FAKE_ADB_HOME_INTERCEPTOR" ]] || return 0
+        printf '%s\n' "$FAKE_ADB_HOME_INTERCEPTOR"
+    elif [[ -f "$STATE/home_interceptor" ]]; then
+        tr -d '\r\n' < "$STATE/home_interceptor"; echo
+    fi
+}
+
+WTPROV_CACHE="/data/user_de/0/com.newlink.wtprovision/shared_prefs/com.newlink.wtprovision.xml"
+
+# wtprovision starts whatever its own cache names, as it does on the device.
+# FAKE_ADB_WTPROV_IGNORES_CACHE=1 models a firmware that ignores the cache: it
+# starts stock, so an earlier non-stock pick can never look like a cache hit.
+wtprov_apply_cache() {
+    if [[ "${FAKE_ADB_WTPROV_IGNORES_CACHE:-0}" == "1" ]]; then
+        echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
+        return 0
+    fi
+    local f="${STATE}${WTPROV_CACHE}" pkg act
+    [[ -f "$f" ]] || return 0
+    pkg=$(sed -n 's|.*<string name="home_pkg">\(.*\)</string>.*|\1|p' "$f" | head -1)
+    act=$(sed -n 's|.*<string name="home_activity">\(.*\)</string>.*|\1|p' "$f" | head -1)
+    [[ -n "$pkg" && -n "$act" ]] || return 0
+    echo "$pkg/$act" > "$STATE/home_activity"
+}
 setting_get() {
     [[ -f "$STATE/settings" ]] || { echo null; return; }
     local v
@@ -234,6 +305,33 @@ su_binary_ok() {
     esac
 }
 
+# Octal mode of a host file, setuid bits included, as toybox `stat -c %a`
+# prints it. BSD `stat -f %Lp` drops the setuid bit, so ask GNU stat first and
+# otherwise take the last four digits of BSD `%p`.
+host_mode() {
+    if stat -c%a "$1" >/dev/null 2>&1; then stat -c%a "$1"; return; fi
+    stat -f%p "$1" | awk '{ printf "%d\n", substr($0, length($0) - 3) }'
+}
+
+# Can this caller actually reach root by running `su <uid> <cmd>`? Two gates,
+# and the emulator used to model neither: the binary has to be setuid-root, and
+# the caller has to be exempt from NO_NEW_PRIVS. Without the first, the client
+# prints "setgid failed"; without the second, it cannot elevate an app.
+su_can_elevate() {
+    local path="$1" mode
+    if [[ -n "$FAKE_SU_CAN_ELEVATE" ]]; then
+        [[ "$FAKE_SU_CAN_ELEVATE" == "1" ]] || return 1
+    else
+        mode=$(host_mode "${STATE}${path}" 2>/dev/null)
+        [[ -n "$mode" && "${#mode}" -eq 4 && "${mode:0:1}" == "4" ]] || return 1
+    fi
+    su_binary_ok "$path" || return 1
+    # setuid is dead for a caller that carries the flag: the kernel runs the
+    # binary as the caller, so stock su fails to setgid, exactly as measured.
+    [[ "$FAKE_SU_NO_NEW_PRIVS" == "1" ]] && return 1
+    return 0
+}
+
 run_remote() {
     local cmd="$1"
 
@@ -244,6 +342,10 @@ run_remote() {
             ;;
 
         # --- properties -------------------------------------------------
+        "getprop sys.boot_completed")
+            # FAKE_ADB_NEVER_BOOTS=1: adb answers but boot never completes.
+            if [[ "${FAKE_ADB_NEVER_BOOTS:-0}" == "1" ]]; then echo 0; else echo 1; fi
+            return 0 ;;
         "getprop "*)
             local k="${cmd#getprop }"
             [[ -f "$STATE/props" ]] && awk -F= -v k="$k" '$1==k{print $2}' "$STATE/props"
@@ -290,11 +392,28 @@ run_remote() {
         "mount -o remount,rw /"|"mount -o rw,remount /")
             echo rw > "$STATE/mount_system"; return 0 ;;
         "mount -o remount,ro /"|"mount -o ro,remount /")
-            echo ro > "$STATE/mount_system"; return 0 ;;
+            echo ro > "$STATE/mount_system"
+            [[ "${FAKE_ADB_MOUNTS_UNREADABLE:-0}" == "1" ]] && : > "$STATE/mounts_unreadable"
+            return 0 ;;
         "mount -o remount,rw /system"|"mount -o rw,remount /system"|\
         "mount -o remount,ro /system"|"mount -o ro,remount /system")
             echo "mount: '/system' not in /proc/mounts" >&2; return 1 ;;
+        "cat /proc/uptime")
+            if [[ "${FAKE_ADB_NO_UPTIME:-0}" == "1" ]]; then
+                echo "cat: /proc/uptime: Permission denied" >&2; return 1
+            fi
+            # Whole seconds since boot. Each read moves it on by one, so a
+            # second reboot still makes it go backwards.
+            local up
+            up=$(sget uptime 5000)
+            echo $((up + 1)) > "$STATE/uptime"
+            echo "$up.00 $up.00"
+            return 0 ;;
         "cat /proc/mounts")
+            # Armed by a remount to ro, so system_rw can still verify its own step.
+            if [[ "${FAKE_ADB_MOUNTS_UNREADABLE:-0}" == "1" && -e "$STATE/mounts_unreadable" ]]; then
+                echo "cat: /proc/mounts: Permission denied" >&2; return 1
+            fi
             echo "/dev/root / ext4 $(sget mount_system ro),seclabel,relatime 0 0"
             echo "/dev/block/platform/soc/f9830000.emmc/by-name/userdata /data ext4 rw,seclabel,nosuid 0 0"
             return 0 ;;
@@ -395,23 +514,84 @@ run_remote() {
                 return 0
             fi
             proc_start "$p"; return 0 ;;
+        "pidof com.newlink.wtprovision")
+            # No pid file means wtprovision is not running.
+            [[ -s "$STATE/wtprov_pid" ]] || return 1
+            tr -d '\r\n' < "$STATE/wtprov_pid"; echo
+            return 0 ;;
         "pidof "*)
             local p="${cmd##* }"
             proc_running "$p" || return 1
             echo 4242; return 0 ;;
+        "kill -9 "*)
+            local kp="${cmd#kill -9 }" cur=""
+            [[ -f "$STATE/wtprov_pid" ]] && cur=$(tr -d '\r\n' < "$STATE/wtprov_pid")
+            if [[ -n "$cur" && "$kp" == "$cur" ]]; then
+                # The system restarts wtprovision under a new pid, and it
+                # re-reads its cache on the way up.
+                echo $(( cur + 1 )) > "$STATE/wtprov_pid"
+                wtprov_apply_cache
+                return 0
+            fi
+            echo "kill: $kp: No such process" >&2
+            return 1 ;;
+        "input keyevent HOME")
+            if [[ "${FAKE_ADB_INPUT_FAILS:-0}" == "1" ]]; then
+                echo "Error: Injecting to another application requires INJECT_EVENTS permission"
+                return 1
+            fi
+            [[ "${FAKE_ADB_WTPROV_STALE:-0}" == "1" ]] && return 0
+            [[ -n "$(home_interceptor_comp)" ]] && wtprov_apply_cache
+            return 0 ;;
+        "dumpsys window")
+            local fc; fc=$(sget home_activity "com.newlink.hisilauncher/.WizardAciticity")
+            echo "  mCurrentFocus=Window{1a2b3c u0 $fc}"
+            return 0 ;;
+        # Write through a redirect, the way a root-owned file has to be
+        # replaced here: keeps inode, mode and SELinux context.
+        "sh -c \"cat "*" > "*"\""|"sh -c 'cat "*" > "*"'")
+            local body="${cmd#sh -c }" src dst
+            body="${body:1:${#body}-2}"
+            body="${body#cat }"
+            src="${body%% > *}"; dst="${body#* > }"
+            if [[ "$AS_ROOT" != "1" ]]; then
+                echo "sh: can't create $dst: Permission denied" >&2; return 1
+            fi
+            if [[ "$dst" == /system/* && "$(sget mount_system ro)" == "ro" ]]; then
+                echo "sh: can't create $dst: Read-only file system" >&2; return 1
+            fi
+            mkdir -p "$(dirname "${STATE}${dst}")"
+            # The shell truncates the target before cat runs, so a missing
+            # source still empties it, as on the device.
+            if [[ -d "${STATE}${dst}" ]]; then
+                echo "sh: can't create $dst: Is a directory" >&2; return 1
+            fi
+            if ! { : > "${STATE}${dst}"; } 2>/dev/null; then
+                echo "sh: can't create $dst: Permission denied" >&2; return 1
+            fi
+            if [[ ! -f "${STATE}${src}" ]]; then
+                echo "cat: $src: No such file or directory" >&2; return 1
+            fi
+            cat "${STATE}${src}" > "${STATE}${dst}" || return 1
+            # The .meta sidecar stands in for the manifest, as with cp.
+            [[ -f "${STATE}${src}.meta" ]] && cp "${STATE}${src}.meta" "${STATE}${dst}.meta"
+            system_cp_corrupt "$dst"
+            return 0 ;;
 
         # --- home activity ----------------------------------------------
         "cmd package query-activities"*SETUP_WIZARD*)
             # The firmware's home intent carries CATEGORY_SETUP_WIZARD, so
             # whatever declares it owns HOME regardless of the preferred
-            # launcher. Off by default; a profile opts in to model the lock.
+            # launcher. The seed sets wtprovision as the interceptor; a test
+            # clears $STATE/home_interceptor to model a firmware without one.
             #
             # A disabled component registers nothing, so an interceptor that has
             # been disabled answers this query with silence -- which is the whole
             # brick: the intent ends up with no candidate at all.
-            if [[ -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" ]] \
-               && ! grep -qx "$FAKE_ADB_HOME_INTERCEPTOR" "$STATE/components_disabled" 2>/dev/null; then
-                echo "    $FAKE_ADB_HOME_INTERCEPTOR"
+            local icept; icept=$(home_interceptor_comp)
+            if [[ -n "$icept" ]] \
+               && ! grep -qx "$icept" "$STATE/components_disabled" 2>/dev/null; then
+                echo "    $icept"
             fi
             return 0 ;;
         "cmd package query-activities"*)
@@ -437,11 +617,6 @@ run_remote() {
             # and it does not refresh the recorded candidate set. On hardware the
             # stale record was byte-identical before and after the call. So the
             # write "succeeds" and still loses the vendor intent at boot.
-            #
-            # A preference that does win is written by the system's own chooser
-            # (press HOME, pick a launcher). Tests simulate that by touching
-            # home_pref_strong; there is no CLI on API 28 that produces one.
-            rm -f "$STATE/home_pref_strong" 2>/dev/null || true
             echo Success; return 0 ;;
         # API 28 HAS NO get-home-activity. Measured on the device 2026-07-29:
         # it answers exactly this, and set-home-activity works fine. The
@@ -488,13 +663,20 @@ run_remote() {
             # File-state aware, so a hybrid artifact that cannot actually exec
             # stock su through itself is caught here instead of only being
             # asserted by file content in the test. See su_binary_ok.
+            # Also mode-aware: a 0755 client answers "setgid failed" the way the
+            # real device does, so an install that drops the setuid bit cannot
+            # pass this.
             local rest="${cmd#su }"
             local uid="${rest%% *}"
-            if su_binary_ok "/system/xbin/su"; then
+            if su_can_elevate "/system/xbin/su"; then
                 echo "uid=${uid}(root) gid=${uid}(root)"
                 return 0
             fi
-            echo "su: not a valid binary" >&2
+            echo "su: setgid failed: Operation not permitted" >&2
+            return 1 ;;
+        "su 0 sh -c "*)
+            # Reached only when unwrap_su found that su cannot elevate.
+            echo "su: setgid failed: Operation not permitted" >&2
             return 1 ;;
         "/system/xbin/su_new "*" id")
             # Same rule, for the staged-but-not-yet-promoted hybrid: this is
@@ -502,16 +684,23 @@ run_remote() {
             # the real /system/xbin/su.
             local rest="${cmd#/system/xbin/su_new }"
             local uid="${rest%% *}"
-            if su_binary_ok "/system/xbin/su_new"; then
+            if su_can_elevate "/system/xbin/su_new"; then
                 echo "uid=${uid}(root) gid=${uid}(root)"
                 return 0
             fi
-            echo "su_new: not a valid binary" >&2
+            echo "su_new: setgid failed: Operation not permitted" >&2
             return 1 ;;
 
         # --- filesystem under /system ------------------------------------
         "cp "*|"mkdir "*|"chmod "*|"chown "*|"rm -rf "*)
             fs_op "$cmd"; return $? ;;
+
+        # --- mode and ownership, which a checksum cannot prove -----------
+        "stat -c %a "*)
+            local sp="${cmd#stat -c %a }"
+            [[ -e "${STATE}${sp}" ]] || { echo "stat: '$sp': No such file or directory" >&2; return 1; }
+            host_mode "${STATE}${sp}"
+            return 0 ;;
         esac
 
     case "$cmd" in
@@ -791,6 +980,13 @@ unwrap_su() {
         return 0
     fi
 
+    # su 0 sh -c "CMD": the form used to write a root-owned file in place.
+    # Only unwrapped when su can elevate, like `su 0 id`.
+    if [[ "$shell_cmd" == "su 0 sh -c "* ]] && su_can_elevate "/system/xbin/su"; then
+        printf '%s' "${shell_cmd#su 0 }"
+        return 0
+    fi
+
     # echo 'CMD' | su   (also: { echo 'CMD'; } | su)
     if [[ "$shell_cmd" == *"| su"* && "$shell_cmd" == "echo '"* ]]; then
         [[ "$SU_MODE" == "piped" ]] || return 1
@@ -814,6 +1010,15 @@ case "$subcmd" in
         [[ -r "$STATE/control-seed" ]] || { echo 'fake-adb: control seed missing' >&2; exit 2; }
         printf 'pt-control:'
         tr '0123456789abcdef' 'fedcba9876543210' < "$STATE/control-seed"
+        exit 0
+        ;;
+
+    get-state)
+        # Still "device" under FAKE_ADB_NEVER_BOOTS, so a wait reaches the boot check.
+        if [[ "${FAKE_ADB_NO_DEVICE:-0}" == "1" ]]; then
+            echo "error: no devices/emulators found" >&2; exit 1
+        fi
+        echo device
         exit 0
         ;;
 
@@ -841,6 +1046,7 @@ case "$subcmd" in
             exit "$push_rc"
         fi
         cp "$push_source" "${STATE}${push_target}"
+        [[ -f "$push_source.meta" ]] && cp "$push_source.meta" "${STATE}${push_target}.meta"
         if [[ -n "${FAKE_ADB_CORRUPT_PUSH_TARGET:-}" && "$push_target" == "$FAKE_ADB_CORRUPT_PUSH_TARGET" \
               && -f "${STATE}${push_target}" ]]; then
             printf 'corrupt\n' >> "${STATE}${push_target}"
@@ -912,6 +1118,11 @@ case "$subcmd" in
         ;;
 
     reboot)
+        # The old adbd answering after `adb reboot` without a restart, in miniature.
+        [[ "${FAKE_ADB_REBOOT_IGNORED:-0}" == "1" ]] && exit 0
+        if [[ "${FAKE_ADB_REBOOT_FAILS:-0}" == "1" ]]; then
+            echo "error: closed" >&2; exit 1
+        fi
         # CORRECTED 2026-07-30 against hardware. The previous model here was a
         # labelled hypothesis: that the stock launcher re-claims HOME on boot
         # while it is enabled, which is why Nova sat unused since July. It was
@@ -929,14 +1140,33 @@ case "$subcmd" in
         # interceptor -- stale, so it never applied. Not because anything
         # re-claimed anything.
         #
-        # So: a preference survives a reboot. It only fails to take effect when
-        # an interceptor owns the vendor intent and the preference does not
-        # cover it (see set-home-activity above).
-        if [[ -f "$STATE/home_activity" && -n "${FAKE_ADB_HOME_INTERCEPTOR:-}" \
-              && ! -f "$STATE/home_pref_strong" ]]; then
-            echo "com.newlink.hisilauncher/.WizardAciticity" > "$STATE/home_activity"
+        # So: a preference survives a reboot only when no interceptor owns the
+        # vendor intent. With one, the screen is whatever wtprovision's own
+        # cache names, and a firmware that ignores the cache starts stock.
+        if [[ -f "$STATE/home_activity" && -n "$(home_interceptor_comp)" ]]; then
+            wtprov_apply_cache
+        fi
+        if [[ -f "$STATE/props" ]]; then
+            awk 'index($0, "zyzys.install.whitelist=") != 1' "$STATE/props" > "$STATE/props.new"
+            if [[ -f "$STATE/system/build.prop" ]]; then
+                awk 'index($0, "zyzys.install.whitelist=") == 1 { line=$0 }
+                     END { if (line != "") print line }' "$STATE/system/build.prop" >> "$STATE/props.new"
+            fi
+            mv "$STATE/props.new" "$STATE/props"
         fi
         [[ -f "$STATE/reboots" ]] && echo $(( $(cat "$STATE/reboots") + 1 )) > "$STATE/reboots"
+        # A unit that never comes back keeps its old uptime.
+        [[ "${FAKE_ADB_NEVER_BOOTS:-0}" == "1" ]] || echo 30 > "$STATE/uptime"
+        # The package manager scans /system/app on boot. Only APKs whose identity
+        # is known (a .meta sidecar or a known name) register.
+        for sys_apk in "$STATE"/system/app/*/*.apk; do
+            [[ -f "$sys_apk" ]] || continue
+            sys_pkg=$(apk_meta "$sys_apk" pkg)
+            [[ -n "$sys_pkg" ]] || continue
+            pkg_known "$sys_pkg" && continue
+            echo "${sys_apk#$STATE}=$sys_pkg" >> "$STATE/packages"
+            apk_meta "$sys_apk" home >> "$STATE/home_activities"
+        done
         # Nothing survives a restart except what the system brings back up: the
         # home package. Without this, a launcher proven alive before a reboot
         # would still look alive after one, and the gate would never be tested.
