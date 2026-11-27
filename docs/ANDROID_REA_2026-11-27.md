@@ -340,6 +340,12 @@ REA also identifies the caller upstream of `TempService`: `WTProvision.MainActiv
 | Sensors and thermal protection | ADB: the standard Android sensor service reported no sensors. REA: WTProvision subscribes to vendor sensor events and handles thermistor errors separately from overheat warnings. | An empty framework inventory does not rule out board sensors. No vendor sample, fan response or thermal shutdown was observed in this audit. |
 | Vendor services | REA: manifest inventory above; ADB: named post-boot processes. | Does not map every service to its driver or establish which code ran at boot. |
 
+### How to narrow the remaining gaps without changing the projector
+
+- **Boot versus HOME selection:** if an existing boot log is still available, look for a launch request naming WTProvision and a subsequent request naming the chosen HOME component in the same boot. A resolver query lists candidates; two running processes do not establish which launched the other. If the log has rolled over, leave the chronology unknown rather than rebooting to recreate it.
+- **Automatic focus:** once read-only ADB is available, query the installed user-0 activities for `com.zhiying.AUTO_FOCUS` without starting one. Include packages outside the two vendor namespaces. A match would identify a candidate handler, not a camera, a calibration result or lens travel.
+- **Audio:** a system audio-policy route, an open PCM stream and audible output are different observations. If playback is already underway, compare the active audio-policy output with the active ALSA substream in the same interval. Do not start playback for this check; matching activity would narrow the route but would not identify the amplifier wiring.
+
 ## Android text input
 
 ADB reported `com.hisilicon.android.inputmethod.remote/.RemoteIME` both as the selected default input method and in the enabled IME list. REA confirmed the matching service in the stock HiPinyinIME manifest: it advertises `android.view.InputMethod` and requires `BIND_INPUT_METHOD`. The APK separates text input from Pinyin decoding: `PinyinDecoderService` advertises `com.android.inputmethod.pinyin.Decoder_Service`, not `android.view.InputMethod`. Its `SettingsActivity` declares `MAIN` without `LAUNCHER`; the IME metadata names the settings screen, but the manifest does not advertise it as an app tile. This identifies the vendor component Android selects for text fields, not the driver that receives physical remote buttons. No keyboard was opened and no input text was read or entered.
