@@ -16,7 +16,7 @@ is how the device stopped booting once (see [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md)
 |---|---|---|---|---|
 | `com.newlink.wtprovision` | Home dispatcher, persistent, declares SETUP_WIZARD | yes | INSTALL_PACKAGES, RECOVERY, SET_PREFERRED_APPLICATIONS, WRITE_SECURE_SETTINGS | **do not touch**, boot depends on it |
 | `com.newlink.hisilauncher` | Stock launcher (RGTPLauncher), persistent | yes | FORCE_STOP_PACKAGES, location | **do not touch**, it is the fallback home |
-| `com.zhiying.powerservice` | Power key and standby handling | no (boot receiver) | SYSTEM_ALERT_WINDOW | **do not touch**, power path |
+| `com.zhiying.powerservice` | Power-related screens | no (October snapshot) | SYSTEM_ALERT_WINDOW | **leave unchanged**. The [November REA audit](ANDROID_REA_2026-11-27.md) found three activities and no manifest receiver in the inspected APK. The physical POWER key route remains unverified. |
 | `com.hisilicon.tv.service` | HiSilicon TV platform service, persistent | yes | none notable | **do not touch**, platform |
 | `com.hisilicon.rmservice` | Resource manager, persistent | yes | FORCE_STOP_PACKAGES | **do not touch**, platform |
 | `com.hisilicon.tvinput.external` | HDMI, VGA, CVBS, YPbPr input services | yes | WRITE_SECURE_SETTINGS | **keep**, every external input goes through it |
