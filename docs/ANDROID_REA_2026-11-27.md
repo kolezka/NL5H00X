@@ -39,6 +39,12 @@ The main MMC user block device reports type `MMC`, product name `UEM`, and 14,94
 
 On-device init configuration connects these identifiers to startup. `/init.rc` imports `/init.${ro.hardware}.rc`, `/vendor/etc/init/hw/init.${ro.hardware}.rc` and `/init.${ro.zygote}.rc`. Both resolved `bigfish` files exist. The resolved `/init.zygote32.rc` declares `zygote` as `/system/bin/app_process -Xzygote /system/bin --zygote --start-system-server`. In the post-boot snapshot init reported zygote running and Android reported `sys.boot_completed=1`. This identifies the configured path into the Android framework, not a replay of every init action or proof that every service was ready.
 
+## Board services and radio drivers
+
+The root `bigfish` init configuration requests `bootvideo` at `init`. At `post-fs` it requests `hwsysmanager-1-0`, `vendor.hiavplayer`, `hwandroidmediahal-2-0`, `hwtvmw-1-0` and `hidl_memory`. All five reported `running` after boot. `bootvideo` reported `stopped`; that state does not show whether a boot video played. The vendor configuration mounts the board fstab at `fs` and requests `vendor.ir_user` and `vendor.virtualkeypad` at `boot`. Both reported `running`. This ties two input services to board startup, not a particular remote button to either service.
+
+The vendor boot action lists several alternative Bluetooth modules; the file alone does not identify the fitted radio. In the running kernel, `wlan0` and `p2p0` both point to the same USB parent, with vendor/product ID `a69c:8801`. Two interfaces on that device bind to `aic_btusb` and the third binds to `aic8800_fdrv`. This identifies the stock composite radio's driver pair without scanning or pairing. It does not identify the exact silicon revision or verify radio performance. `eth0`, by contrast, points to the `hieth` platform driver.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
@@ -51,4 +57,4 @@ On-device init configuration connects these identifiers to startup. `/init.rc` i
 | Network | ADB: sysfs listed `eth0`, `lo`, `p2p0` and `wlan0`; init reported `wificond` running. | Interface names do not show the physical chipset, active carrier or Wi-Fi association. No scan was performed. |
 | Vendor services | REA: manifest inventory above; ADB: named post-boot processes. | Does not map every service to its driver or establish which code ran at boot. |
 
-The next passive checks are the audio policy's declared routes and kernel driver links for the network and input devices. Those can distinguish dependencies without playing sound, injecting input or changing connectivity.
+The next passive checks are the audio policy's declared routes and kernel driver links for the input devices. Those can distinguish dependencies without playing sound, injecting input or changing connectivity.
