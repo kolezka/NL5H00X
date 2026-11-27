@@ -57,4 +57,8 @@ The vendor boot action lists several alternative Bluetooth modules; the file alo
 | Network | ADB: sysfs listed `eth0`, `lo`, `p2p0` and `wlan0`; init reported `wificond` running. | Interface names do not show the physical chipset, active carrier or Wi-Fi association. No scan was performed. |
 | Vendor services | REA: manifest inventory above; ADB: named post-boot processes. | Does not map every service to its driver or establish which code ran at boot. |
 
-The next passive checks are the audio policy's declared routes and kernel driver links for the input devices. Those can distinguish dependencies without playing sound, injecting input or changing connectivity.
+## Android audio policy and input endpoints
+
+The vendor audio policy includes a primary HAL 2.0 module. It declares `Speaker` as the default output and routes `primary output` (48 kHz, stereo, 16-bit PCM) to that sink. The live `media.audio_policy` dump also lists the primary module, `Sink: Speaker` and `AUDIO_DEVICE_OUT_SPEAKER`. This confirms Android's logical route, not the connection from the HAL to ALSA or the amplifier. Both `audio.primary.bigfish.so` and `audio.primary.default.so` are present under `/vendor/lib/hw`; filenames do not identify which one was loaded. No playback or capture test was performed.
+
+The four input event nodes in this snapshot were `Hi keyboard`, `Hi mouse`, `qwerty` and `Hi Keypad`. All resolve under `/sys/devices/virtual/input`, not to a physical receiver bus. Android can map the virtual key devices to layouts, but these sysfs paths alone do not identify the event producer. A useful next static check is how the stock IR service translates a received code into an input event.
