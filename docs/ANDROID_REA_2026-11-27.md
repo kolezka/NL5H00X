@@ -55,6 +55,12 @@ Kernel sysfs identified `fb0` as `hifb`, with a virtual size of 1920 by 3240 at 
 
 The post-boot HAL inventory lists the default `IOmx` and `IOmxStore` instances of `android.hardware.media.omx@1.0`. The vendor codec XML, parsed as XML to exclude commented examples, declares HiSilicon AVC, HEVC and VP9 decoder components with a maximum size of 1920 by 1088; the MPEG-2, MPEG-4 and VP8 entries specify 1920 by 1080. The limits describe decoder inputs, not display modes. The same file includes separate Google audio and video codec lists, so its direct entries alone are not an inventory of all codecs available to apps. A registered OMX service plus a declared codec does not prove a player selected it or sustained a particular resolution, profile or frame rate. No media was played.
 
+## Android memory policy
+
+The stock build sets `ro.config.low_ram=true`. Its ART properties specify a 5 MiB starting heap, a 128 MiB growth limit and a 256 MiB heap size. These are managed-heap settings, not limits on a process's total resident memory. Init reported the low-memory killer daemon (`lmkd`) running; that alone does not show it killed any process.
+
+The kernel reported 1,005,264 KiB of usable RAM and 319,088 KiB of swap. `/proc/swaps` identified the active backend as `/dev/block/zram0`; sysfs identified LZ4 as the selected compression algorithm. This provides about 312 MiB of logical swap backed by compressed RAM, not additional physical RAM or evidence of paging to flash. No memory pressure was induced.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
