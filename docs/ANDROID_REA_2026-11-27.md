@@ -31,6 +31,14 @@ NewLinkService and HiTvSetting declare `BOOT_COMPLETED` receivers. The latter de
 
 Android 9 (API 28), `PPR1.180610.011`, incremental `eng.hudson.20220706.192233`, `userdebug/dev-keys`. The root and vendor filesystems were mounted read-only as ext4. By-name links mapped recovery to p5, logo to p8, boot to p9, misc to p15, system to p20, vendor to p21, cache to p24 and userdata to p25. Reported filesystem capacities and use: `/` 1.7 G (88%), `/vendor` 291 M (16%), `/data` 4.4 G (38%), `/cache` 93 M (1%). These are filesystem measurements, not raw partition sizes.
 
+## Board identity and Android startup configuration
+
+The running device tree reports model `Hi3751` and compatible `hisilicon,hi3751`; `/proc/cpuinfo` reports hardware `hi3751`. Android uses the board name `bigfish` for `ro.board.platform`, `ro.hardware` and `ro.boot.hardware`. These are complementary identifiers, not different devices. The kernel showed CPUs `0-3` online, each reporting implementer `0x41` and part `0xd03` (Arm Cortex-A53). That core identity does not imply a 64-bit Android build: the running kernel reports `armv7l` and Android selects `zygote32`. These software observations do not identify a finer chip stepping or package marking.
+
+The main MMC user block device reports type `MMC`, product name `UEM`, and 14,942,208 Linux 512-byte sectors: 7,650,410,496 bytes (7.125 GiB). This is the capacity exposed by `mmcblk0`, not free space, the size of userdata, or a physical NAND inventory.
+
+On-device init configuration connects these identifiers to startup. `/init.rc` imports `/init.${ro.hardware}.rc`, `/vendor/etc/init/hw/init.${ro.hardware}.rc` and `/init.${ro.zygote}.rc`. Both resolved `bigfish` files exist. The resolved `/init.zygote32.rc` declares `zygote` as `/system/bin/app_process -Xzygote /system/bin --zygote --start-system-server`. In the post-boot snapshot init reported zygote running and Android reported `sys.boot_completed=1`. This identifies the configured path into the Android framework, not a replay of every init action or proof that every service was ready.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
