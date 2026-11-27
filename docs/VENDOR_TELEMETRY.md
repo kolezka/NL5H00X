@@ -1,8 +1,9 @@
 # Vendor telemetry, OTA and the update question
 
-**Summary:** the projector reports to the manufacturer on every boot and every
-network change. `com.newlink.service` posts the WiFi MAC, a city derived from a
-geo-IP lookup, customer and batch identifiers and a usage counter to
+**Summary:** the boot and network-change code can start a reporting service;
+starting the service is not evidence of an upload on every event.
+Depending on connectivity and activation state, `com.newlink.service` can post
+the Wi-Fi MAC, a city derived from a geo-IP lookup and vendor metadata to
 `www.newlinksz.com`, all over plain HTTP. There is no silent OTA path: the only
 firmware installer is a user-driven screen in the vendor settings app, and the
 vendor's update package returns 404 anyway. Android itself cannot be updated on
@@ -27,8 +28,18 @@ Trigger chain:
 
 1. `BootCompleteReceiver` starts `BootService`.
 2. `BootService` waits 60 s, then starts `MyServices`.
-3. `NetWorkChangeReceiver` starts `MyServices` again on every connectivity
-   change.
+3. When Android calls `NetWorkChangeReceiver.onReceive`, the method logs the
+   action and requests `MyServices` without testing connectivity. The manifest
+   declaration has no recorded action. `BootService` declares a field of type
+   `NetWorkChangeReceiver`, but neither its constructor nor `onCreate()`
+   constructs or registers that receiver. Its `onDestroy()` only calls the
+   superclass. REA found no incoming reference to the receiver constructor in
+   this APK. As a control, the same constructor lookup found `BootService$3`
+   called by `BootService.onStartCommand` at DEX code-unit offset 43. This
+   narrows the direct construction path; it does not rule out instantiation
+   by the Android framework or reflection, or establish live event delivery.
+   `MyServices` checks connectivity before preparing a report; see the
+   [boot reporting trace](ANDROID_REA_2026-11-27.md#data-prepared-by-the-boot-reporting-service-rea).
 
 `MyServices` builds one JSON object (class `com.newlink.service.Entity`) and
 sends it to three endpoints with OkHttp:

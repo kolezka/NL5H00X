@@ -16,7 +16,7 @@ is how the device stopped booting once (see [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md)
 |---|---|---|---|---|
 | `com.newlink.wtprovision` | Home dispatcher, persistent, declares SETUP_WIZARD | yes | INSTALL_PACKAGES, RECOVERY, SET_PREFERRED_APPLICATIONS, WRITE_SECURE_SETTINGS | **do not touch**, boot depends on it |
 | `com.newlink.hisilauncher` | Stock launcher (RGTPLauncher), persistent | yes | FORCE_STOP_PACKAGES, location | **do not touch**, it is the fallback home |
-| `com.zhiying.powerservice` | Power key and standby handling | no (boot receiver) | SYSTEM_ALERT_WINDOW | **do not touch**, power path |
+| `com.zhiying.powerservice` | Power-related screens | no (October snapshot) | SYSTEM_ALERT_WINDOW | **leave unchanged**. The [November REA audit](ANDROID_REA_2026-11-27.md) found three activities and no manifest receiver in the inspected APK. The physical POWER key route remains unverified. |
 | `com.hisilicon.tv.service` | HiSilicon TV platform service, persistent | yes | none notable | **do not touch**, platform |
 | `com.hisilicon.rmservice` | Resource manager, persistent | yes | FORCE_STOP_PACKAGES | **do not touch**, platform |
 | `com.hisilicon.tvinput.external` | HDMI, VGA, CVBS, YPbPr input services | yes | WRITE_SECURE_SETTINGS | **keep**, every external input goes through it |
@@ -28,8 +28,8 @@ is how the device stopped booting once (see [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md)
 | `com.zhiying.sourceui` | Source picker UI | no | RECOVERY | keep |
 | `com.newlink.nlsource` | Source player stub | no | none | keep, referenced by the launcher and sourceui |
 | `com.hisilicon.tvui` | TV UI, 13 exported activities | no | INTERACT_ACROSS_USERS | keep, referenced by launcher and sourceui |
-| `com.newlink.cast` | Screen cast (HBCastNew) | no | INTERNET, SYSTEM_ALERT_WINDOW | optional, nothing depends on it |
-| `com.hisilicon.miracast` | Miracast sink | no | none | optional, launcher references it |
+| `com.newlink.cast` | Screen cast (HBCastNew) | no | INTERNET, SYSTEM_ALERT_WINDOW | target of the stock launcher's iOS Cast tile (`MainActivityNew.onClick`); not the Miracast target |
+| `com.hisilicon.miracast` | Wireless display receiver app | no | Requests CONFIGURE_WIFI_DISPLAY, ACCESS_WIFI_STATE and CHANGE_WIFI_STATE | Target of the Miracast tile on the HiSilicon path. The [November audit](ANDROID_REA_2026-11-27.md) resolved its TV launcher entry without starting a session. |
 | `com.newlink.filemanager` | File manager | no | PACKAGE_USAGE_STATS | optional, launcher and sourceui reference it |
 | `com.hisilicon.android.videoplayer` | Video player, priv-app | no | INTERNET | optional |
 | `com.hisilicon.android.music` | Music player | no | none | optional |
@@ -37,7 +37,7 @@ is how the device stopped booting once (see [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md)
 | `com.newlink.isuperred.ijkplayer` | IJK video player | no | INTERNET | optional |
 | `com.hisilicon.tv.menu` | Factory menu | no | none | optional, factory only |
 
-"Optional" means no other vendor package depends on it and it is not running.
+"Optional" was the October assessment, not a dependency test. A package absent from the process snapshot can still be needed when a launcher tile is selected.
 It does not mean disabling it is tested. Any disable is a device change: one
 package at a time, `pm disable-user`, reboot, confirm boot and HOME, with
 `pm enable` as the revert.
