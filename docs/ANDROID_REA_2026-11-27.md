@@ -109,6 +109,8 @@ Android's volume daemon (`vold`) was running, and StorageManager reported both `
 
 The board init file invokes `mount_all /vendor/etc/fstab.${ro.hardware}`. In the resolved `fstab.bigfish`, the `/data` entry requests `wait,check,quota,reservedsize=104857600` (100 MiB reserved); `/cache` requests `wait`. The live mount table confirms both are writable ext4 using `data=ordered`. The 100 MiB figure is a configuration request, not a measurement of current free space. Mount flags alone do not establish that a filesystem check ran at the last boot or that a quota was enforced for a particular app.
 
+The [October property snapshot](DEVICE_AUDIT_2026-10-24.md#L53) recorded `ro.crypto.state=unsupported`. This is Android's reported encryption state at that date, not a November measurement or an inspection of raw userdata. Keep it separate from `directBootAware`: that manifest attribute concerns component eligibility before user unlock, not whether a particular file on p25 is encrypted.
+
 ## Board identity and Android startup configuration
 
 The running device tree reports model `Hi3751` and compatible `hisilicon,hi3751`; `/proc/cpuinfo` reports hardware `hi3751`. Android uses the board name `bigfish` for `ro.board.platform`, `ro.hardware` and `ro.boot.hardware`. These are complementary identifiers, not different devices. The kernel showed CPUs `0-3` online, each reporting implementer `0x41` and part `0xd03` (Arm Cortex-A53). That core identity does not imply a 64-bit Android build: the running kernel reports `armv7l` and Android selects `zygote32`. These software observations do not identify a finer chip stepping or package marking.
