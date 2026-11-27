@@ -10,6 +10,10 @@ Scope: HOME dispatch, boot-related declarations and running processes, Newlink a
 
 WTProvision and hisilauncher processes were present after boot. The sampled 4000 log entries did not identify a HOME handoff. Neither process presence nor resolver order establishes the pair used at the last boot.
 
+### Setup completion is separate from HOME launch
+
+On the default first-setup branch in `MainActivity.onCreate`, WTProvision calls `setProvision()` before `doSelectSourceId(-1)`. REA shows that the helper requests three settings writes: `device_provisioned` in Global and the user and TV setup-complete flags in Secure, all set to 1. It then sets `persist.init.enable` to `false` and `persist.sys.country` to `cn`. It does not wait for a launcher result. A setup-complete flag therefore cannot establish that the selected HOME activity started or displayed a frame. Other wizard branches can take a different path; no settings were changed to test this sequence.
+
 ## Artifact provenance
 
 The shipped WTProvision APK (SHA-256 `0260af1f4824d4e1744d99c1e951543ab73a6afd72087a5ea6facd4512b0a430`) supplied the manifest, not the activity bodies. Its companion ARM VDEX 019 (`8ef44fe7f339c381bb029dfda307f9a065be8a4b7d64ae3f8b09757601c8e336`) supplied CompactDex. `vdexExtractor` and `compact-to-dex` produced standard DEX 039 with 6308 class definitions. REA inspected the derived APK (`8c2c5f0d3631b5d225c268b1d8111e6156756d342477753bd802cf0e72b50a4f`); it was not installed. RGTPLauncher was inspected directly (`83396f9340839143c89a662e0cebd9558b5a585e26a7b6f5dc7f4096547d3a4b`).
