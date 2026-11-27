@@ -61,6 +61,8 @@ The root `bigfish` init configuration requests `bootvideo` at `init`. At `post-f
 
 The vendor boot action lists several alternative Bluetooth modules; the file alone does not identify the fitted radio. In the running kernel, `wlan0` and `p2p0` both point to the same USB parent, with vendor/product ID `a69c:8801`. Two interfaces on that device bind to `aic_btusb` and the third binds to `aic8800_fdrv`. This identifies the stock composite radio's driver pair without scanning or pairing. It does not identify the exact silicon revision or verify radio performance. `eth0`, by contrast, points to the `hieth` platform driver.
 
+Above the kernel driver, PackageManager advertises Bluetooth and Bluetooth LE. The Android Bluetooth manager reported the adapter enabled and `ON` in this snapshot. The vendor A2DP audio policy declares output routes for Bluetooth headphones and speakers, plus an input route. These are logical Android audio paths, not evidence of a connected accessory, an active stream, or a working end-to-end receiver mode. No discovery or pairing was requested.
+
 ## Display mode, UI density and framebuffer
 
 Android's DisplayManager reported the built-in display ON, with one advertised mode: 1920 by 1080 at approximately 60 Hz. WindowManager independently reported a base size of 1920 by 1080 and a density override of 320 dpi over a base of 240 dpi. The override changes the scale used for Android layouts, not the pixel dimensions of the display mode. Neither density value measures the projected image on a wall.
