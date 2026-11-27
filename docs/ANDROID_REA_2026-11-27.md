@@ -51,6 +51,10 @@ For a concrete consumer, the live package record for `com.newlink.wtprovision` l
 
 REA's complete decoded manifest for the stock external TV input APK shows a different contract: minimum and target API 28, Leanback and Live TV required, touchscreen optional. Its HDMI, YPbPr, CVBS and VGA services advertise the Android `TvInputService` action. The requirements describe the software environment expected by this APK, not a physical inventory of inputs.
 
+## Embedded web content
+
+PackageManager advertises `android.software.webview`. Android's WebView Update Service identified `com.android.webview` version `66.0.3359.158` as both current and preferred, installed and enabled for all users in the snapshot. It reported multiprocess mode disabled. For an app embedding a standard Android WebView, this provider version is a more precise compatibility baseline than Android API 28 alone. It does not identify a standalone browser, an app's bundled engine or the most recent available update. No page was loaded and no rendering or update test was performed.
+
 ## Board services and radio drivers
 
 The root `bigfish` init configuration requests `bootvideo` at `init`. At `post-fs` it requests `hwsysmanager-1-0`, `vendor.hiavplayer`, `hwandroidmediahal-2-0`, `hwtvmw-1-0` and `hidl_memory`. All five reported `running` after boot. `bootvideo` reported `stopped`; that state does not show whether a boot video played. The vendor configuration mounts the board fstab at `fs` and requests `vendor.ir_user` and `vendor.virtualkeypad` at `boot`. Both reported `running`. This ties two input services to board startup, not a particular remote button to either service.
