@@ -366,6 +366,8 @@ The keyboard package declares `persistent=true` and `directBootAware=true` at ap
 
 Offline decoding of the compiled `@xml/method` resource showed two keyboard subtypes: `en_US` and `zh_CN`. Both declare `isAsciiCapable=true`. The settings entry points to `com.hisilicon.android.inputmethod.remote.SettingsActivity`. The selected IME in the ADB snapshot identifies the service, not which subtype was active or the language of the system interface.
 
+App resources have a separate language inventory. In the 19 digest-matched vendor APKs, all 19 compiled resource tables contain both an unqualified language configuration and an explicit `zh` configuration. Ten also contain `pl`: Miracast, HiTvSetting, Cast, the Newlink file manager, HiSetting, the stock launcher, IjkPlayer, NLSourcePlayer, NewLinkService and WTProvision. A qualifier can apply to a library resource rather than the app's own menus. Its presence does not establish Polish translation coverage, the selected system locale or keyboard support.
+
 ## Android audio policy and input endpoints
 
 The vendor audio policy includes a primary HAL 2.0 module. It declares `Speaker` as the default output and routes `primary output` (48 kHz, stereo, 16-bit PCM) to that sink. The live `media.audio_policy` dump also lists the primary module, `Sink: Speaker` and `AUDIO_DEVICE_OUT_SPEAKER`. This confirms Android's logical route, not the connection from the HAL to ALSA or the amplifier. Both `audio.primary.bigfish.so` and `audio.primary.default.so` are present under `/vendor/lib/hw`; filenames do not identify which one was loaded. No playback or capture test was performed.
