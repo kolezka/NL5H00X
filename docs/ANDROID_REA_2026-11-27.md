@@ -18,7 +18,7 @@ The dispatcher's cache is distinct from Android's preferred HOME activity. `getL
 
 The source-switch timer is not a HOME launch delay. `doSelectSourceId()` returns from the factory-video and HOME branches before reaching `sendSourceMessageDelayed()`. In the remaining branch (except source 10010 with a nonempty app target), the helper clears pending callbacks and messages on `mHandler`, then posts one message with `what = this.sourceId`. It reads the delay in milliseconds from `persist.start_source_delay`. A parsed value of zero selects 5000 ms if the manufacturer string contains `MediaTek`, or 2500 ms otherwise. These are scheduling defaults, not a measured time to a picture or a launcher screen.
 
-REA also identifies the timer's recipient: `MainActivity.MyHandler.handleMessage(Message)` reads a weak reference to the activity. If the reference still resolves, the handler calls `doSelectItemLogic(message.what)`; otherwise it skips that call. Enqueuing the source ID therefore does not guarantee that the activity processes it.
+REA also identifies the timer's recipient: `MainActivity.MyHandler.handleMessage(Message)` reads a weak reference to the activity. If the reference still resolves, the handler calls `doSelectItemLogic(message.what)`; otherwise it skips that call. `MainActivity.onPause()` and `onStop()` only log and call their superclass; neither explicitly cancels the timer. `onDestroy()` calls `mHandler.removeCallbacksAndMessages(null)`, removing pending work on that handler, not undoing a source request already dispatched.
 
 When the manufacturer string does not contain `MediaTek`, `doSelectItemLogic(id)` calls `selectHSSource(id, intent)` before starting the activity. REA shows three targets in priority order:
 
