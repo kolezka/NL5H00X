@@ -47,6 +47,10 @@ The stock app ABI list is `armeabi-v7a,armeabi`, the 64-bit list is empty, and `
 
 PackageManager lists three HiSilicon Java libraries. The stock XML under `/system/etc/permissions` maps `com.hisilicon.android` to `HitvManager.jar`, `com.hisilicon.android.tvapi` to `HitvShare.jar`, and `com.hisilicon.dtv` to `HiDtvShare.jar`, all under `/system/framework`. These library names are framework dependencies that vendor apps can request, not Android application package names. Registration alone does not prove which app uses a given API.
 
+For a concrete consumer, the live package record for `com.newlink.wtprovision` lists `com.hisilicon.android.tvapi` under `usesOptionalLibraries` and `/system/framework/HitvShare.jar` under `usesLibraryFiles`. Stock Android thus resolves the optional library for the provisioning app. This does not prove that any one of its methods called the API during boot or that all features work without it.
+
+REA's complete decoded manifest for the stock external TV input APK shows a different contract: minimum and target API 28, Leanback and Live TV required, touchscreen optional. Its HDMI, YPbPr, CVBS and VGA services advertise the Android `TvInputService` action. The requirements describe the software environment expected by this APK, not a physical inventory of inputs.
+
 ## Board services and radio drivers
 
 The root `bigfish` init configuration requests `bootvideo` at `init`. At `post-fs` it requests `hwsysmanager-1-0`, `vendor.hiavplayer`, `hwandroidmediahal-2-0`, `hwtvmw-1-0` and `hidl_memory`. All five reported `running` after boot. `bootvideo` reported `stopped`; that state does not show whether a boot video played. The vendor configuration mounts the board fstab at `fs` and requests `vendor.ir_user` and `vendor.virtualkeypad` at `boot`. Both reported `running`. This ties two input services to board startup, not a particular remote button to either service.
