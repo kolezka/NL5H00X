@@ -107,6 +107,10 @@ Opening that screen can also change radio state without a button press. `onCreat
 
 PackageManager advertises `android.hardware.usb.host`, and the kernel root hub product strings identify EHCI and OHCI host controllers. The composite radio above is an observed USB host device. Separately, both Android gadget properties `sys.usb.config` and `sys.usb.state` read `adb`. This snapshot was obtained over TCP ADB, not a USB cable: the properties do not verify that any external connector can expose USB ADB. Controller count is not connector count. No peripheral was plugged in, detached or reconfigured.
 
+## Source player: from a vendor choice to an Android TV input
+
+NLSourcePlayer's `MainActivity` declares the `android.newlink.source` action. REA decoded three steps: `onCreate()` enumerates `TvInputManager.getTvInputList()` and remembers IDs containing `cvbs` or `vga` (case-insensitive); `initData()` maps the integer `SourceName` to an ID; `onResume()` requests `TvView.tune()` with that ID and its passthrough channel URI. Value `6` selects the remembered VGA ID. Values `9`, `10` and `11` construct HDMI IDs ending in `HDMI0000C1`, `HDMI0000C2` and `HDMI0000C3` respectively. A missing intent, a missing extra or any other value selects the CVBS field. Unlike VGA and CVBS, the three HDMI IDs are constructed rather than discovered by this code. A tune request does not establish that an input exists or carries a signal. No source was switched.
+
 ## Display mode, UI density and framebuffer
 
 Android's DisplayManager reported the built-in display ON, with one advertised mode: 1920 by 1080 at approximately 60 Hz. WindowManager independently reported a base size of 1920 by 1080 and a density override of 320 dpi over a base of 240 dpi. The override changes the scale used for Android layouts, not the pixel dimensions of the display mode. Neither density value measures the projected image on a wall.
