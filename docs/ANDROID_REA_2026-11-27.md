@@ -279,6 +279,8 @@ REA decoded four thermal callbacks in `TempService$7`. Temperature reports and L
 
 ### Bluetooth profile selection after a link connects
 
+WTProvision has a separate vendor service request. `MainActivity.startBTService()` calls `Context.startService()` with the explicit component `com.newlink.bluetooth/.BTService`. It ignores the returned component; if the call throws an exception, the helper calls itself immediately. This method does not enable the Android Bluetooth adapter or verify a connection. Its presence does not establish that it ran at boot.
+
 In WTProvision, `TempService` requests Bluetooth profile proxies 1, 2 and 4 with one listener. REA shows that `TempService$9.onServiceConnected` ignores the profile ID and overwrites a single `mProfile` field. On `ACL_CONNECTED`, `TempService$8.onReceive` stores the device from the broadcast. If a proxy is present, it queues a delayed call to `connectHid`. The queued task reads both fields when it runs, not when it is queued.
 
 Despite its name, `connectHid` does not select the HID profile. It looks up `connect(BluetoothDevice)` on the supplied proxy by reflection, ignores the return value and catches exceptions. This explains a possible profile connection attempt after a Bluetooth link comes up; it does not identify the remote, prove pairing or establish which profile connected. No Bluetooth device was connected for this analysis.
