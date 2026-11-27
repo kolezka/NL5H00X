@@ -23,6 +23,8 @@ The shipped WTProvision APK (SHA-256 `0260af1f4824d4e1744d99c1e951543ab73a6afd72
 
 ## Vendor packages and boot
 
+In the live user 0 snapshot, PackageManager listed 78 distinct packages. Its system filter returned 76 and its non-system filter returned two; the sets were disjoint and their union matched the unfiltered list. Exactly 19 of the 78 names had the Newlink or HiSilicon prefixes used for the REA inventory below. Package counts include framework and service packages, not just launchable apps. The non-system package names were not published. The namespace filter describes audit coverage, not authorship of every package in the image.
+
 The [component inventory](vendor-manifests-2026-11-27.csv) contains 152 REA declaration rows for the 19 installed packages in the `com.newlink.*` and `com.hisilicon.*` namespaces. Eighteen manifests had complete declaration coverage; HiTvService returned four declarations with partial coverage. An empty `exported` field means no explicit value was recorded, not `false`. Declarations are not delivery records.
 
 NewLinkService and HiTvSetting declare `BOOT_COMPLETED` receivers. The latter declares `com.hisilicon.permission.COMMON_PERMISSION`. The HDMI, YPbPr, CVBS and VGA TV input services declare `BIND_TV_INPUT`. ADB showed zygote, system_server, surfaceflinger, both HOME packages, com.newlink.service, com.hisilicon.tv.service and com.hisilicon.rmservice running; bootanim was stopped. This snapshot does not order their startup.
