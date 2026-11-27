@@ -363,6 +363,8 @@ The time label is not a decoder-position readback. `VideoActivity$6.onProgressCh
 
 The view also exposes two different time readings. Without a prepared player, `getCurrentPosition()` returns `0` without querying Android, while `getDuration()` sets and returns `-1`. Once prepared, the view asks `MediaPlayer` for the current position on every call but reuses a positive cached duration. A position of zero alone therefore cannot distinguish an unprepared player from one at the start of a film.
 
+Unlike `pause()`, `HisiVideoView.destroyPlayer()` clears the view's surface-holder reference. If a media session wrapper exists, it calls `setPlaybackState(false, false)` and releases the wrapper. If a `MediaPlayer` exists, it resets and releases it, then clears the player reference. These are app-level cleanup calls, not evidence of when the hardware decoder stops or the projected frame disappears.
+
 ## Opening a still image
 
 In HiGalleryL, REA found a `VIEW` / `DEFAULT` filter on the landscape activity `com.hisilicon.higallery.NetworkHiGallery`. Despite its name, it accepts `file:` and `content:` as well as `http:`. It lists individual MIME types rather than `image/*`: `image/bmp`, `image/jpeg`, `image/png`, `image/gif`, `image/http` (literal), `image/heic` and `image/heif`. For example, a `content:` URI typed as `image/heic` matches this filter; the same URI typed as `image/webp` does not. This distinguishes how Android chooses a candidate activity from which images the gallery can actually decode. No image was opened.
