@@ -41,6 +41,12 @@ The main MMC user block device reports type `MMC`, product name `UEM`, and 14,94
 
 On-device init configuration connects these identifiers to startup. `/init.rc` imports `/init.${ro.hardware}.rc`, `/vendor/etc/init/hw/init.${ro.hardware}.rc` and `/init.${ro.zygote}.rc`. Both resolved `bigfish` files exist. The resolved `/init.zygote32.rc` declares `zygote` as `/system/bin/app_process -Xzygote /system/bin --zygote --start-system-server`. In the post-boot snapshot init reported zygote running and Android reported `sys.boot_completed=1`. This identifies the configured path into the Android framework, not a replay of every init action or proof that every service was ready.
 
+## Application compatibility and vendor Java APIs
+
+The stock app ABI list is `armeabi-v7a,armeabi`, the 64-bit list is empty, and `/system/bin/app_process` resolves to `app_process32`. An app that requires an `arm64-v8a`-only native library has no matching stock app ABI. This restriction concerns native code, not ordinary DEX bytecode; an ABI match alone does not guarantee installability or correct behavior.
+
+PackageManager lists three HiSilicon Java libraries. The stock XML under `/system/etc/permissions` maps `com.hisilicon.android` to `HitvManager.jar`, `com.hisilicon.android.tvapi` to `HitvShare.jar`, and `com.hisilicon.dtv` to `HiDtvShare.jar`, all under `/system/framework`. These library names are framework dependencies that vendor apps can request, not Android application package names. Registration alone does not prove which app uses a given API.
+
 ## Board services and radio drivers
 
 The root `bigfish` init configuration requests `bootvideo` at `init`. At `post-fs` it requests `hwsysmanager-1-0`, `vendor.hiavplayer`, `hwandroidmediahal-2-0`, `hwtvmw-1-0` and `hidl_memory`. All five reported `running` after boot. `bootvideo` reported `stopped`; that state does not show whether a boot video played. The vendor configuration mounts the board fstab at `fs` and requests `vendor.ir_user` and `vendor.virtualkeypad` at `boot`. Both reported `running`. This ties two input services to board startup, not a particular remote button to either service.
