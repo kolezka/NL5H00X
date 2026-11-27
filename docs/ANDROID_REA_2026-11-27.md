@@ -183,7 +183,7 @@ If `MainActivity.onKeyDown()` receives DPAD_LEFT or DPAD_RIGHT (21/22), it consu
 
 ## Display mode, UI density and framebuffer
 
-Android's DisplayManager reported the built-in display ON, with one advertised mode: 1920 by 1080 at approximately 60 Hz. WindowManager independently reported a base size of 1920 by 1080 and a density override of 320 dpi over a base of 240 dpi. The override changes the scale used for Android layouts, not the pixel dimensions of the display mode. Neither density value measures the projected image on a wall.
+Android's DisplayManager reported the built-in display ON, with one advertised mode: 1920 by 1080 at approximately 60 Hz. WindowManager independently reported a base size of 1920 by 1080 and a density override of 320 dpi over a base of 240 dpi. The override changes the scale used for Android layouts, not the pixel dimensions of the display mode. At those densities, the full 1920 × 1080 mode corresponds to 1280 × 720 dp at 240 dpi or 960 × 540 dp at 320 dpi (`dp = px × 160 / dpi`). These are calculated full-display equivalents, not measured app bounds: window insets can reduce usable space. Neither density value measures the projected image on a wall.
 
 Kernel sysfs identified `fb0` as `hifb`, with a virtual size of 1920 by 3240 at 32 bits per pixel. The virtual height is three 1080-line spans; that is framebuffer geometry, not a 3240-line display or proof of how many buffers the compositor actually presents. These readings establish what stock Android and the framebuffer driver expose. They do not independently measure panel-native resolution, optical output or physical refresh timing.
 
