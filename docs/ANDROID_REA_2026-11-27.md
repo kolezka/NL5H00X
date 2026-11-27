@@ -119,6 +119,8 @@ REA's complete decompilation of `ListenActivity.onCreate(Bundle)` shows no branc
 
 `PowerActivity` follows a different path. Its `onCreate(Bundle)` displays `R.layout.power` and calls `findView()` and `registerListener()`. The latter attaches a click listener to `mOkButton`. A click starts a worker thread that attempts to send an Android power-key press and release (key code 26) via `Instrumentation`; the callback catches `Exception` without reporting it. This is an outgoing synthetic key event, not evidence that this activity receives the remote's physical power key. Neither event delivery nor the board's response was tested.
 
+`KJMPowerActivity` displays `R.layout.kjm_power` and schedules handler message 0 with a 5,000 ms delay. Its `handleMessage` callback handles that message by calling `finish()` on the activity. `onDestroy()` clears pending messages and callbacks. The timer therefore dismisses the screen; it is not a five-second hardware shutdown request. This static path does not identify which component opens the screen or whether the board enters standby by a separate route.
+
 ## Sensors exposed to Android apps
 
 The framework `sensorservice` was registered, but its diagnostic dump reported `No Sensors on the device` and `devInitCheck : -19`. PackageManager's feature list also returned no `android.hardware.sensor.*` entry; the same read returned the expected television feature. At the time of the snapshot the standard Android sensor service therefore offered no sensor inventory. This does not establish why initialization returned that status, or rule out sensors wired to a board controller, exposed through a vendor API, or used internally for protection.
