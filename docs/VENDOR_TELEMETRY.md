@@ -30,8 +30,11 @@ Trigger chain:
 2. `BootService` waits 60 s, then starts `MyServices`.
 3. When Android calls `NetWorkChangeReceiver.onReceive`, the method logs the
    action and requests `MyServices` without testing connectivity. The manifest
-   declaration has no recorded action. A class reference from `BootService`
-   does not establish runtime registration or delivery on each network change.
+   declaration has no recorded action. `BootService` declares a field of type
+   `NetWorkChangeReceiver`, but neither its constructor nor `onCreate()`
+   constructs or registers that receiver. Its `onDestroy()` only calls the
+   superclass. The field is not proof of a subscription; whether another path
+   registers the receiver, or the running device delivers events, remains open.
    `MyServices` checks connectivity before preparing a report; see the
    [boot reporting trace](ANDROID_REA_2026-11-27.md#data-prepared-by-the-boot-reporting-service-rea).
 
