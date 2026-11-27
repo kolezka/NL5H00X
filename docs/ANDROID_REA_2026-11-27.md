@@ -71,6 +71,10 @@ The vendor boot action lists several alternative Bluetooth modules; the file alo
 
 Above the kernel driver, PackageManager advertises Bluetooth and Bluetooth LE. The Android Bluetooth manager reported the adapter enabled and `ON` in this snapshot. The vendor A2DP audio policy declares output routes for Bluetooth headphones and speakers, plus an input route. These are logical Android audio paths, not evidence of a connected accessory, an active stream, or a working end-to-end receiver mode. No discovery or pairing was requested.
 
+## Android USB roles
+
+PackageManager advertises `android.hardware.usb.host`, and the kernel root hub product strings identify EHCI and OHCI host controllers. The composite radio above is an observed USB host device. Separately, both Android gadget properties `sys.usb.config` and `sys.usb.state` read `adb`. This snapshot was obtained over TCP ADB, not a USB cable: the properties do not verify that any external connector can expose USB ADB. Controller count is not connector count. No peripheral was plugged in, detached or reconfigured.
+
 ## Display mode, UI density and framebuffer
 
 Android's DisplayManager reported the built-in display ON, with one advertised mode: 1920 by 1080 at approximately 60 Hz. WindowManager independently reported a base size of 1920 by 1080 and a density override of 320 dpi over a base of 240 dpi. The override changes the scale used for Android layouts, not the pixel dimensions of the display mode. Neither density value measures the projected image on a wall.
