@@ -161,6 +161,12 @@ In WTProvision, `TempService` requests Bluetooth profile proxies 1, 2 and 4 with
 
 Despite its name, `connectHid` does not select the HID profile. It looks up `connect(BluetoothDevice)` on the supplied proxy by reflection, ignores the return value and catches exceptions. This explains a possible profile connection attempt after a Bluetooth link comes up; it does not identify the remote, prove pairing or establish which profile connected. No Bluetooth device was connected for this analysis.
 
+The profile listener's `onServiceDisconnected(int)` is empty: that callback does not clear the stored proxy. This is a profile-service notification, not evidence that a physical remote disconnected.
+
+### Optional voice service
+
+REA shows a separate branch in `TempService.onCreate()`: when `vendor.newlink.shijiu_yuyin` reads as `1` (default `0`), it schedules a task to start `com.qcode.tvvoicehelp.services.AIVoiceService` in package `com.qcode.tvvoicehelp`. The task sets the explicit component and the action `com.qcode.acion.voicehelp` (spelling in firmware). If `startService` throws an exception, it schedules another attempt after 500 ms. This identifies the intended Android service, not the effective property value, an installed handler, microphone use or a successful launch on this unit.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
