@@ -187,6 +187,10 @@ The app chooses its implementation once during `TvCustomSetting` class initializ
 
 The reverse path uses the same setting ID, not a second one. `dispatchFocusDown` skips the backward request on key release or when the reported position is 0. Otherwise it passes 1 for the initial press or 2 for a repeat. `HiTvCustomSetting` delegates unchanged, and HitvShare negates the argument before calling `setAdvancedPictureSetting(66, -i)`. The position getter delegates to `getAdvancedPictureSetting(66)`. The sign therefore distinguishes the two requested directions on write; on read, WTProvision treats 0 and 2 as directional limits. Nothing in these methods establishes how the position is measured or whether a physical limit switch exists.
 
+## Digital zoom versus display metrics
+
+ZYCustomer routes `alliance://start_screen_scale` to `com.newlink.hisetting.MainActivity`. Its `onCreate()` reads the Android window dimensions, but `initData()` takes the initial zoom value from `AdvancedPictureSetting.getDigitalZoom()`. In stock HitvShare this returns `mCusEx.getAdvancedPictureSetting(8)`: the app reads a vendor setting rather than calculating zoom from the window size. Opening this screen is not necessarily read-only: if `zyzys.projectionmode.changed` is the string `true`, `onCreate()` requests that it be set to `false`. No current zoom value or projected image size was measured.
+
 ## Which keystone settings screen opens
 
 In ZYCustomer (`com.newlink.hisetting`), the manifest routes `alliance://start_keystone` to `StartProjectionActivity`. Its `onCreate()` only calls the superclass. In `onResume()` it reads `zysys.projection.is_new` (default `"0"`): exactly `"2"` selects `Projection6DSensorActivity`; all other values select `FourPointActivity`. Both paths explicitly request the selected activity with `FLAG_ACTIVITY_NEW_TASK` and finish the dispatcher. The stock DEX string operands confirm `"2"` behind the decompiler's `GPS_MEASUREMENT_2D` alias; this comparison does not use GPS. The branch selects a settings screen, not a measured correction of the projected image. The active property value was not sampled here.
