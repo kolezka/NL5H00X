@@ -75,6 +75,8 @@ For a concrete consumer, the live package record for `com.newlink.wtprovision` l
 
 REA's complete decoded manifest for the stock external TV input APK shows a different contract: minimum and target API 28, Leanback and Live TV required, touchscreen optional. Its HDMI, YPbPr, CVBS and VGA services advertise the Android `TvInputService` action. The requirements describe the software environment expected by this APK, not a physical inventory of inputs.
 
+HiRMService differs from WTProvision: its manifest lists `com.hisilicon.android` and `com.hisilicon.dtv` without marking either library optional. The application is `persistent` and `directBootAware`. Its service advertises the Android accessibility service action, requires `BIND_ACCESSIBILITY_SERVICE` of the caller, and points Android to `@xml/filter_event_service`. These declarations identify dependencies and a binding interface. Seeing the process in the ADB snapshot does not establish that Android bound the accessibility service, that it received remote-control keys, or that it ran before user unlock.
+
 ## Embedded web content
 
 PackageManager advertises `android.software.webview`. Android's WebView Update Service identified `com.android.webview` version `66.0.3359.158` as both current and preferred, installed and enabled for all users in the snapshot. It reported multiprocess mode disabled. For an app embedding a standard Android WebView, this provider version is a more precise compatibility baseline than Android API 28 alone. It does not identify a standalone browser, an app's bundled engine or the most recent available update. No page was loaded and no rendering or update test was performed.
