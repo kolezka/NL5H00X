@@ -29,7 +29,7 @@ is how the device stopped booting once (see [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md)
 | `com.newlink.nlsource` | Source player stub | no | none | keep, referenced by the launcher and sourceui |
 | `com.hisilicon.tvui` | TV UI, 13 exported activities | no | INTERACT_ACROSS_USERS | keep, referenced by launcher and sourceui |
 | `com.newlink.cast` | Screen cast (HBCastNew) | no | INTERNET, SYSTEM_ALERT_WINDOW | target of the stock launcher's iOS Cast tile (`MainActivityNew.onClick`); not the Miracast target |
-| `com.hisilicon.miracast` | Miracast sink | no | none | optional, launcher references it |
+| `com.hisilicon.miracast` | Wireless display receiver app | no | Requests CONFIGURE_WIFI_DISPLAY, ACCESS_WIFI_STATE and CHANGE_WIFI_STATE | Target of the Miracast tile on the HiSilicon path. The [November audit](ANDROID_REA_2026-11-27.md) resolved its TV launcher entry without starting a session. |
 | `com.newlink.filemanager` | File manager | no | PACKAGE_USAGE_STATS | optional, launcher and sourceui reference it |
 | `com.hisilicon.android.videoplayer` | Video player, priv-app | no | INTERNET | optional |
 | `com.hisilicon.android.music` | Music player | no | none | optional |
