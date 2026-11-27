@@ -151,7 +151,7 @@ Opening that screen can also change radio state without a button press. `onCreat
 
 ## Android USB roles
 
-PackageManager advertises `android.hardware.usb.host`, and the kernel root hub product strings identify EHCI and OHCI host controllers. The composite radio above is an observed USB host device. Separately, both Android gadget properties `sys.usb.config` and `sys.usb.state` read `adb`. This snapshot was obtained over TCP ADB, not a USB cable: the properties do not verify that any external connector can expose USB ADB. Controller count is not connector count. No peripheral was plugged in, detached or reconfigured.
+PackageManager advertises `android.hardware.usb.host`, and the kernel root hub product strings identify EHCI and OHCI host controllers. The composite radio above is an observed USB host device. Separately, both Android gadget properties `sys.usb.config` and `sys.usb.state` read `adb`. This snapshot was obtained over TCP ADB, not a USB cable: the properties do not verify that any external connector can expose USB ADB. The [October inspection](DEVICE_AUDIT_2026-10-24.md#partition-and-boot-evidence) did not find `/sys/class/udc`, `/sys/class/android_usb` or `/config/usb_gadget` at those paths. That historical observation neither contradicts the later property readings nor rules out a device-mode controller: neither inspection demonstrated USB enumeration by an external host. Controller count is not connector count. No peripheral was plugged in, detached or reconfigured.
 
 ## Source player: from a vendor choice to an Android TV input
 
