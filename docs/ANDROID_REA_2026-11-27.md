@@ -14,6 +14,8 @@ This report maps Android 9 on one modified NL5H00X_TP, from board startup and HO
 
 WTProvision and hisilauncher processes were present after boot. The sampled 4000 log entries did not identify a HOME handoff. Neither process presence nor resolver order establishes the pair used at the last boot.
 
+The dispatcher's cache is distinct from Android's preferred HOME activity. `getLauncherHomeActivity()` passes `home_pkg` and `home_activity` to `setWTProvision_sp()` in two separate calls. Each opens a `SharedPreferences` editor for the app, writes one string and calls `commit()` without checking its boolean result. The resolver later reads both keys back. This establishes where the dispatcher stores its choice, not the contents of the cache on the last boot. No preference was read from or written to the device for this check.
+
 ### Setup completion is separate from HOME launch
 
 On the default first-setup branch in `MainActivity.onCreate`, WTProvision calls `setProvision()` before `doSelectSourceId(-1)`. REA shows that the helper requests three settings writes: `device_provisioned` in Global and the user and TV setup-complete flags in Secure, all set to 1. It then sets `persist.init.enable` to `false` and `persist.sys.country` to `cn`. It does not wait for a launcher result. A setup-complete flag therefore cannot establish that the selected HOME activity started or displayed a frame. Other wizard branches can take a different path; no settings were changed to test this sequence.
