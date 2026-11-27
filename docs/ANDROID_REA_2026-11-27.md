@@ -387,6 +387,8 @@ In HiGalleryL, REA found a `VIEW` / `DEFAULT` filter on the landscape activity `
 
 The gallery requests a large heap (`largeHeap=true`) and disables hardware acceleration for Android UI drawing at application scope (`hardwareAccelerated=false`). The gallery activity does not override that setting. This distinguishes its UI configuration from the device-wide Mali and framebuffer observations: the manifest does not identify the image decoder, measure memory use or show that system composition runs without the GPU.
 
+HiGalleryL also declares its own `music.MusicListService` and `music.BackgroundMusicService`. Both explicitly set `exported=false`. The similarly named `com.hisilicon.higallery.permission.BACKGROUNDMUSIC` is defined at signature level and requested by the gallery, but neither service names it as a caller permission. These declarations distinguish gallery music components from HiMusic; they do not show that opening a photo starts music or which app supplies a track.
+
 ## File manager entry points
 
 In the stock Newlink file manager (6.0), `activity.SelectActivity`, not `activity.MainActivity`, declares `MAIN` with `LAUNCHER`. The USB screens `UsbCountActivity` and `USBAllActivity` declare `MAIN` with `DEFAULT`; those filters are not USB attachment notifications. The manifest also declares an AndroidX FileProvider that can grant access to individual content URIs. These declarations do not establish which screen appears after USB insertion or whether opening an image passes a URI to HiGalleryL. REA did not resolve `SelectActivity.onCreate` from the inspected APK. No removable media was attached or opened for this check.
