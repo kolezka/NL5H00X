@@ -115,6 +115,8 @@ The player's `no_signal_tip` is a delayed Android UI indicator, not a cable dete
 
 If Android delivers another intent to the existing activity, `onNewIntent()` saves it with `setIntent()`; the method does not itself tune. On the next `onResume()`, `initData()` reads that saved intent before the player requests the input. Conversely, `onStop()` resets the `TvView` and clears the handler queue, including any pending no-signal warning. This is a reset of the Android view, not evidence that the physical input was powered down.
 
+If `MainActivity.onKeyDown()` receives DPAD_LEFT or DPAD_RIGHT (21/22), it consumes the event and requests the current media volume (stream 3) minus or plus one step, with the volume UI flag. MENU (82) instead requests the implicit `com.hisilicon.android.intent.action.tvsetting` activity and then delegates to the superclass if the request returns. The [vendor manifest inventory](vendor-manifests-2026-11-27.csv) identifies a matching target, `com.hisilicon.tvsetting.main.SettingActivity`, protected by `com.hisilicon.permission.COMMON_PERMISSION`. This identifies a candidate, not a successful launch or proof that the physical remote delivered these codes.
+
 ## Display mode, UI density and framebuffer
 
 Android's DisplayManager reported the built-in display ON, with one advertised mode: 1920 by 1080 at approximately 60 Hz. WindowManager independently reported a base size of 1920 by 1080 and a density override of 320 dpi over a base of 240 dpi. The override changes the scale used for Android layouts, not the pixel dimensions of the display mode. Neither density value measures the projected image on a wall.
