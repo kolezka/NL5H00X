@@ -251,6 +251,8 @@ Despite its name, `autoKeystone_3d_Runnable` (`TempService$5.run`) does not dire
 
 The saved REA manifest inventory has no activity or activity-alias row declaring the exact action `com.zhiying.AUTO_FOCUS`. The same exact-action lookup found `com.newlink.cast_qlto1` on `MainCastQLTo1Activity` as a control. This inventory covers Newlink and HiSilicon packages, not Zhiying packages. HiTvService's complete decoded manifest declares neither activities nor aliases. The earlier string scan of Zhiying Settings mentions `com.zhiying.autofocus`, but that is not an intent filter. The installed resolver target remains unknown: the read-only ADB connection timed out before a PackageManager lookup could run.
 
+REA also decoded `TempService.onDestroy()`: it calls `super.onDestroy()` and unregisters `mBtReceiver`. This method does not explicitly cancel the queued autofocus retry or unregister the vendor sensor listeners. That does not establish that a retry runs after teardown: neither the service lifecycle nor callback delivery was observed.
+
 ### Thermal notifications at service creation
 
 REA places thermal registration in `TempService.onCreate()`, before `startSensorsListener()`. Its `startTemp()` helper sets `zysys.temp.enable` to `true`, creates a `Handler`, and passes a callback to `TvCustomSetting.setThermalListener`. Although a log string in the helper mentions `onStartCommand`, the service's `onStartCommand` override only logs and delegates to its superclass. The camera checks inside `startSensorsListener()` therefore do not gate this thermal registration. This is a code path, not a temperature reading, fan-speed measurement or observation that the service ran at boot.
