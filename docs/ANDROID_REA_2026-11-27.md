@@ -191,6 +191,8 @@ REA also identifies the caller upstream of `TempService`: `WTProvision.MainActiv
 
 ADB reported `com.hisilicon.android.inputmethod.remote/.RemoteIME` both as the selected default input method and in the enabled IME list. REA confirmed the matching service in the stock HiPinyinIME manifest: it advertises `android.view.InputMethod` and requires `BIND_INPUT_METHOD`. The APK separately declares `PinyinDecoderService`. This identifies the vendor component Android selects for text fields, not the driver that receives physical remote buttons. No keyboard was opened and no input text was read or entered.
 
+The keyboard package declares `persistent=true` and `directBootAware=true` at application scope. This permits pre-unlock operation but does not show whether Android started the keyboard before unlock on this boot. The `RemoteIME` service points Android to `@xml/method`; the APK also contains QWERTY, phone, symbol and smiley keyboard layout resources. Their presence does not identify the layout selected for any text field.
+
 ## Android audio policy and input endpoints
 
 The vendor audio policy includes a primary HAL 2.0 module. It declares `Speaker` as the default output and routes `primary output` (48 kHz, stereo, 16-bit PCM) to that sink. The live `media.audio_policy` dump also lists the primary module, `Sink: Speaker` and `AUDIO_DEVICE_OUT_SPEAKER`. This confirms Android's logical route, not the connection from the HAL to ALSA or the amplifier. Both `audio.primary.bigfish.so` and `audio.primary.default.so` are present under `/vendor/lib/hw`; filenames do not identify which one was loaded. No playback or capture test was performed.
