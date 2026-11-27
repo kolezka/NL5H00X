@@ -63,6 +63,10 @@ Android's DisplayManager reported the built-in display ON, with one advertised m
 
 Kernel sysfs identified `fb0` as `hifb`, with a virtual size of 1920 by 3240 at 32 bits per pixel. The virtual height is three 1080-line spans; that is framebuffer geometry, not a 3240-line display or proof of how many buffers the compositor actually presents. These readings establish what stock Android and the framebuffer driver expose. They do not independently measure panel-native resolution, optical output or physical refresh timing.
 
+## Wireless display application
+
+Stock Android exposes Miracast as a HiSilicon system app. REA decoded its original manifest: `WelcomeActivity` declares `MAIN` with both `LAUNCHER` and `LEANBACK_LAUNCHER`, and the same package declares `WfdService`. On the projector, a package-scoped Leanback intent query resolved to `com.hisilicon.miracast/.activity.WelcomeActivity`; it did not launch it. PackageManager also advertises Wi-Fi Direct. These observations confirm the installed TV launcher entry and declared service, not a running wireless display session, protocol interoperability or stream quality. No peer discovery or pairing was performed.
+
 ## Android media decoding
 
 The post-boot HAL inventory lists the default `IOmx` and `IOmxStore` instances of `android.hardware.media.omx@1.0`. The vendor codec XML, parsed as XML to exclude commented examples, declares HiSilicon AVC, HEVC and VP9 decoder components with a maximum size of 1920 by 1088; the MPEG-2, MPEG-4 and VP8 entries specify 1920 by 1080. The limits describe decoder inputs, not display modes. The same file includes separate Google audio and video codec lists, so its direct entries alone are not an inventory of all codecs available to apps. A registered OMX service plus a declared codec does not prove a player selected it or sustained a particular resolution, profile or frame rate. No media was played.
