@@ -79,7 +79,7 @@ HiRMService differs from WTProvision: its manifest lists `com.hisilicon.android`
 
 The compiled `filter_event_service` XML in the same SHA-256-matched APK declares `canRetrieveWindowContent=true`, event mask `0x400000`, feedback mask `0x10` and flags `0x40`. These are static settings, not a record of reading a window. The offline binary XML decoder was checked against the binding permission in the manifest decoded by REA. No screen content was collected.
 
-The APK also ships a layout named `activity_black_screen`. Its compiled XML contains one `RelativeLayout` element and no child views. Despite the filename, REA's complete manifest inventory lists one service and no activity. The resource alone does not identify what inflates it, whether an overlay appeared or whether the projector switched off its light source.
+The APK also ships a layout named `activity_black_screen`. Its compiled XML contains one `RelativeLayout` element and no child views. Both dimensions encode `-1` (`match_parent`); the background is a framework resource reference (`0x0106000c`), not an inline color. Matching the parent does not establish that the parent fills the display. Despite the filename, REA's complete manifest inventory lists one service and no activity. The resource alone does not identify what inflates it, whether an overlay appeared or whether the projector switched off its light source.
 
 ## Embedded web content
 
