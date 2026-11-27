@@ -193,6 +193,8 @@ In ZYCustomer (`com.newlink.hisetting`), the manifest routes `alliance://start_k
 
 Opening `FourPointActivity` is not a read-only way to inspect calibration. Its `onCreate()` parses the same property as an integer and, if that integer equals 2, requests `AdvancedPictureSetting.setAutoKeystone(3)`. This condition differs from the dispatcher's exact string match. After initializing the data and views, it requests `persist.4dot_open = 1` even without a corner adjustment. These are calls in the stock app, not observed property changes or optical effects. The activity was not opened during this audit.
 
+`FourPointActivity.initData()` reads eight integers: X and Y for each of four corners. In mode 2 it reads the `getX1KeystonePosition()` family and divides each result by 5 using integer arithmetic. In other modes it uses the `getX1Keystone()` family and copies the results unchanged. The app's internal coordinates therefore cannot be compared across modes as raw vendor readings. Neither branch establishes units in pixels, degrees or millimetres.
+
 ## Sensors exposed to Android apps
 
 The framework `sensorservice` was registered, but its diagnostic dump reported `No Sensors on the device` and `devInitCheck : -19`. PackageManager's feature list also returned no `android.hardware.sensor.*` entry; the same read returned the expected television feature. At the time of the snapshot the standard Android sensor service therefore offered no sensor inventory. This does not establish why initialization returned that status, or rule out sensors wired to a board controller, exposed through a vendor API, or used internally for protection.
