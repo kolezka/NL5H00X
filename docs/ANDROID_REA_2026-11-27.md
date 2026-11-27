@@ -195,6 +195,8 @@ REA also identifies the caller upstream of `TempService`: `WTProvision.MainActiv
 | Audio | ADB: `audioserver` running. ALSA lists card 0 `HISI-AIAO` and PCM `00-00` `playback aiao-hifi-0`, with one playback substream. | Does not identify which Android output routes use that PCM, or verify audible sound. |
 | Remote | ADB: input manager associated `Hi Keypad` and `Hi keyboard` with stock key layouts. | No physical keypress traced through the driver to an Android action. |
 | Network | ADB: `wlan0` and `p2p0` share the `a69c:8801` USB parent. Its interfaces bind to `aic8800_fdrv` and `aic_btusb`. Ethernet uses the separate `hieth` platform driver. | Driver bindings do not establish silicon revision, Ethernet carrier, Wi-Fi association or throughput. No scan was performed. |
+| Focus and geometry | REA: the HiSilicon focus path writes signed values to setting 66; the orientation path can request a separate autofocus activity. | The focus animation does not measure lens travel. The installed autofocus handler and projected geometry change remain unverified. |
+| Sensors and thermal protection | ADB: the standard Android sensor service reported no sensors. REA: WTProvision subscribes to vendor sensor events and handles thermistor errors separately from overheat warnings. | An empty framework inventory does not rule out board sensors. No vendor sample, fan response or thermal shutdown was observed in this audit. |
 | Vendor services | REA: manifest inventory above; ADB: named post-boot processes. | Does not map every service to its driver or establish which code ran at boot. |
 
 ## Android text input
