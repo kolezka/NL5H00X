@@ -20,6 +20,14 @@ The source-switch timer is not a HOME launch delay. `doSelectSourceId()` returns
 
 REA also identifies the timer's recipient: `MainActivity.MyHandler.handleMessage(Message)` reads a weak reference to the activity. If the reference still resolves, the handler calls `doSelectItemLogic(message.what)`; otherwise it skips that call. Enqueuing the source ID therefore does not guarantee that the activity processes it.
 
+When the manufacturer string does not contain `MediaTek`, `doSelectItemLogic(id)` calls `selectHSSource(id, intent)` before starting the activity. REA shows three targets in priority order:
+
+1. If `persist.display.720p` is false (default: true), PackageManager finds `com.newlink.nlsource`, and `id != 0`, the intent explicitly targets `com.newlink.nlsource/.MainActivity` with integer extra `SourceName = id`. The package lookup does not check for an input signal.
+2. Otherwise, a nonempty `persist.newlink.wakeup_source` selects `ACTION_VIEW` with URI `yktv://source/mainpage?sourceid=` plus the property value, not the queued ID.
+3. Otherwise the explicit target is `com.hisilicon.tvui/.MainActivity` with `SourceName = id`.
+
+The caller catches exceptions from the final launch and its first-run/finish bookkeeping and queues another delayed message. A retry is therefore not proof of a missing player. No activity was launched to test these branches.
+
 ### Setup completion is separate from HOME launch
 
 On the default first-setup branch in `MainActivity.onCreate`, WTProvision calls `setProvision()` before `doSelectSourceId(-1)`. REA shows that the helper requests three settings writes: `device_provisioned` in Global and the user and TV setup-complete flags in Secure, all set to 1. It then sets `persist.init.enable` to `false` and `persist.sys.country` to `cn`. It does not wait for a launcher result. A setup-complete flag therefore cannot establish that the selected HOME activity started or displayed a frame. Other wizard branches can take a different path; no settings were changed to test this sequence.
