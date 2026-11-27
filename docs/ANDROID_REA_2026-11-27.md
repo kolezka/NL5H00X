@@ -93,6 +93,8 @@ The vendor boot action lists several alternative Bluetooth modules; the file alo
 
 Above the kernel driver, PackageManager advertises Bluetooth and Bluetooth LE. The Android Bluetooth manager reported the adapter enabled and `ON` in this snapshot. The vendor A2DP audio policy declares output routes for Bluetooth headphones and speakers, plus an input route. These are logical Android audio paths, not evidence of a connected accessory, an active stream, or a working end-to-end receiver mode. No discovery or pairing was requested.
 
+In WTProvision's Bluetooth setup screen, `BluetoothActivity.onCreate()` registers for device discovery, adapter state, bond state and ACL connection broadcasts. `getBluetoothProfile()` requests profile 4 if the adapter exists and the activity has no cached proxy. Its callback stores the proxy only when the reported profile ID is 4. That callback connects the app to an Android profile service; it does not confirm a remote has paired. REA decoded both methods offline. The setup screen was not launched.
+
 ## Android USB roles
 
 PackageManager advertises `android.hardware.usb.host`, and the kernel root hub product strings identify EHCI and OHCI host controllers. The composite radio above is an observed USB host device. Separately, both Android gadget properties `sys.usb.config` and `sys.usb.state` read `adb`. This snapshot was obtained over TCP ADB, not a USB cable: the properties do not verify that any external connector can expose USB ADB. Controller count is not connector count. No peripheral was plugged in, detached or reconfigured.
