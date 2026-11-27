@@ -213,6 +213,8 @@ The corresponding CVBS and VGA callbacks accept hardware types `3` and `7`, resp
 
 The stock build sets `ro.config.low_ram=true`. Its ART properties specify a 5 MiB starting heap, a 128 MiB growth limit and a 256 MiB heap size. These are managed-heap settings, not limits on a process's total resident memory. Init reported the low-memory killer daemon (`lmkd`) running; that alone does not show it killed any process.
 
+Of the 19 digest-matched Newlink and HiSilicon APKs in the inventory, two explicitly request `android:largeHeap="true"` on the application: `com.hisilicon.higallery` and `com.hisilicon.tvui`. The other 17 omit the attribute, including the stock launcher and both video players. These counts describe compiled manifests, not all installed packages. A large-heap request is not a 256 MiB allocation or a measurement of resident memory.
+
 The kernel reported 1,005,264 KiB of usable RAM and 319,088 KiB of swap. `/proc/swaps` identified the active backend as `/dev/block/zram0`; sysfs identified LZ4 as the selected compression algorithm. This provides about 312 MiB of logical swap backed by compressed RAM, not additional physical RAM or evidence of paging to flash. No memory pressure was induced.
 
 ## CPU frequency policy and power telemetry
