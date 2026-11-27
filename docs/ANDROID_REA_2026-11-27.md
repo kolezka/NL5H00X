@@ -167,6 +167,8 @@ The profile listener's `onServiceDisconnected(int)` is empty: that callback does
 
 REA shows a separate branch in `TempService.onCreate()`: when `vendor.newlink.shijiu_yuyin` reads as `1` (default `0`), it schedules a task to start `com.qcode.tvvoicehelp.services.AIVoiceService` in package `com.qcode.tvvoicehelp`. The task sets the explicit component and the action `com.qcode.acion.voicehelp` (spelling in firmware). If `startService` throws an exception, it schedules another attempt after 500 ms. This identifies the intended Android service, not the effective property value, an installed handler, microphone use or a successful launch on this unit.
 
+REA also identifies the caller upstream of `TempService`: `WTProvision.MainActivity.onCreate` explicitly requests it when `isAppFirst` is true. Later in the same method, if `isAppFirst`, `systemInitFirstTime` and the voice property are all set, the activity requests the same Qcode service directly. Unlike the delayed task, the direct call catches an exception without retrying. `initSharedPreference()` reads `systemInitFirstTime` from `persist.init.enable` (default true); the field is not a boot counter. These are two possible requests to the same component, not evidence of two service instances or two launches during boot.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
