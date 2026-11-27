@@ -187,6 +187,10 @@ The app chooses its implementation once during `TvCustomSetting` class initializ
 
 The reverse path uses the same setting ID, not a second one. `dispatchFocusDown` skips the backward request on key release or when the reported position is 0. Otherwise it passes 1 for the initial press or 2 for a repeat. `HiTvCustomSetting` delegates unchanged, and HitvShare negates the argument before calling `setAdvancedPictureSetting(66, -i)`. The position getter delegates to `getAdvancedPictureSetting(66)`. The sign therefore distinguishes the two requested directions on write; on read, WTProvision treats 0 and 2 as directional limits. Nothing in these methods establishes how the position is measured or whether a physical limit switch exists.
 
+## Which keystone settings screen opens
+
+In ZYCustomer (`com.newlink.hisetting`), the manifest routes `alliance://start_keystone` to `StartProjectionActivity`. Its `onCreate()` only calls the superclass. In `onResume()` it reads `zysys.projection.is_new` (default `"0"`): exactly `"2"` selects `Projection6DSensorActivity`; all other values select `FourPointActivity`. Both paths explicitly request the selected activity with `FLAG_ACTIVITY_NEW_TASK` and finish the dispatcher. The stock DEX string operands confirm `"2"` behind the decompiler's `GPS_MEASUREMENT_2D` alias; this comparison does not use GPS. The branch selects a settings screen, not a measured correction of the projected image. The active property value was not sampled here.
+
 ## Sensors exposed to Android apps
 
 The framework `sensorservice` was registered, but its diagnostic dump reported `No Sensors on the device` and `devInitCheck : -19`. PackageManager's feature list also returned no `android.hardware.sensor.*` entry; the same read returned the expected television feature. At the time of the snapshot the standard Android sensor service therefore offered no sensor inventory. This does not establish why initialization returned that status, or rule out sensors wired to a board controller, exposed through a vendor API, or used internally for protection.
