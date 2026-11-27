@@ -79,6 +79,8 @@ HiRMService differs from WTProvision: its manifest lists `com.hisilicon.android`
 
 The compiled `filter_event_service` XML in the same SHA-256-matched APK declares `canRetrieveWindowContent=true`, event mask `0x400000`, feedback mask `0x10` and flags `0x40`. These are static settings, not a record of reading a window. The offline binary XML decoder was checked against the binding permission in the manifest decoded by REA. No screen content was collected.
 
+The APK also ships a layout named `activity_black_screen`. Its compiled XML contains one `RelativeLayout` element and no child views. Despite the filename, REA's complete manifest inventory lists one service and no activity. The resource alone does not identify what inflates it, whether an overlay appeared or whether the projector switched off its light source.
+
 ## Embedded web content
 
 PackageManager advertises `android.software.webview`. Android's WebView Update Service identified `com.android.webview` version `66.0.3359.158` as both current and preferred, installed and enabled for all users in the snapshot. It reported multiprocess mode disabled. For an app embedding a standard Android WebView, this provider version is a more precise compatibility baseline than Android API 28 alone. It does not identify a standalone browser, an app's bundled engine or the most recent available update. No page was loaded and no rendering or update test was performed.
