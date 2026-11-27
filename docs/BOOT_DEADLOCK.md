@@ -45,13 +45,16 @@ com.newlink.wtprovision/.MainActivity
   Category: android.intent.category.DEFAULT
 ```
 
-Because it is the only declarant of `SETUP_WIZARD`, it wins the home intent
-uniquely, with no chooser and no ambiguity. It then starts the component cached in
-`wtprovision`'s own preferences. On a stock unit that is the stock launcher.
+WTProvision was the only match for that combined intent on the audited unit.
+The stock launcher matches ordinary `MAIN + HOME`, but not this vendor intent.
+Re-enabling the launcher alone therefore does not replace a disabled dispatcher.
 
-**The stock launcher never wins HOME on its own.** It is *started by*
-wtprovision. This is the single most important fact about this device's boot,
-and it is why "just re-enable the launcher" does not fix the brick.
+On the normal HOME path, `MainActivity.doSelectSourceId(-1)` starts the component
+named by `home_pkg` and `home_activity`. If the pair is missing, WTProvision
+queries ordinary HOME candidates and chooses the first eligible result. The
+stock launcher is one possible target. See the [REA audit](ANDROID_REA_2026-11-27.md)
+for the filter, exclusions and launcher branches. This code does not identify
+the activity shown on the last boot.
 
 The package is built for this role: `flags=[ SYSTEM HAS_CODE PERSISTENT ... ]`,
 `privateFlags=[ DEFAULT_TO_DEVICE_PROTECTED_STORAGE DIRECT_BOOT_AWARE ]`. It is
