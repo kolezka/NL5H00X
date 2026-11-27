@@ -111,6 +111,8 @@ The main MMC user block device reports type `MMC`, product name `UEM`, and 14,94
 
 On-device init configuration connects these identifiers to startup. `/init.rc` imports `/init.${ro.hardware}.rc`, `/vendor/etc/init/hw/init.${ro.hardware}.rc` and `/init.${ro.zygote}.rc`. Both resolved `bigfish` files exist. The resolved `/init.zygote32.rc` declares `zygote` as `/system/bin/app_process -Xzygote /system/bin --zygote --start-system-server`. In the post-boot snapshot init reported zygote running and Android reported `sys.boot_completed=1`. This identifies the configured path into the Android framework, not a replay of every init action or proof that every service was ready.
 
+The boot image header and the running root filesystem answer different questions. The [October image analysis](DEVICE_AUDIT_2026-10-24.md#offline-recovery-image-check) recorded zero external ramdisk bytes in the boot and recovery headers, yet found a CPIO archive inside each kernel in the September backup. Both contained `init`; only the recovery inventory listed here establishes the presence of `sbin/recovery`. The recorded `skip_initramfs` and `root=/dev/mmcblk0p20` distinguish normal system-as-root startup from those archived files. The backup analysis does not identify the current partition bytes or prove a recovery boot.
+
 ## Application compatibility and vendor Java APIs
 
 REA decoded the stock launcher's version as `22.02.13` (code `220212`). Its manifest sets minimum API 16 and target API 29. The projector's API 28 meets the minimum; the higher target is not evidence that the projector runs Android 10. The launcher also declares Bluetooth LE as required and lists the GPS feature. These describe the APK's hardware expectations, not a GPS receiver detected on the board.
