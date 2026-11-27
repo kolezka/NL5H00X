@@ -183,6 +183,8 @@ Kernel sysfs identified `fb0` as `hifb`, with a virtual size of 1920 by 3240 at 
 
 ## Wireless display application
 
+REA: the `MainActivityNew` launcher's iOS Cast tile requests the launch intent for `com.newlink.cast`. The Miracast tile requests `com.mediatek.androidbox` when `ro.product.manufacturer` contains `MediaTek`, otherwise `com.hisilicon.miracast`. `startActivityByPackage()` passes `getLaunchIntentForPackage()` to `startActivity()` and logs exceptions; it does not try the other package. The tile selects an app, not a receiver service or a peer.
+
 Stock Android exposes Miracast as a HiSilicon system app. REA decoded its original manifest: `WelcomeActivity` declares `MAIN` with both `LAUNCHER` and `LEANBACK_LAUNCHER`, and the same package declares `WfdService`. On the projector, a package-scoped Leanback intent query resolved to `com.hisilicon.miracast/.activity.WelcomeActivity`; it did not launch it. PackageManager also advertises Wi-Fi Direct. These observations confirm the installed TV launcher entry and declared service, not a running wireless display session, protocol interoperability or stream quality. No peer discovery or pairing was performed.
 
 For a board port, distinguish the stock Miracast app's SDK target from its system integration. Version `V5` (code 1000) was compiled against API 28 but targets API 19, with API 17 as its minimum. Its manifest requests `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE` and `CONFIGURE_WIFI_DISPLAY`, and names `android.uid.system` as its shared UID. Matching the minimum SDK alone does not establish equivalent grants or wireless display support on another image.
