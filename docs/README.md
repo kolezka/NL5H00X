@@ -27,6 +27,7 @@ is a snapshot, not the starting point for current procedures.
 | [Device audit, 2026-10-24](DEVICE_AUDIT_2026-10-24.md) | Snapshot of one modified unit. Later work supersedes parts of it. |
 | [Vendor apps audit, 2026-10-26](VENDOR_APPS_2026-10-26.md) | Read-only inventory of vendor packages. |
 | [Android 9 REA audit, 2026-11-27](ANDROID_REA_2026-11-27.md) | HOME method bodies, vendor manifest inventory, post-boot processes and partitions. |
+| [Custom Android feasibility, 2026-11-27](AOSP_PORT_2026-11-27.md) | Stock display, remote and HDMI dependencies; what remains unverified for an AOSP port. |
 | [Docs index](README.md) | This index. |
 
 ## Source-pinned system documentation
