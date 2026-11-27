@@ -30,3 +30,17 @@ NewLinkService and HiTvSetting declare `BOOT_COMPLETED` receivers. The latter de
 ## Build and storage (ADB)
 
 Android 9 (API 28), `PPR1.180610.011`, incremental `eng.hudson.20220706.192233`, `userdebug/dev-keys`. The root and vendor filesystems were mounted read-only as ext4. By-name links mapped recovery to p5, logo to p8, boot to p9, misc to p15, system to p20, vendor to p21, cache to p24 and userdata to p25. Reported filesystem capacities and use: `/` 1.7 G (88%), `/vendor` 291 M (16%), `/data` 4.4 G (38%), `/cache` 93 M (1%). These are filesystem measurements, not raw partition sizes.
+
+## Device-wide coverage and open questions
+
+| Subsystem | Evidence from this unit | What it does not establish |
+|---|---|---|
+| Kernel, CPU and memory | ADB: `uname` reported Linux `4.9.127_s5`, `armv7l`; sysfs reported CPUs `0-3` present. `/proc/meminfo` reported `MemTotal: 1005264 kB` (about 982 MiB). | CPUs present are not CPUs online. Kernel-visible memory is not installed DRAM capacity. Driver inventory and board-specific bindings remain to be mapped. |
+| Storage and boot | ADB: partition links and mount sizes above; zygote running after boot. REA: HOME selection paths and boot receiver declarations above. | Neither a boot chronology nor a tested recovery route. |
+| Panel and graphics | ADB: SurfaceFlinger identified Mali-450 MP; the device manifest declares composer 2.1. See the [display and remote report](AOSP_PORT_2026-11-27.md). | Neither the panel timing path nor output on a replacement OS has been verified. |
+| Audio | ADB: `audioserver` running. ALSA lists card 0 `HISI-AIAO` and PCM `00-00` `playback aiao-hifi-0`, with one playback substream. | Does not identify which Android output routes use that PCM, or verify audible sound. |
+| Remote | ADB: input manager associated `Hi Keypad` and `Hi keyboard` with stock key layouts. | No physical keypress traced through the driver to an Android action. |
+| Network | ADB: sysfs listed `eth0`, `lo`, `p2p0` and `wlan0`; init reported `wificond` running. | Interface names do not show the physical chipset, active carrier or Wi-Fi association. No scan was performed. |
+| Vendor services | REA: manifest inventory above; ADB: named post-boot processes. | Does not map every service to its driver or establish which code ran at boot. |
+
+The next passive checks are the audio policy's declared routes and kernel driver links for the network and input devices. Those can distinguish dependencies without playing sound, injecting input or changing connectivity.
