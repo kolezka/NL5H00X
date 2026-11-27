@@ -155,6 +155,12 @@ REA decoded four thermal callbacks in `TempService$7`. Temperature reports and L
 
 `QUtils.showTempDialog(Context)` displays an alert with an OK button whose click handler is empty. When the customer property contains `dangbei`, the text warns of impending automatic shutdown; otherwise the helper uses the `temp_dialog_msg` resource. Neither the helper nor its button requests shutdown. The warning text is not evidence that a shutdown timer started, or that this unit displayed that variant.
 
+### Bluetooth profile selection after a link connects
+
+In WTProvision, `TempService` requests Bluetooth profile proxies 1, 2 and 4 with one listener. REA shows that `TempService$9.onServiceConnected` ignores the profile ID and overwrites a single `mProfile` field. On `ACL_CONNECTED`, `TempService$8.onReceive` stores the device from the broadcast. If a proxy is present, it queues a delayed call to `connectHid`. The queued task reads both fields when it runs, not when it is queued.
+
+Despite its name, `connectHid` does not select the HID profile. It looks up `connect(BluetoothDevice)` on the supplied proxy by reflection, ignores the return value and catches exceptions. This explains a possible profile connection attempt after a Bluetooth link comes up; it does not identify the remote, prove pairing or establish which profile connected. No Bluetooth device was connected for this analysis.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
