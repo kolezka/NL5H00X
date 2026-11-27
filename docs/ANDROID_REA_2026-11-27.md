@@ -101,6 +101,10 @@ Android BatteryService reported `present: false` alongside `level: 42` and `volt
 | Network | ADB: sysfs listed `eth0`, `lo`, `p2p0` and `wlan0`; init reported `wificond` running. | Interface names do not show the physical chipset, active carrier or Wi-Fi association. No scan was performed. |
 | Vendor services | REA: manifest inventory above; ADB: named post-boot processes. | Does not map every service to its driver or establish which code ran at boot. |
 
+## Android text input
+
+ADB reported `com.hisilicon.android.inputmethod.remote/.RemoteIME` both as the selected default input method and in the enabled IME list. REA confirmed the matching service in the stock HiPinyinIME manifest: it advertises `android.view.InputMethod` and requires `BIND_INPUT_METHOD`. The APK separately declares `PinyinDecoderService`. This identifies the vendor component Android selects for text fields, not the driver that receives physical remote buttons. No keyboard was opened and no input text was read or entered.
+
 ## Android audio policy and input endpoints
 
 The vendor audio policy includes a primary HAL 2.0 module. It declares `Speaker` as the default output and routes `primary output` (48 kHz, stereo, 16-bit PCM) to that sink. The live `media.audio_policy` dump also lists the primary module, `Sink: Speaker` and `AUDIO_DEVICE_OUT_SPEAKER`. This confirms Android's logical route, not the connection from the HAL to ALSA or the amplifier. Both `audio.primary.bigfish.so` and `audio.primary.default.so` are present under `/vendor/lib/hw`; filenames do not identify which one was loaded. No playback or capture test was performed.
