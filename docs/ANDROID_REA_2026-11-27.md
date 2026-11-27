@@ -199,6 +199,8 @@ PackageManager advertises `android.hardware.type.television`, `android.software.
 
 REA found four TV input services in the stock external-input APK: HDMI, component (YPbPr), composite (CVBS) and VGA. Each declares the `android.media.tv.TvInputService` action, the `android.media.tv.input` metadata key and the `android.permission.BIND_TV_INPUT` binding permission. These declarations describe how Android discovers and binds the services, not how many ports each supplies.
 
+All four service declarations reference the same `@xml/externaltvinput` metadata resource. The package separately declares `HiexternalSetupActivity` with a `MAIN` filter but no `LAUNCHER` category. It requires the vendor's `EXTERNAL_TV_INPUT_SETUP` permission (`signatureOrSystem`), distinct from the service binding permission. In the recovered bytecode its `onCreate(Bundle)` only logs and calls the superclass; this method does not select an input or check for a signal.
+
 The live TV Input Manager mapped logical inputs to the vendor's CVBS, VGA and HDMI services (one CVBS identifier, one VGA identifier and three HDMI identifiers). Its service-state list also included the YPbPr service. A service entry, a logical input identifier and a physical socket are different things: none proves a connector is fitted or receiving video. No input was selected during this read.
 
 ## Android memory policy
