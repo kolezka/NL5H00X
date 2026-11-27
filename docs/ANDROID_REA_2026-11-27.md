@@ -343,6 +343,8 @@ Playback controls can change pending requests before the player is ready. `HisiV
 
 The time label is not a decoder-position readback. `VideoActivity$6.onProgressChanged()` formats the seek bar's supplied position for the label on both user and programmatic updates. Only a user update resets fast forward or rewind if active and passes the position to `HisiVideoView.seekTo(int)` (direct DEX call at code-unit offset 32). The callback does not wait for seek completion before updating the label.
 
+The view also exposes two different time readings. Without a prepared player, `getCurrentPosition()` returns `0` without querying Android, while `getDuration()` sets and returns `-1`. Once prepared, the view asks `MediaPlayer` for the current position on every call but reuses a positive cached duration. A position of zero alone therefore cannot distinguish an unprepared player from one at the start of a film.
+
 ## Opening a still image
 
 In HiGalleryL, REA found a `VIEW` / `DEFAULT` filter on the landscape activity `com.hisilicon.higallery.NetworkHiGallery`. Despite its name, it accepts `file:` and `content:` as well as `http:`. It lists individual MIME types rather than `image/*`: `image/bmp`, `image/jpeg`, `image/png`, `image/gif`, `image/http` (literal), `image/heic` and `image/heif`. For example, a `content:` URI typed as `image/heic` matches this filter; the same URI typed as `image/webp` does not. This distinguishes how Android chooses a candidate activity from which images the gallery can actually decode. No image was opened.
