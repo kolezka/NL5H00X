@@ -109,6 +109,8 @@ On the running stock kernel, `policy0` lists CPUs 0 through 3 as affected by the
 
 Android BatteryService reported `present: false` alongside `level: 42` and `voltage: 0`. The level is therefore not evidence of a battery charged to 42 percent. Its temperature field does not identify a SoC or lamp sensor. This read did not establish a physical temperature, power draw or fan speed.
 
+In a passive post-boot snapshot, Android's DeviceIdleController reported both light and deep Doze disabled, with both state machines `ACTIVE`. PowerManager reported `Awake`, `mIsPowered=true` and `mStayOn=true`. Doze concerns framework idle restrictions on apps; it is not the same as switching off the projector or suspending the board. No standby or wake transition was tested, so these readings do not establish behavior after the remote power button is pressed.
+
 ## Sensors exposed to Android apps
 
 The framework `sensorservice` was registered, but its diagnostic dump reported `No Sensors on the device` and `devInitCheck : -19`. PackageManager's feature list also returned no `android.hardware.sensor.*` entry; the same read returned the expected television feature. At the time of the snapshot the standard Android sensor service therefore offered no sensor inventory. This does not establish why initialization returned that status, or rule out sensors wired to a board controller, exposed through a vendor API, or used internally for protection.
