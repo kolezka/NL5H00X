@@ -205,6 +205,8 @@ The live TV Input Manager mapped logical inputs to the vendor's CVBS, VGA and HD
 
 `HiYpbprTvInputService.onHardwareAdded()` uses the Android hardware type, not NLSourcePlayer's `SourceName`. For a non-null descriptor it rejects types other than `6`. For type `6`, it assigns each newly seen device ID a number (`map.size() + 1`), passes `YPBPR` plus that number as the display label to `createTvInputInfo`, and requests the hardware by device ID. The label is not the framework input ID. This code neither shows that the framework delivered a type-6 descriptor on this unit nor explains why the earlier snapshot lacked a YPbPr input.
 
+The corresponding CVBS and VGA callbacks accept hardware types `3` and `7`, respectively. CVBS assigns each new device ID a number and labels the input `CVBS1`, `CVBS2`, etc.; VGA passes the fixed label `VGA`. Both use the device ID, not the label, to request the hardware. In particular, selecting VGA crosses two numbering schemes: `SourceName=6` selects the remembered VGA input in NLSourcePlayer, while hardware type `7` identifies VGA to the service. Neither number is a socket index.
+
 ## Android memory policy
 
 The stock build sets `ro.config.low_ram=true`. Its ART properties specify a 5 MiB starting heap, a 128 MiB growth limit and a 256 MiB heap size. These are managed-heap settings, not limits on a process's total resident memory. Init reported the low-memory killer daemon (`lmkd`) running; that alone does not show it killed any process.
