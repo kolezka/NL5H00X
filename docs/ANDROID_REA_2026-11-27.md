@@ -32,6 +32,8 @@ When the manufacturer string does not contain `MediaTek`, `doSelectItemLogic(id)
 2. Otherwise, a nonempty `persist.newlink.wakeup_source` selects `ACTION_VIEW` with URI `yktv://source/mainpage?sourceid=` plus the property value, not the queued ID.
 3. Otherwise the explicit target is `com.hisilicon.tvui/.MainActivity` with `SourceName = id`.
 
+The two apps do not share a default source player. With `persist.display.720p` absent and `persist.newlink.wakeup_source` empty, WTProvision's non-MediaTek source path targets HiSilicon TV UI (`getBoolean` defaults to true). For the same configuration, an HDMI tile in the [launcher's non-3S, non-MediaTek path](#source-player-from-a-vendor-choice-to-an-android-tv-input) targets Newlink's source player (the string comparison defaults to `false`). Seeing one target after a tile click therefore does not identify which target WTProvision requested at startup.
+
 The caller catches exceptions from the final launch and its first-run/finish bookkeeping and queues another delayed message. A retry is therefore not proof of a missing player. No activity was launched to test these branches.
 
 ### Setup completion is separate from HOME launch
