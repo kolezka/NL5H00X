@@ -111,6 +111,8 @@ Android BatteryService reported `present: false` alongside `level: 42` and `volt
 
 In a passive post-boot snapshot, Android's DeviceIdleController reported both light and deep Doze disabled, with both state machines `ACTIVE`. PowerManager reported `Awake`, `mIsPowered=true` and `mStayOn=true`. Doze concerns framework idle restrictions on apps; it is not the same as switching off the projector or suspending the board. No standby or wake transition was tested, so these readings do not establish behavior after the remote power button is pressed.
 
+The earlier [technical notes](TECHNICAL_NOTES.md#services-and-home-screen) identify `com.zhiying.powerservice` as a power-management package outside the two namespaces in the manifest inventory. PackageManager confirmed version 1.0 installed for user 0 at `/system/app/PowerService/PowerService.apk`. ActivityManager's package-scoped service dump returned `(nothing)` while the same query for the external TV input package returned a live service record. This distinguishes an installed package from a currently tracked Android service; it does not exclude on-demand handling or identify the owner of the physical power button.
+
 ## Sensors exposed to Android apps
 
 The framework `sensorservice` was registered, but its diagnostic dump reported `No Sensors on the device` and `devInitCheck : -19`. PackageManager's feature list also returned no `android.hardware.sensor.*` entry; the same read returned the expected television feature. At the time of the snapshot the standard Android sensor service therefore offered no sensor inventory. This does not establish why initialization returned that status, or rule out sensors wired to a board controller, exposed through a vendor API, or used internally for protection.
