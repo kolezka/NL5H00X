@@ -28,7 +28,7 @@ is how the device stopped booting once (see [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md)
 | `com.zhiying.sourceui` | Source picker UI | no | RECOVERY | keep |
 | `com.newlink.nlsource` | Source player stub | no | none | keep, referenced by the launcher and sourceui |
 | `com.hisilicon.tvui` | TV UI, 13 exported activities | no | INTERACT_ACROSS_USERS | keep, referenced by launcher and sourceui |
-| `com.newlink.cast` | Screen cast (HBCastNew) | no | INTERNET, SYSTEM_ALERT_WINDOW | optional, nothing depends on it |
+| `com.newlink.cast` | Screen cast (HBCastNew) | no | INTERNET, SYSTEM_ALERT_WINDOW | target of the stock launcher's iOS Cast tile (`MainActivityNew.onClick`); not the Miracast target |
 | `com.hisilicon.miracast` | Miracast sink | no | none | optional, launcher references it |
 | `com.newlink.filemanager` | File manager | no | PACKAGE_USAGE_STATS | optional, launcher and sourceui reference it |
 | `com.hisilicon.android.videoplayer` | Video player, priv-app | no | INTERNET | optional |
@@ -37,7 +37,7 @@ is how the device stopped booting once (see [BOOT_DEADLOCK.md](BOOT_DEADLOCK.md)
 | `com.newlink.isuperred.ijkplayer` | IJK video player | no | INTERNET | optional |
 | `com.hisilicon.tv.menu` | Factory menu | no | none | optional, factory only |
 
-"Optional" means no other vendor package depends on it and it is not running.
+"Optional" was the October assessment, not a dependency test. A package absent from the process snapshot can still be needed when a launcher tile is selected.
 It does not mean disabling it is tested. Any disable is a device change: one
 package at a time, `pm disable-user`, reboot, confirm boot and HOME, with
 `pm enable` as the revert.
