@@ -287,7 +287,9 @@ Despite its name, `connectHid` does not select the HID profile. It looks up `con
 
 The profile listener's `onServiceDisconnected(int)` is empty: that callback does not clear the stored proxy. This is a profile-service notification, not evidence that a physical remote disconnected.
 
-### Optional voice service
+### Optional voice services
+
+WTProvision has separate switches for AliTV and Qcode. `MainActivity.onCreate()` requests its own `TVService` through `startService()` when `isAppFirst` is true and the boolean `vendor.newlink.ali_yuyin` is true (default false). This branch does not test the Qcode property. The AliTV command listener is registered from the started-service path described above, not supplied to clients by `onBind()`. These conditions identify which software can receive voice results, not which microphone or remote is present.
 
 REA shows a separate branch in `TempService.onCreate()`: when `vendor.newlink.shijiu_yuyin` reads as `1` (default `0`), it schedules a task to start `com.qcode.tvvoicehelp.services.AIVoiceService` in package `com.qcode.tvvoicehelp`. The task sets the explicit component and the action `com.qcode.acion.voicehelp` (spelling in firmware). If `startService` throws an exception, it schedules another attempt after 500 ms. This identifies the intended Android service, not the effective property value, an installed handler, microphone use or a successful launch on this unit.
 
