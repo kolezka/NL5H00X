@@ -35,6 +35,8 @@ NewLinkService and HiTvSetting declare `BOOT_COMPLETED` receivers. The latter de
 
 ## Build and storage (ADB)
 
+The framework reports security patch level `2019-11-05` (`ro.build.version.security_patch`). This is the build's declared Android patch level, not its build date or a verification of individual backports. A separate query for `ro.vendor.build.security_patch` returned an empty value, so that property does not establish the vendor patch level. Likewise `ro.vndk.version=28` identifies a native interface version, not proof of Treble support: this build explicitly sets `ro.treble.enabled=false`.
+
 Android 9 (API 28), `PPR1.180610.011`, incremental `eng.hudson.20220706.192233`, `userdebug/dev-keys`. The root and vendor filesystems were mounted read-only as ext4. By-name links mapped recovery to p5, logo to p8, boot to p9, misc to p15, system to p20, vendor to p21, cache to p24 and userdata to p25. Reported filesystem capacities and use: `/` 1.7 G (88%), `/vendor` 291 M (16%), `/data` 4.4 G (38%), `/cache` 93 M (1%). These are filesystem measurements, not raw partition sizes.
 
 Android's volume daemon (`vold`) was running, and StorageManager reported both `private` and `emulated` volumes mounted. In the ADB shell mount namespace the userdata block device backs ext4 at `/data`; `sdcardfs` exposes `/data/media` at `/storage/emulated`. The `/sdcard` alias points to `/storage/self/primary`, which in turn points to `/mnt/user/0/primary`. The emulated shared-storage view therefore consumes space on userdata, not a second disk: do not add its reported capacity to `/data`. This describes the active internal storage arrangement, not support for removable media. No user files were enumerated.
