@@ -89,6 +89,10 @@ On the running stock kernel, `policy0` lists CPUs 0 through 3 as affected by the
 
 Android BatteryService reported `present: false` alongside `level: 42` and `voltage: 0`. The level is therefore not evidence of a battery charged to 42 percent. Its temperature field does not identify a SoC or lamp sensor. This read did not establish a physical temperature, power draw or fan speed.
 
+## Sensors exposed to Android apps
+
+The framework `sensorservice` was registered, but its diagnostic dump reported `No Sensors on the device` and `devInitCheck : -19`. PackageManager's feature list also returned no `android.hardware.sensor.*` entry; the same read returned the expected television feature. At the time of the snapshot the standard Android sensor service therefore offered no sensor inventory. This does not establish why initialization returned that status, or rule out sensors wired to a board controller, exposed through a vendor API, or used internally for protection.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
