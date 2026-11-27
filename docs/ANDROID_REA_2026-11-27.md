@@ -153,6 +153,8 @@ REA places thermal registration in `TempService.onCreate()`, before `startSensor
 
 REA decoded four thermal callbacks in `TempService$7`. Temperature reports and LSADC errors only log their arguments in these methods. An overheat warning logs the message and calls `QUtils.showTempDialog` unless the dialog flag is already set. A thermistor error has two separate, default-on checks: one opens `ShutdownTipActivity`; the other schedules a task after 5 seconds. That task clears the thermal listener and requests Android shutdown with reason `thermal`. The delay starts at error handling, not at a measured temperature crossing. No event was induced, and neither effective settings nor a completed shutdown were observed.
 
+`QUtils.showTempDialog(Context)` displays an alert with an OK button whose click handler is empty. When the customer property contains `dangbei`, the text warns of impending automatic shutdown; otherwise the helper uses the `temp_dialog_msg` resource. Neither the helper nor its button requests shutdown. The warning text is not evidence that a shutdown timer started, or that this unit displayed that variant.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
