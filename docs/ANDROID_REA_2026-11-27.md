@@ -368,7 +368,7 @@ Offline decoding of the compiled `@xml/method` resource showed two keyboard subt
 
 App resources have a separate language inventory. In the 19 digest-matched vendor APKs, all 19 compiled resource tables contain both an unqualified language configuration and an explicit `zh` configuration. Ten also contain `pl`: Miracast, HiTvSetting, Cast, the Newlink file manager, HiSetting, the stock launcher, IjkPlayer, NLSourcePlayer, NewLinkService and WTProvision. A qualifier can apply to a library resource rather than the app's own menus. Its presence does not establish Polish translation coverage, the selected system locale or keyboard support.
 
-For the stock launcher specifically, the Polish table contains more than generic action-bar strings. Its `movie`, `music` and `photo` entries decode to `Film`, `Muzyka` and `Zdjęcie`; `usb_tip` reads `Proszę włożyć USB`. These entries establish Polish wording for media and USB resources. They do not identify which launcher variant uses them or what was displayed on this unit.
+For the stock launcher specifically, the Polish table contains more than generic action-bar strings. Its `movie`, `music` and `photo` entries decode to `Film`, `Muzyka` and `Zdjęcie`; `usb_tip` reads `Proszę włożyć USB`. All four main layout families (`activity_main`, `activity_main_new`, `activity_main_second` and `activity_main_third`) reference the three media strings as `TextView` text, in both their base and `v17` compiled layouts. These references connect the media translations to actual layout definitions; they do not show which layout or locale was active, whether code replaced the text, or whether the USB prompt appeared.
 
 ## Android audio policy and input endpoints
 
