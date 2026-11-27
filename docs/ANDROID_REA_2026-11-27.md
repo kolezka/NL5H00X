@@ -55,6 +55,12 @@ Kernel sysfs identified `fb0` as `hifb`, with a virtual size of 1920 by 3240 at 
 
 The post-boot HAL inventory lists the default `IOmx` and `IOmxStore` instances of `android.hardware.media.omx@1.0`. The vendor codec XML, parsed as XML to exclude commented examples, declares HiSilicon AVC, HEVC and VP9 decoder components with a maximum size of 1920 by 1088; the MPEG-2, MPEG-4 and VP8 entries specify 1920 by 1080. The limits describe decoder inputs, not display modes. The same file includes separate Google audio and video codec lists, so its direct entries alone are not an inventory of all codecs available to apps. A registered OMX service plus a declared codec does not prove a player selected it or sustained a particular resolution, profile or frame rate. No media was played.
 
+## TV framework personality and input inventory
+
+PackageManager advertises `android.hardware.type.television`, `android.software.leanback`, `android.software.leanback_only` and `android.software.live_tv`. The running UI mode was `0x14`, whose type field is television. Apps therefore see a television-oriented Android configuration; these flags do not establish commercial Android TV certification or a broadcast tuner.
+
+The live TV Input Manager mapped logical inputs to the vendor's CVBS, VGA and HDMI services (one CVBS identifier, one VGA identifier and three HDMI identifiers). Its service-state list also included the YPbPr service. A service entry, a logical input identifier and a physical socket are different things: none proves a connector is fitted or receiving video. No input was selected during this read.
+
 ## Android memory policy
 
 The stock build sets `ro.config.low_ram=true`. Its ART properties specify a 5 MiB starting heap, a 128 MiB growth limit and a 256 MiB heap size. These are managed-heap settings, not limits on a process's total resident memory. Init reported the low-memory killer daemon (`lmkd`) running; that alone does not show it killed any process.
