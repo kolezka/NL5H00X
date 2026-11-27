@@ -1,6 +1,10 @@
 # Android 9 on the NL5H00X: 2026-11-27 observations
 
-Scope: HOME dispatch, boot-related declarations and running processes, Newlink and HiSilicon application manifests, build and partition layout on one modified NL5H00X_TP. This is not a boot trace, raw flash dump or review of every executable. REA inspected shipped artifacts offline. ADB supplied the artifacts, package resolver results and post-boot snapshot; no activity was started and no reboot was performed.
+This report maps Android 9 on one modified NL5H00X_TP, from board startup and HOME selection to the interfaces used for projection, input, audio and video. Start with the [device-wide findings and open questions](#device-wide-coverage-and-open-questions).
+
+- **How Android starts:** [board and init configuration](#board-identity-and-android-startup-configuration), [build and storage](#build-and-storage-adb), [HOME selection](#two-home-decisions).
+- **How apps reach projector hardware:** [display and framebuffer](#display-mode-ui-density-and-framebuffer), [TV inputs](#tv-framework-personality-and-input-inventory), [focus motor](#focus-motor-request-versus-on-screen-feedback), [keystone controls](#which-keystone-settings-screen-opens), [sensors](#sensors-exposed-to-android-apps).
+- **How to interpret the evidence:** REA inspected shipped artifacts offline. ADB supplied the artifacts, resolver results and post-boot observations. A method body shows what the software can request; a post-boot snapshot shows state at the time of collection. Neither alone proves the order of events at boot or the physical response to a request. No activity was started and no reboot was performed. This is not a raw flash dump or a review of every executable.
 
 ## Two HOME decisions
 
