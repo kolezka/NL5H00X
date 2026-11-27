@@ -197,6 +197,8 @@ The post-boot HAL inventory lists the default `IOmx` and `IOmxStore` instances o
 
 PackageManager advertises `android.hardware.type.television`, `android.software.leanback`, `android.software.leanback_only` and `android.software.live_tv`. The running UI mode was `0x14`, whose type field is television. Apps therefore see a television-oriented Android configuration; these flags do not establish commercial Android TV certification or a broadcast tuner.
 
+REA found four TV input services in the stock external-input APK: HDMI, component (YPbPr), composite (CVBS) and VGA. Each declares the `android.media.tv.TvInputService` action, the `android.media.tv.input` metadata key and the `android.permission.BIND_TV_INPUT` binding permission. These declarations describe how Android discovers and binds the services, not how many ports each supplies.
+
 The live TV Input Manager mapped logical inputs to the vendor's CVBS, VGA and HDMI services (one CVBS identifier, one VGA identifier and three HDMI identifiers). Its service-state list also included the YPbPr service. A service entry, a logical input identifier and a physical socket are different things: none proves a connector is fitted or receiving video. No input was selected during this read.
 
 ## Android memory policy
