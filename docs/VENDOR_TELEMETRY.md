@@ -33,8 +33,11 @@ Trigger chain:
    declaration has no recorded action. `BootService` declares a field of type
    `NetWorkChangeReceiver`, but neither its constructor nor `onCreate()`
    constructs or registers that receiver. Its `onDestroy()` only calls the
-   superclass. The field is not proof of a subscription; whether another path
-   registers the receiver, or the running device delivers events, remains open.
+   superclass. REA found no incoming reference to the receiver constructor in
+   this APK. As a control, the same constructor lookup found `BootService$3`
+   called by `BootService.onStartCommand` at DEX code-unit offset 43. This
+   narrows the direct construction path; it does not rule out instantiation
+   by the Android framework or reflection, or establish live event delivery.
    `MyServices` checks connectivity before preparing a report; see the
    [boot reporting trace](ANDROID_REA_2026-11-27.md#data-prepared-by-the-boot-reporting-service-rea).
 
