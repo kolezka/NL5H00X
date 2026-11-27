@@ -145,6 +145,8 @@ WTProvision has a separate vendor event path. In the HiSilicon implementation, `
 
 Despite its name, `autoKeystone_3d_Runnable` (`TempService$5.run`) does not directly set image geometry. It compares the recorded pitch and roll ranges separately. If either exceeds 5 raw units (exactly 5 does not qualify), 3D autofocus is enabled, and the current activity is not `com.zhiying.autofocus.AutoFocus2Activity`, it queues `autoFocusRunnable` after 10 ms with status 0. That runnable (`TempService$4.run`) sets `sys.newlink.auto` to `1` and requests an activity with the implicit action `com.zhiying.AUTO_FOCUS`, `FLAG_ACTIVITY_NEW_TASK` and the `auto_keystone_startstatus` extra. On `ActivityNotFoundException` it schedules itself again after 1000 ms. The activity name used in the guard is not an explicit intent target. This offline trace establishes the handoff request, not which activity resolves it or whether the projected image changes.
 
+The saved REA manifest inventory has no activity or activity-alias row declaring the exact action `com.zhiying.AUTO_FOCUS`. The same exact-action lookup found `com.newlink.cast_qlto1` on `MainCastQLTo1Activity` as a control. This inventory covers Newlink and HiSilicon packages, not Zhiying packages; HiTvService also has partial manifest coverage. The earlier string scan of Zhiying Settings mentions `com.zhiying.autofocus`, but that is not an intent filter. The installed resolver target remains unknown: the read-only ADB connection timed out before a PackageManager lookup could run.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
