@@ -113,6 +113,8 @@ NLSourcePlayer's `MainActivity` declares the `android.newlink.source` action. RE
 
 The player's `no_signal_tip` is a delayed Android UI indicator, not a cable detector. `onVideoUnavailable()` replaces any pending message `1` with a new one due in 1,500 ms, regardless of the reported reason. When handled, message `1` makes the tip visible. Both `onVideoAvailable()` and `onContentAllowed()` cancel the pending message and hide the tip immediately. Repeated unavailable callbacks can therefore postpone the warning; its timing alone cannot date a physical disconnect. This behavior was decoded offline, not timed on the projector.
 
+If Android delivers another intent to the existing activity, `onNewIntent()` saves it with `setIntent()`; the method does not itself tune. On the next `onResume()`, `initData()` reads that saved intent before the player requests the input. Conversely, `onStop()` resets the `TvView` and clears the handler queue, including any pending no-signal warning. This is a reset of the Android view, not evidence that the physical input was powered down.
+
 ## Display mode, UI density and framebuffer
 
 Android's DisplayManager reported the built-in display ON, with one advertised mode: 1920 by 1080 at approximately 60 Hz. WindowManager independently reported a base size of 1920 by 1080 and a density override of 320 dpi over a base of 240 dpi. The override changes the scale used for Android layouts, not the pixel dimensions of the display mode. Neither density value measures the projected image on a wall.
