@@ -39,6 +39,8 @@ The [component inventory](vendor-manifests-2026-11-27.csv) contains 152 REA decl
 
 NewLinkService and HiTvSetting declare `BOOT_COMPLETED` receivers. The latter declares `com.hisilicon.permission.COMMON_PERMISSION`. The HDMI, YPbPr, CVBS and VGA TV input services declare `BIND_TV_INPUT`. ADB showed zygote, system_server, surfaceflinger, both HOME packages, com.newlink.service, com.hisilicon.tv.service and com.hisilicon.rmservice running; bootanim was stopped. This snapshot does not order their startup.
 
+REA decoded `NewLinkService`'s `BootCompleteReceiver.onReceive(Context, Intent)`. It checks the action for exact equality with `android.intent.action.BOOT_COMPLETED`. If `ro.zhiying.model` does not contain the case-sensitive substring `3S`, it first requests `com.newlink.hisetting.message.MessageService` in the `com.newlink.hisetting` package. It then requests its own `com.newlink.service.service.BootService`, which its manifest declares. On the `3S` branch it skips the settings request and goes straight to `BootService`. This is call order on normal return, not proof that either service started, or that the broadcast reached the receiver on the observed boot.
+
 ## Build and storage (ADB)
 
 The framework reports security patch level `2019-11-05` (`ro.build.version.security_patch`). This is the build's declared Android patch level, not its build date or a verification of individual backports. A separate query for `ro.vendor.build.security_patch` returned an empty value, so that property does not establish the vendor patch level. Likewise `ro.vndk.version=28` identifies a native interface version, not proof of Treble support: this build explicitly sets `ro.treble.enabled=false`.
