@@ -67,6 +67,8 @@ On-device init configuration connects these identifiers to startup. `/init.rc` i
 
 ## Application compatibility and vendor Java APIs
 
+REA decoded the stock launcher's version as `22.02.13` (code `220212`). Its manifest sets minimum API 16 and target API 29. The projector's API 28 meets the minimum; the higher target is not evidence that the projector runs Android 10. The launcher also declares Bluetooth LE as required and lists the GPS feature. These describe the APK's hardware expectations, not a GPS receiver detected on the board.
+
 The stock app ABI list is `armeabi-v7a,armeabi`, the 64-bit list is empty, and `/system/bin/app_process` resolves to `app_process32`. An app that requires an `arm64-v8a`-only native library has no matching stock app ABI. This restriction concerns native code, not ordinary DEX bytecode; an ABI match alone does not guarantee installability or correct behavior.
 
 PackageManager lists three HiSilicon Java libraries. The stock XML under `/system/etc/permissions` maps `com.hisilicon.android` to `HitvManager.jar`, `com.hisilicon.android.tvapi` to `HitvShare.jar`, and `com.hisilicon.dtv` to `HiDtvShare.jar`, all under `/system/framework`. These library names are framework dependencies that vendor apps can request, not Android application package names. Registration alone does not prove which app uses a given API.
