@@ -95,6 +95,8 @@ Above the kernel driver, PackageManager advertises Bluetooth and Bluetooth LE. T
 
 In WTProvision's Bluetooth setup screen, `BluetoothActivity.onCreate()` registers for device discovery, adapter state, bond state and ACL connection broadcasts. `getBluetoothProfile()` requests profile 4 if the adapter exists and the activity has no cached proxy. Its callback stores the proxy only when the reported profile ID is 4. That callback connects the app to an Android profile service; it does not confirm a remote has paired. REA decoded both methods offline. The setup screen was not launched.
 
+Opening that screen can also change radio state without a button press. `onCreate()` schedules handler message `1000` after five seconds. If Bluetooth is off when the handler runs, it requests `enable()` and does not call `startDiscovery()` in that invocation. If Bluetooth is on, it leaves an existing discovery session alone; otherwise it clears any entries in its local list and requests `startDiscovery()`. These are requests in the recovered code, not observed radio operations.
+
 ## Android USB roles
 
 PackageManager advertises `android.hardware.usb.host`, and the kernel root hub product strings identify EHCI and OHCI host controllers. The composite radio above is an observed USB host device. Separately, both Android gadget properties `sys.usb.config` and `sys.usb.state` read `adb`. This snapshot was obtained over TCP ADB, not a USB cable: the properties do not verify that any external connector can expose USB ADB. Controller count is not connector count. No peripheral was plugged in, detached or reconfigured.
