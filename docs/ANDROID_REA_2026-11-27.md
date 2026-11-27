@@ -203,6 +203,8 @@ All four service declarations reference the same `@xml/externaltvinput` metadata
 
 The live TV Input Manager mapped logical inputs to the vendor's CVBS, VGA and HDMI services (one CVBS identifier, one VGA identifier and three HDMI identifiers). Its service-state list also included the YPbPr service. A service entry, a logical input identifier and a physical socket are different things: none proves a connector is fitted or receiving video. No input was selected during this read.
 
+`HiYpbprTvInputService.onHardwareAdded()` uses the Android hardware type, not NLSourcePlayer's `SourceName`. For a non-null descriptor it rejects types other than `6`. For type `6`, it assigns each newly seen device ID a number (`map.size() + 1`), passes `YPBPR` plus that number as the display label to `createTvInputInfo`, and requests the hardware by device ID. The label is not the framework input ID. This code neither shows that the framework delivered a type-6 descriptor on this unit nor explains why the earlier snapshot lacked a YPbPr input.
+
 ## Android memory policy
 
 The stock build sets `ro.config.low_ram=true`. Its ART properties specify a 5 MiB starting heap, a 128 MiB growth limit and a 256 MiB heap size. These are managed-heap settings, not limits on a process's total resident memory. Init reported the low-memory killer daemon (`lmkd`) running; that alone does not show it killed any process.
