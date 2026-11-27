@@ -61,6 +61,12 @@ The stock build sets `ro.config.low_ram=true`. Its ART properties specify a 5 Mi
 
 The kernel reported 1,005,264 KiB of usable RAM and 319,088 KiB of swap. `/proc/swaps` identified the active backend as `/dev/block/zram0`; sysfs identified LZ4 as the selected compression algorithm. This provides about 312 MiB of logical swap backed by compressed RAM, not additional physical RAM or evidence of paging to flash. No memory pressure was induced.
 
+## CPU frequency policy and power telemetry
+
+On the running stock kernel, `policy0` lists CPUs 0 through 3 as affected by the same frequency policy. Its `hi3751-cpufreq` driver advertises 800,000 and 1,000,000 kHz (800 MHz and 1 GHz), with the `interactive` governor selected. These are available operating points, not a measurement of the instantaneous clock, sustained performance or the silicon's rated maximum.
+
+Android BatteryService reported `present: false` alongside `level: 42` and `voltage: 0`. The level is therefore not evidence of a battery charged to 42 percent. Its temperature field does not identify a SoC or lamp sensor. This read did not establish a physical temperature, power draw or fan speed.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
