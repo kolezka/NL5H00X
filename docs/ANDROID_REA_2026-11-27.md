@@ -101,6 +101,8 @@ On the service side, `AirplayService.onBind` calls `initData()` before returning
 
 On service destruction, `AirplayService.onDestroy()` unregisters its broadcast receiver and calls `closeWifiAp()`. If the hotspot check reports enabled, the helper requests `WifiManager.stopSoftAp()` by reflection. It catches exceptions and does not check the resulting hotspot state. This path concerns the projector acting as an access point, not its Wi-Fi client association. Leaving the Cast screen does not by itself prove that Android destroyed the service or stopped a hotspot.
 
+The activity has a separate Bluetooth side effect. `MainCastActivity.onDestroy()` calls `unBindIOSCastService()` and then, if `persist.bluetooth.enablesink` equals the literal string `true`, requests `BluetoothAdapter.enable()`. This branch tests the property, not the adapter's state before casting, and ignores the result. It is therefore not proof that Bluetooth was restored to its previous state or that a Bluetooth audio connection was made.
+
 ## Android media decoding
 
 The post-boot HAL inventory lists the default `IOmx` and `IOmxStore` instances of `android.hardware.media.omx@1.0`. The vendor codec XML, parsed as XML to exclude commented examples, declares HiSilicon AVC, HEVC and VP9 decoder components with a maximum size of 1920 by 1088; the MPEG-2, MPEG-4 and VP8 entries specify 1920 by 1080. The limits describe decoder inputs, not display modes. The same file includes separate Google audio and video codec lists, so its direct entries alone are not an inventory of all codecs available to apps. A registered OMX service plus a declared codec does not prove a player selected it or sustained a particular resolution, profile or frame rate. No media was played.
