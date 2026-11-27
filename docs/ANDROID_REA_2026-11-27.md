@@ -139,6 +139,8 @@ The reverse path uses the same setting ID, not a second one. `dispatchFocusDown`
 
 The framework `sensorservice` was registered, but its diagnostic dump reported `No Sensors on the device` and `devInitCheck : -19`. PackageManager's feature list also returned no `android.hardware.sensor.*` entry; the same read returned the expected television feature. At the time of the snapshot the standard Android sensor service therefore offered no sensor inventory. This does not establish why initialization returned that status, or rule out sensors wired to a board controller, exposed through a vendor API, or used internally for protection.
 
+WTProvision has a separate vendor event path. In the HiSilicon implementation, `setAccelerometerListener` passes `TVMessage.NL_TV_EVT_EX_ACCELEROMETER` to `setSensorsListener`. That helper replaces the listener for the event ID on `HitvManager`, not Android's `SensorManager`. Its adapter forwards four integers unchanged for each accelerometer, gyroscope, orientation-stable or orientation-change callback. REA establishes the subscription code, not that the board produces any of these events. No sample was captured; the units and physical sensor remain unknown.
+
 ## Device-wide coverage and open questions
 
 | Subsystem | Evidence from this unit | What it does not establish |
